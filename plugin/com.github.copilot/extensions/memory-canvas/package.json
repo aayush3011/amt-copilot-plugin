@@ -1,0 +1,16 @@
+{
+  "name": "amt-memory-canvas",
+  "description": "See what AMT remembers about you, grouped by Personal / Team / Org scope, and act on it.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "extension.mjs",
+  "keywords": [
+    "amt",
+    "agent-memory",
+    "canvas",
+    "dashboard"
+  ],
+  "dependencies": {
+    "@github/copilot-sdk": "^0.1.0"
+  }
+}

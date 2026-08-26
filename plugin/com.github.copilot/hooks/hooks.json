@@ -5,14 +5,14 @@
       {
         "type": "command",
         "bash": "./com.github.copilot/scripts/inject.sh",
-        "timeoutSec": 15
+        "timeoutSec": 30
       }
     ],
     "agentStop": [
       {
         "type": "command",
         "bash": "./com.github.copilot/scripts/capture.sh",
-        "timeoutSec": 15
+        "timeoutSec": 20
       }
     ]
   }

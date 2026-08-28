@@ -5,6 +5,7 @@
       {
         "type": "command",
         "bash": "./com.github.copilot/scripts/inject.sh",
+        "powershell": "./com.github.copilot/scripts/inject.ps1",
         "timeoutSec": 30
       }
     ],
@@ -12,6 +13,7 @@
       {
         "type": "command",
         "bash": "./com.github.copilot/scripts/capture.sh",
+        "powershell": "./com.github.copilot/scripts/capture.ps1",
         "timeoutSec": 20
       }
     ]

@@ -5,14 +5,18 @@
 # sessionId, timestamp, cwd, transcriptPath, stopReason. The agent's message lives in the
 # transcript file, so we read the last assistant message from it. Best-effort: if the
 # transcript format does not match, this is a safe no-op (the user turn is already captured
-# by inject.sh on userPromptSubmitted, which is the primary, reliable capture path).
+# by inject.sh on userPromptSubmitted, the primary, reliable capture path).
 #
-# The user turn is captured in inject.sh; this completes the pair so AMT sees the full
-# exchange and its extraction LLM - not the coding agent - decides what to remember.
+# Auth is a gateway-issued hook token (Authorization: HookToken <access>) via amt-token.sh.
 set -euo pipefail
 
+# GUI apps (the Copilot desktop app) may spawn hooks with a minimal PATH. Prepend the common
+# tool locations so jq/curl resolve on macOS (Homebrew) and Linux. Windows uses capture.ps1.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin:/usr/bin:/bin:${PATH:-}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AMT_GATEWAY_BASE="${AMT_GATEWAY_BASE:-https://reranker-api-h2b5czhkfkcphnf4.westus3-01.azurewebsites.net/inference/memory}"
+# shellcheck source=amt-config.sh
+. "$SCRIPT_DIR/amt-config.sh"
 
 command -v jq   >/dev/null 2>&1 || { echo '{}'; exit 0; }
 command -v curl >/dev/null 2>&1 || { echo '{}'; exit 0; }
@@ -20,7 +24,7 @@ command -v curl >/dev/null 2>&1 || { echo '{}'; exit 0; }
 payload="$(cat)"
 thread="$(printf '%s' "$payload" | jq -r '.sessionId // .session_id // "copilot-app"')"
 transcript="$(printf '%s' "$payload" | jq -r '.transcriptPath // .transcript_path // empty')"
-[ -z "$transcript" ] || [ ! -f "$transcript" ] && { echo '{}'; exit 0; }
+{ [ -z "$transcript" ] || [ ! -f "$transcript" ]; } && { echo '{}'; exit 0; }
 
 # Extract the last assistant/agent message text from the transcript. Transcripts are
 # commonly JSONL (one JSON object per line); we scan for the last line whose role/type is
@@ -48,8 +52,8 @@ fi
 token="$("$SCRIPT_DIR/amt-token.sh" 2>/dev/null || true)"
 [ -z "$token" ] && { echo '{}'; exit 0; }
 
-curl -sS --max-time 12 -X POST "$AMT_GATEWAY_BASE/memory" \
-  -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
+curl -sS --max-time 12 -X POST "${AMT_HOOK_BASE}/capture" \
+  -H "Authorization: HookToken ${token}" -H "Content-Type: application/json" \
   -d "$(jq -n --arg t "$thread" --arg c "$agent_msg" '{thread_id:$t, role:"agent", content:$c}')" \
   >/dev/null 2>&1 || true
 

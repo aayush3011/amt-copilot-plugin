@@ -6,7 +6,21 @@
 # source of truth for amt-token/amt-login/amt-logout/inject/capture.
 # See Docs/amt-hook-token-contract.md.
 
-$script:AmtGatewayBase = if ($env:AMT_GATEWAY_BASE) { $env:AMT_GATEWAY_BASE } else { 'https://reranker-api-h2b5czhkfkcphnf4.westus3-01.azurewebsites.net/inference/memory' }
+# Single source of truth for the gateway is the plugin's .mcp.json - the one URL the customer
+# configures. Derive the data-plane base from it (strip the trailing /mcp[/]); AMT_GATEWAY_BASE
+# overrides for tests / local dev. Windows twin of amt-config.sh.
+function Get-AmtGatewayBaseFromMcp {
+  $mcp = Join-Path $PSScriptRoot '..\..\.mcp.json'
+  if (-not (Test-Path $mcp)) { return $null }
+  try {
+    $url = (Get-Content -Raw -Path $mcp | ConvertFrom-Json).mcpServers.'amt-memory'.url
+    if ($url) { return ($url -replace '/mcp/?$', '' -replace '/$', '') }
+  } catch { }
+  return $null
+}
+
+$script:AmtGatewayBase = if ($env:AMT_GATEWAY_BASE) { $env:AMT_GATEWAY_BASE.TrimEnd('/') } else { Get-AmtGatewayBaseFromMcp }
+if (-not $script:AmtGatewayBase) { [Console]::Error.WriteLine('amt-config: gateway not configured (no amt-memory url in .mcp.json); set AMT_GATEWAY_BASE') }
 $script:AmtHookBase    = if ($env:AMT_HOOK_BASE)    { $env:AMT_HOOK_BASE }    else { "$script:AmtGatewayBase/hook" }
 
 $script:AmtCopilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }

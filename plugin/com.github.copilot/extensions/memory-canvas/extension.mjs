@@ -7,9 +7,12 @@
 //   - The extension runs a local node:http server that serves the panel HTML and a small
 //     read-only JSON API the page polls. A per-server capability token guards every
 //     request so a cross-site/rebinding caller cannot reach the socket.
-//   - Reads come straight from the AMT REST API over the IP gateway, using a delegated
-//     token from `az` (same identity path as the plugin hooks). This is demo-grade; the
-//     productized token path is shared with amt-token.sh (see plugin/README.md).
+//   - Reads and imports go straight to the AMT REST API over the IP gateway using the
+//     plugin's gateway-issued hook token (amt-token.sh) - the same keyless identity path as
+//     the hooks. No `az` and no Entra client id live in the canvas.
+//   - "Import memory" reads local GitHub Copilot CLI state (read-only) via the shared engine
+//     scripts/amt-import.mjs and publishes it: session turns to POST /memory, Copilot's own
+//     memories to POST /facts (+ /reconcile).
 //   - Write actions (forget / promote) do NOT call AMT directly. They use
 //     session.send(...) to ask the host agent to run the amt-memory MCP tools, so they
 //     reuse the plugin's existing OAuth sign-in and the server-side authz. (forget /
@@ -18,42 +21,53 @@
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
+import { listSessions, importSessions, importMemories, resolveGatewayBase } from "../../scripts/amt-import.mjs";
 
-const GATEWAY_BASE =
-  process.env.AMT_GATEWAY_BASE ||
-  "https://reranker-api-h2b5czhkfkcphnf4.westus3-01.azurewebsites.net/inference/memory";
-const TOKEN_RESOURCE =
-  process.env.AMT_TOKEN_RESOURCE || "api://45cdeed7-4e4e-481d-9f00-6708c0631565";
+// The gateway data-plane base is customer-configured in exactly one place (the plugin's
+// .mcp.json) and resolved by the shared engine; nothing is hardcoded here. Memoized after the
+// first read. AMT_GATEWAY_BASE overrides for tests / local dev.
+let _gatewayBase;
+function gatewayBase() {
+  return (_gatewayBase ||= resolveGatewayBase());
+}
+// The plugin's token authority is amt-token.sh: it prints a valid gateway-issued hook access
+// token (see amt-config.sh) and refreshes silently. The canvas reuses it, so it needs no
+// Entra client id and no `az` - the same keyless path as the hooks and the import engine.
+const SCRIPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts");
 
 // One local server per open canvas instance.
 const servers = new Map();
 
 // --- AMT access -----------------------------------------------------------------------
 
-// Delegated gateway token via the Azure CLI (demo-grade; expires ~1h). Shared identity
-// path with the plugin's amt-token.sh.
+// A valid AMT hook access token from the plugin's token authority (amt-token.sh, which
+// refreshes silently at the gateway). Non-blocking. This is the same token the hooks and the
+// import engine send; the gateway accepts it on every /inference/memory route.
 function getToken() {
+  if (process.env.AMT_ACCESS_TOKEN) return Promise.resolve(process.env.AMT_ACCESS_TOKEN.trim());
+  const isWindows = process.platform === "win32";
+  const cmd = isWindows ? "powershell" : "bash";
+  const args = isWindows
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(SCRIPTS_DIR, "amt-token.ps1")]
+    : [join(SCRIPTS_DIR, "amt-token.sh")];
   return new Promise((resolve, reject) => {
-    execFile(
-      "az",
-      ["account", "get-access-token", "--resource", TOKEN_RESOURCE, "--query", "accessToken", "--output", "tsv"],
-      { timeout: 15000 },
-      (err, stdout) => {
-        if (err) return reject(new Error("az token failed; run 'az login'"));
-        const t = String(stdout).trim();
-        t ? resolve(t) : reject(new Error("empty token"));
-      },
-    );
+    execFile(cmd, args, { timeout: 30000 }, (err, stdout) => {
+      if (err) return reject(new Error("not signed in to AMT; run /amt-login"));
+      const t = String(stdout).trim();
+      t ? resolve(t) : reject(new Error("not signed in to AMT; run /amt-login"));
+    });
   });
 }
 
 async function amt(path, { method = "GET", body } = {}) {
   const token = await getToken();
-  const res = await fetch(`${GATEWAY_BASE}${path}`, {
+  const res = await fetch(`${gatewayBase()}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `HookToken ${token}`,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -114,6 +128,31 @@ function hasToken(req, token) {
   const provided = Array.isArray(h) ? h[0] : h;
   return typeof provided === "string" && provided === token;
 }
+function readJsonBody(req) {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (chunk) => {
+      data += chunk;
+      if (data.length > 1_000_000) req.destroy();
+    });
+    req.on("end", () => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch {
+        resolve({});
+      }
+    });
+    req.on("error", () => resolve({}));
+  });
+}
+function guard(req, res, token) {
+  if (isCrossSite(req) || !hasToken(req, token)) {
+    res.writeHead(403, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "forbidden" }));
+    return false;
+  }
+  return true;
+}
 
 async function startServer(instanceId) {
   const capabilityToken = randomBytes(32).toString("base64url");
@@ -136,6 +175,38 @@ async function startServer(instanceId) {
         const data = await loadMemory();
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify(data));
+      }
+
+      // Import: list local Copilot sessions (label + last two user turns). Local files only,
+      // still guarded so only the same-origin panel can enumerate them.
+      if (url.pathname === "/api/import/sessions" && req.method === "GET") {
+        if (!guard(req, res, capabilityToken)) return;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ sessions: listSessions() }));
+      }
+
+      // Import: ingest the selected sessions' turns into AMT (POST /memory, original
+      // timestamps). AMT's pipeline extracts / reconciles / summarizes them afterward.
+      if (url.pathname === "/api/import/sessions" && req.method === "POST") {
+        if (!guard(req, res, capabilityToken)) return;
+        const body = await readJsonBody(req);
+        const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+        if (!ids.length) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "no sessions selected" }));
+        }
+        const result = await importSessions(ids, { token: await getToken() });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(result));
+      }
+
+      // Import: publish Copilot's own distilled memories as facts (POST /facts) and run one
+      // reconciliation pass so they consolidate against existing memories.
+      if (url.pathname === "/api/import/memories" && req.method === "POST") {
+        if (!guard(req, res, capabilityToken)) return;
+        const result = await importMemories({ token: await getToken() });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(result));
       }
 
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -263,6 +334,27 @@ function renderPanel(token) {
   .empty { opacity: 0.5; font-style: italic; }
   .err { color: #c00; }
   button { font: inherit; cursor: pointer; }
+  button.primary { background:#0969da; color:#fff; border:1px solid #0969da; border-radius:6px; padding:5px 12px; }
+  button.ghost { background:transparent; border:1px solid rgba(128,128,128,0.4); border-radius:6px; padding:5px 12px; }
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,0.45); display:none; align-items:center; justify-content:center; z-index:10; }
+  .overlay.show { display:flex; }
+  .modal { background:Canvas; color:CanvasText; border:1px solid rgba(128,128,128,0.35); border-radius:10px; padding:16px; width:min(680px,92vw); max-height:82vh; overflow:auto; box-shadow:0 12px 40px rgba(0,0,0,0.45); }
+  .modal h2 { font-size:14px; margin:0 0 12px; }
+  .choice { display:flex; gap:10px; }
+  .choice button { flex:1; text-align:left; padding:14px; border-radius:8px; border:1px solid rgba(128,128,128,0.35); background:rgba(128,128,128,0.06); }
+  .choice .t { font-weight:600; display:block; margin-bottom:4px; }
+  .choice .d { opacity:0.65; font-size:12px; }
+  .selall { display:flex; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid rgba(128,128,128,0.2); margin-bottom:6px; }
+  .rows { margin:6px 0; }
+  .row { display:flex; gap:8px; padding:8px; border-radius:6px; align-items:flex-start; cursor:pointer; }
+  .row:hover { background:rgba(128,128,128,0.08); }
+  .row .meta { flex:1; min-width:0; }
+  .row .lbl { font-weight:600; }
+  .row .sub { opacity:0.6; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .q { opacity:0.75; font-size:12px; margin-top:2px; }
+  .bar { display:flex; align-items:center; gap:10px; margin-top:12px; }
+  .bar .sp { flex:1; }
+  .msg { font-size:12px; opacity:0.85; }
 </style>
 </head>
 <body>
@@ -270,12 +362,17 @@ function renderPanel(token) {
     <h1>AMT Memory</h1>
     <span id="who" class="who">loading...</span>
     <span style="flex:1"></span>
+    <button id="import" class="primary">Import memory</button>
     <button id="refresh">Refresh</button>
   </header>
   <div class="cols">
     <div class="col"><h2>Personal <span id="c-personal" class="count"></span></h2><ul id="personal"></ul></div>
     <div class="col"><h2>Team <span id="c-team" class="count"></span></h2><ul id="team"></ul></div>
     <div class="col"><h2>Org <span id="c-org" class="count"></span></h2><ul id="org"></ul></div>
+  </div>
+
+  <div id="overlay" class="overlay" role="dialog" aria-modal="true">
+    <div class="modal" id="modal"></div>
   </div>
 <script>
   const TOKEN = ${JSON.stringify(token)};
@@ -297,9 +394,85 @@ function renderPanel(token) {
       fill('team', d.groups.team || []);
       fill('org', d.groups.org || []);
     } catch (e) {
-      document.getElementById('who').innerHTML = '<span class="err">could not load ('+esc(e.message)+') - is az signed in?</span>';
+      document.getElementById('who').innerHTML = '<span class="err">could not load ('+esc(e.message)+') - run /amt-login?</span>';
     }
   }
+  // --- Import memory flow ---------------------------------------------------------------
+  const overlay = document.getElementById('overlay');
+  const modal = document.getElementById('modal');
+  function closeModal(){ overlay.classList.remove('show'); modal.innerHTML=''; }
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
+
+  async function post(path, body){
+    const r = await fetch(path, { method:'POST', headers:{ 'x-amt-canvas-token':TOKEN, 'Content-Type':'application/json' }, body: body?JSON.stringify(body):undefined });
+    if (!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,140));
+    return r.json();
+  }
+
+  function openChoice(){
+    modal.innerHTML =
+      '<h2>Import memory</h2>'+
+      '<div class="choice">'+
+        '<button id="ch-mem"><span class="t">Copilot memory</span><span class="d">Import the distilled memories Copilot already saved, as facts, then reconcile.</span></button>'+
+        '<button id="ch-sess"><span class="t">Local sessions</span><span class="d">Pick past Copilot CLI sessions; import their turns for AMT to distill.</span></button>'+
+      '</div>'+
+      '<div class="bar"><span id="m-msg" class="msg"></span><span class="sp"></span><button class="ghost" id="ch-cancel">Cancel</button></div>';
+    overlay.classList.add('show');
+    document.getElementById('ch-cancel').onclick = closeModal;
+    document.getElementById('ch-mem').onclick = doImportMemories;
+    document.getElementById('ch-sess').onclick = openSessions;
+  }
+
+  async function doImportMemories(){
+    const msg = document.getElementById('m-msg');
+    msg.textContent = 'Importing Copilot memories...';
+    try {
+      const res = await post('/api/import/memories');
+      msg.textContent = 'Imported '+res.memories+' memories and reconciled.';
+      setTimeout(() => { closeModal(); load(); }, 1300);
+    } catch(e){ msg.innerHTML = '<span class="err">'+esc(e.message)+'</span>'; }
+  }
+
+  async function openSessions(){
+    modal.innerHTML = '<h2>Import local sessions</h2><div class="msg">Loading sessions...</div>';
+    let sessions = [];
+    try {
+      const r = await fetch('/api/import/sessions', { headers:{ 'x-amt-canvas-token':TOKEN } });
+      sessions = (await r.json()).sessions || [];
+    } catch(e){ modal.innerHTML = '<h2>Import local sessions</h2><div class="err">'+esc(e.message)+'</div>'; return; }
+    if (!sessions.length){
+      modal.innerHTML = '<h2>Import local sessions</h2><div class="msg">No local Copilot sessions found.</div>'+
+        '<div class="bar"><span class="sp"></span><button class="ghost" id="s-cancel">Close</button></div>';
+      document.getElementById('s-cancel').onclick = closeModal;
+      return;
+    }
+    modal.innerHTML =
+      '<h2>Import local sessions <span class="count">('+sessions.length+')</span></h2>'+
+      '<div class="selall"><input type="checkbox" id="s-all"><label for="s-all">Select all</label></div>'+
+      '<div class="rows">'+ sessions.map(s =>
+        '<label class="row"><input type="checkbox" class="s-cb" data-id="'+esc(s.session_id)+'">'+
+        '<span class="meta"><div class="lbl">'+esc(s.label)+'</div>'+
+        '<div class="sub">'+esc(s.cwd||'')+' · '+s.turn_count+' turns</div>'+
+        (s.last_user_turns||[]).map(q => '<div class="q">› '+esc(q)+'</div>').join('')+
+        '</span></label>').join('') +'</div>'+
+      '<div class="bar"><span id="s-msg" class="msg"></span><span class="sp"></span><button class="ghost" id="s-cancel">Cancel</button><button class="primary" id="s-import">Import</button></div>';
+    const cbs = Array.from(modal.querySelectorAll('.s-cb'));
+    document.getElementById('s-all').onchange = e => cbs.forEach(cb => { cb.checked = e.target.checked; });
+    document.getElementById('s-cancel').onclick = closeModal;
+    document.getElementById('s-import').onclick = async () => {
+      const ids = cbs.filter(cb => cb.checked).map(cb => cb.getAttribute('data-id'));
+      const msg = document.getElementById('s-msg');
+      if (!ids.length){ msg.innerHTML = '<span class="err">Select at least one session.</span>'; return; }
+      msg.textContent = 'Importing '+ids.length+' session(s)...';
+      try {
+        const res = await post('/api/import/sessions', { ids });
+        msg.textContent = 'Imported '+res.messages+' messages from '+res.sessions+' session(s).';
+        setTimeout(() => { closeModal(); load(); }, 1500);
+      } catch(e){ msg.innerHTML = '<span class="err">'+esc(e.message)+'</span>'; }
+    };
+  }
+
+  document.getElementById('import').addEventListener('click', openChoice);
   document.getElementById('refresh').addEventListener('click', load);
   load();
   setInterval(load, 15000);

@@ -91,7 +91,8 @@ async function loadMemory() {
     const t = tierOf(it.scope_key);
     if (t === "team" || t === "org") groups[t].push(shape(it));
   }
-  return { who: who.principal, tenant: who.tenant_id, groups };
+  const teams = (who.groups || []).map((g) => g.replace(/^team:/, ""));
+  return { who: who.principal, tenant: who.tenant_id, teams, groups };
 }
 
 function shape(it) {
@@ -292,7 +293,10 @@ function renderPanel(token) {
       const r = await fetch('/api/memory', { headers: { 'x-amt-canvas-token': TOKEN } });
       if (!r.ok) throw new Error('HTTP '+r.status);
       const d = await r.json();
-      document.getElementById('who').textContent = d.who + ' · ' + d.tenant;
+      const idParts = [d.who];
+      if (Array.isArray(d.teams) && d.teams.length) idParts.push('team: ' + d.teams.join(', '));
+      idParts.push('org: ' + d.tenant);
+      document.getElementById('who').textContent = idParts.join(' · ');
       fill('personal', d.groups.personal || []);
       fill('team', d.groups.team || []);
       fill('org', d.groups.org || []);

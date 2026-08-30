@@ -3,7 +3,7 @@
 Packages the deployed AMT memory service as an Agent Plugin 1.0 for the GitHub Copilot app
 (also VS Code and the CLI). It bundles:
 
-- **MCP server** (`.mcp.json`) - the `amt-memory` server with its 12 tools, via the IP
+- **MCP server** (`mcp.json`) - the `amt-memory` server with its 12 tools, via the IP
   gateway (OAuth sign-in handled by the client, no token in the file).
 - **Skill** (`skills/use-memory/`) - teaches the agent to consult and update memory during
   real work.
@@ -67,7 +67,7 @@ echo '{"prompt":"test turn from the plugin","threadId":"plugin-smoke"}' \
 
 ## Install (GitHub Copilot app / CLI / VS Code)
 
-MCP-only path works today with just `.mcp.json` (add the server URL in the app's Customize
+MCP-only path works today with just `mcp.json` (add the server URL in the app's Customize
 tab; sign in when prompted). Full plugin install (with hooks + commands) follows the Agent
 Plugins install flow for your client; point it at this `plugin/` directory. Hooks run
 locally, so `az`, `jq`, and `curl` must be available in the shell the client uses.

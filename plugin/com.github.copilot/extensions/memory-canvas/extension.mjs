@@ -87,15 +87,18 @@ function tierOf(scopeKey = "") {
 // Build the three-tier view the panel renders. Personal comes from the recent-memories
 // list; team/org come from scoped searches (the only shared-read surface today).
 async function loadMemory() {
-  const who = await amt("/whoami");
-  const orgScope = `org:${who.tenant_id}`;
-  const teamScopes = (who.groups || []).map((g) => (g.startsWith("team:") ? g : `team:${g}`));
+  const who = await amt("/whoami").catch(() => null);
+  const orgScope = who && who.tenant_id ? `org:${who.tenant_id}` : null;
+  const teamScopes = ((who && who.groups) || []).map((g) => (g.startsWith("team:") ? g : `team:${g}`));
+  const sharedScopes = [...teamScopes, ...(orgScope ? [orgScope] : [])];
 
   const personal = await amt("/memories?recent_k=30").catch(() => ({ items: [] }));
-  const shared = await amt("/search", {
-    method: "POST",
-    body: { query: "team and organization knowledge, standards, and decisions", top_k: 25, scopes: [...teamScopes, orgScope] },
-  }).catch(() => ({ items: [] }));
+  const shared = sharedScopes.length
+    ? await amt("/search", {
+        method: "POST",
+        body: { query: "team and organization knowledge, standards, and decisions", top_k: 25, scopes: sharedScopes },
+      }).catch(() => ({ items: [] }))
+    : { items: [] };
 
   const groups = { personal: [], team: [], org: [] };
   for (const it of personal.items || []) {
@@ -105,7 +108,7 @@ async function loadMemory() {
     const t = tierOf(it.scope_key);
     if (t === "team" || t === "org") groups[t].push(shape(it));
   }
-  return { who: who.principal, tenant: who.tenant_id, groups };
+  return { who: (who && who.principal) || "you", tenant: (who && who.tenant_id) || "", groups };
 }
 
 function shape(it) {

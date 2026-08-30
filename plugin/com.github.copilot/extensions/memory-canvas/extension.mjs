@@ -27,7 +27,7 @@ import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
 import { listSessions, importSessions, importMemories, resolveGatewayBase } from "../../scripts/amt-import.mjs";
 
 // The gateway data-plane base is customer-configured in exactly one place (the plugin's
-// .mcp.json) and resolved by the shared engine; nothing is hardcoded here. Memoized after the
+// mcp.json) and resolved by the shared engine; nothing is hardcoded here. Memoized after the
 // first read. AMT_GATEWAY_BASE overrides for tests / local dev.
 let _gatewayBase;
 function gatewayBase() {

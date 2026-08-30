@@ -33,7 +33,7 @@ export const DEFAULT_SESSION_ROOT =
   process.env.AMT_COPILOT_SESSION_ROOT || join(homedir(), ".copilot", "session-state");
 
 // Gateway data plane (ends at /inference/memory). Single source of truth is the plugin's
-// .mcp.json - the one URL the customer configures - so nothing here is hardcoded per customer;
+// mcp.json - the one URL the customer configures - so nothing here is hardcoded per customer;
 // AMT_GATEWAY_BASE overrides for tests / local dev. See resolveGatewayBase().
 const SESSION_SOURCE = "github-copilot";
 const MEMORY_SOURCE = "copilot-cli-memory";
@@ -41,19 +41,19 @@ const REQUEST_TIMEOUT_MS = 90_000;
 
 /**
  * Resolve the gateway data-plane base (…/inference/memory). Order: AMT_GATEWAY_BASE override,
- * then the plugin's .mcp.json (amt-memory server url with the trailing /mcp[/] stripped). This
+ * then the plugin's mcp.json (amt-memory server url with the trailing /mcp[/] stripped). This
  * keeps the gateway customer-configurable in exactly one place and never hardcoded here.
  */
 export function resolveGatewayBase() {
   if (process.env.AMT_GATEWAY_BASE) return process.env.AMT_GATEWAY_BASE.replace(/\/+$/, "");
   try {
-    const mcp = JSON.parse(readFileSync(join(SCRIPT_DIR, "..", "..", ".mcp.json"), "utf8"));
+    const mcp = JSON.parse(readFileSync(join(SCRIPT_DIR, "..", "..", "mcp.json"), "utf8"));
     const url = mcp && mcp.mcpServers && mcp.mcpServers["amt-memory"] && mcp.mcpServers["amt-memory"].url;
     if (url) return String(url).replace(/\/mcp\/?$/i, "").replace(/\/+$/, "");
   } catch {
     /* fall through to the actionable error */
   }
-  throw new Error("AMT gateway not configured: set AMT_GATEWAY_BASE or the amt-memory url in .mcp.json.");
+  throw new Error("AMT gateway not configured: set AMT_GATEWAY_BASE or the amt-memory url in mcp.json.");
 }
 
 // --- read-only JSONL parsing ------------------------------------------------------------

@@ -87,15 +87,18 @@ function tierOf(scopeKey = "") {
 // Build the three-tier view the panel renders. Personal comes from the recent-memories
 // list; team/org come from scoped searches (the only shared-read surface today).
 async function loadMemory() {
-  const who = await amt("/whoami");
-  const orgScope = `org:${who.tenant_id}`;
-  const teamScopes = (who.groups || []).map((g) => (g.startsWith("team:") ? g : `team:${g}`));
+  const who = await amt("/whoami").catch(() => null);
+  const orgScope = who && who.tenant_id ? `org:${who.tenant_id}` : null;
+  const teamScopes = ((who && who.groups) || []).map((g) => (g.startsWith("team:") ? g : `team:${g}`));
+  const sharedScopes = [...teamScopes, ...(orgScope ? [orgScope] : [])];
 
   const personal = await amt("/memories?recent_k=30").catch(() => ({ items: [] }));
-  const shared = await amt("/search", {
-    method: "POST",
-    body: { query: "team and organization knowledge, standards, and decisions", top_k: 25, scopes: [...teamScopes, orgScope] },
-  }).catch(() => ({ items: [] }));
+  const shared = sharedScopes.length
+    ? await amt("/search", {
+        method: "POST",
+        body: { query: "team and organization knowledge, standards, and decisions", top_k: 25, scopes: sharedScopes },
+      }).catch(() => ({ items: [] }))
+    : { items: [] };
 
   const groups = { personal: [], team: [], org: [] };
   for (const it of personal.items || []) {
@@ -105,8 +108,7 @@ async function loadMemory() {
     const t = tierOf(it.scope_key);
     if (t === "team" || t === "org") groups[t].push(shape(it));
   }
-  const teams = (who.groups || []).map((g) => g.replace(/^team:/, ""));
-  return { who: who.principal, tenant: who.tenant_id, teams, groups };
+  return { who: who.principal, tenant: who.tenant_id, groups };
 }
 
 function shape(it) {
@@ -390,10 +392,7 @@ function renderPanel(token) {
       const r = await fetch('/api/memory', { headers: { 'x-amt-canvas-token': TOKEN } });
       if (!r.ok) throw new Error('HTTP '+r.status);
       const d = await r.json();
-      const idParts = [d.who];
-      if (Array.isArray(d.teams) && d.teams.length) idParts.push('team: ' + d.teams.join(', '));
-      idParts.push('org: ' + d.tenant);
-      document.getElementById('who').textContent = idParts.join(' · ');
+      document.getElementById('who').textContent = d.who + ' · ' + d.tenant;
       fill('personal', d.groups.personal || []);
       fill('team', d.groups.team || []);
       fill('org', d.groups.org || []);

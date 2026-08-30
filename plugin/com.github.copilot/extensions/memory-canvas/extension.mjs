@@ -108,7 +108,7 @@ async function loadMemory() {
     const t = tierOf(it.scope_key);
     if (t === "team" || t === "org") groups[t].push(shape(it));
   }
-  return { who: (who && who.principal) || "you", tenant: (who && who.tenant_id) || "", groups };
+  return { who: who.principal, tenant: who.tenant_id, groups };
 }
 
 function shape(it) {

@@ -33,14 +33,24 @@ prompt="$(printf '%s' "$payload" | jq -r '.prompt // .userPrompt // .user_prompt
 thread="$(printf '%s' "$payload" | jq -r '.sessionId // .session_id // "copilot-app"')"
 [ -z "$prompt" ] && { echo '{}'; exit 0; }
 
+# Copilot can append runtime-only notifications to the submitted prompt. They are useful to
+# the agent but are not part of the user's message and must not be persisted as a user turn.
+capture_prompt="$(printf '%s' "$prompt" | jq -Rsr '
+  gsub("(?is)<system_notification>.*?</system_notification>"; "")
+  | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+')"
+
 token="$("$SCRIPT_DIR/amt-token.sh" 2>/dev/null || true)"
 [ -z "$token" ] && { echo '{}'; exit 0; }
 
-# 1) CAPTURE the user turn (fire-and-forget; never block or fail the prompt).
-curl -sS --max-time 12 -X POST "${AMT_HOOK_BASE}/capture" \
-  -H "Authorization: HookToken ${token}" -H "Content-Type: application/json" \
-  -d "$(jq -n --arg t "$thread" --arg c "$prompt" '{thread_id:$t, role:"user", content:$c}')" \
-  >/dev/null 2>&1 || true
+# 1) CAPTURE the user turn (fire-and-forget; never block or fail the prompt). Skip a
+# notification-only payload instead of writing an empty turn.
+if [ -n "$capture_prompt" ]; then
+  curl -sS --max-time 12 -X POST "${AMT_HOOK_BASE}/capture" \
+    -H "Authorization: HookToken ${token}" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg t "$thread" --arg c "$capture_prompt" '{thread_id:$t, role:"user", content:$c}')" \
+    >/dev/null 2>&1 || true
+fi
 
 # 2) RECALL relevant memories and inject them.
 echo '{"type":"progress","message":"Recalling memory...","temporary":true}'

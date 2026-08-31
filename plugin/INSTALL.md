@@ -35,7 +35,7 @@ testing or merge to the default branch.
    - **MCP server** (`amt-memory`, 12 tools) -> sign in with Microsoft when prompted
      (the gateway's OAuth discovery drives this).
    - **Skill** (`use-memory`) -> appears under Customize -> Skills.
-   - **Hooks** (inject / capture) -> run locally; need `az`, `jq`, `curl` on PATH.
+   - **Hooks** (inject / capture) -> run locally; need `jq` and `curl` on PATH.
    - **Canvas** (`AMT Memory`) -> appears under Customize -> Canvas; open it in a session.
 3. Verify: in a chat, "call the amt-memory whoami tool" -> expect your `user:<oid>` and
    tenant. Then open the **AMT Memory** canvas to see facts grouped by Personal / Team / Org.
@@ -45,13 +45,12 @@ testing or merge to the default branch.
 - **Private repo access**: the app must be able to read this repo. If the app cannot fetch
   a private repo's marketplace, make a dedicated public marketplace repo (or push the
   `plugin/` there) and point the app at that.
-- **Canvas registration key**: registered under
-  `plugin.json -> extensions.com.github.copilot.extensions` (array of canvas dirs),
-  matching the `github/awesome-copilot` "the-workshop" plugin. If the app does not pick up
-  the canvas, check whether it expects the canvas listed under a different key.
-- **Hook auth**: `amt-token.sh` uses `az account get-access-token` (expires ~1h). Run
-  `az login` first; re-auth if hooks start returning 401.
-- **Windows**: only `bash` hook entries are provided; add `.ps1` for Windows hosts.
+- **Canvas registration key**: registered under the native top-level `extensions` field in
+  `plugin.json`, alongside the top-level `hooks`, `skills`, `commands`, and `mcpServers`
+  component paths expected by Copilot.
+- **Hook auth**: run `/amt-login` once after the MCP server is connected. It enrolls the
+  hook scripts and caches a gateway-issued access/refresh token under the Copilot home.
+- **Windows**: PowerShell hook entries and `.ps1` script twins are included.
 
 ## Iterating during development
 

@@ -36,19 +36,19 @@ plugin/
 
 ## Prerequisites
 
-- Azure CLI (`az`) installed and signed in: `az login` (tenant `72f988bf-...`).
-- `jq` and `curl` on PATH (used by the hook scripts).
+- `jq` and `curl` on PATH (used by the macOS/Linux hook scripts).
+- Run `/amt-login` once after connecting the MCP server so the hooks have a gateway-issued
+  access/refresh token.
 - The scripts are executable: `chmod +x com.github.copilot/scripts/*.sh`.
 
 ## What is demo-grade vs. real
 
-- **Auth (`amt-token.sh`)**: uses `az account get-access-token` - fine for the demo,
-  expires ~1h. A first-class token path is the main follow-up.
+- **Auth (`amt-token.sh`)**: reads and silently refreshes the hook token enrolled by
+  `/amt-login`; it does not depend on an interactive Azure CLI session.
 - **`userPromptSubmitted` injection field**: uses `additionalContext` (the documented hook
   output for injecting model context). Confirm the field on first run against the
   [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference).
-- **Windows**: only `bash` hook entries are provided. Add `.ps1` equivalents and
-  `powershell` keys in `hooks.json` for Windows hosts.
+- **Windows**: PowerShell hook entries and `.ps1` twins are included.
 - **`/forget`**: no delete endpoint exists yet (AMT supersedes, not deletes).
 
 ## Quick local check (no Copilot needed)
@@ -60,9 +60,12 @@ Verify the scripts talk to AMT with your identity:
 echo '{"prompt":"what did we decide about signing the x-amt-context header"}' \
   | ./com.github.copilot/scripts/inject.sh
 
-# capture path: append a turn
-echo '{"prompt":"test turn from the plugin","threadId":"plugin-smoke"}' \
+# capture path: append the last agent message from a Copilot-style transcript
+printf '%s\n' '{"type":"assistant.message","data":{"content":"test turn from the plugin"}}' \
+  > /tmp/amt-plugin-smoke.jsonl
+echo '{"sessionId":"plugin-smoke","transcriptPath":"/tmp/amt-plugin-smoke.jsonl"}' \
   | ./com.github.copilot/scripts/capture.sh
+rm /tmp/amt-plugin-smoke.jsonl
 ```
 
 ## Install (GitHub Copilot app / CLI / VS Code)

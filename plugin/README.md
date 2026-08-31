@@ -7,10 +7,11 @@ Packages the deployed AMT memory service as an Agent Plugin 1.0 for the GitHub C
   gateway (OAuth sign-in handled by the client, no token in the file).
 - **Skill** (`skills/use-memory/`) - teaches the agent to consult and update memory during
   real work.
-- **Hooks** (`com.github.copilot/hooks/`) - deterministic recall and capture that MCP alone
+- **Hooks** (`hooks/hooks.json`) - deterministic recall and capture that MCP alone
   cannot do:
-  - `userPromptSubmitted` -> `inject.sh` retrieves memories and injects them before the
-    model sees the prompt.
+  - `userPromptSubmitted` -> `inject.sh` captures the sanitized user turn.
+  - `userPromptTransformed` -> `inject.sh` retrieves memories and adds them to the
+    model-facing prompt.
   - `agentStop` -> `capture.sh` appends the turn to AMT.
 - **Commands** (`com.github.copilot/commands/`) - `/memory-show`, `/forget`.
 - **Canvas** (`com.github.copilot/extensions/memory-canvas/`) - a "Memory" panel that
@@ -26,9 +27,9 @@ this is purely a client-surface package.
 plugin/
 ├── plugin.json
 ├── mcp.json
+├── hooks/hooks.json
 ├── skills/use-memory/SKILL.md
 └── com.github.copilot/
-    ├── hooks/hooks.json
     ├── scripts/{inject,capture,amt-token}.sh
     ├── commands/{memory-show,forget}.md
     └── extensions/memory-canvas/{package.json,extension.mjs,README.md}
@@ -45,9 +46,12 @@ plugin/
 
 - **Auth (`amt-token.sh`)**: reads and silently refreshes the hook token enrolled by
   `/amt-login`; it does not depend on an interactive Azure CLI session.
-- **`userPromptSubmitted` injection field**: uses `additionalContext` (the documented hook
-  output for injecting model context). Confirm the field on first run against the
+- **Hook lifecycle**: `userPromptSubmitted` performs capture as a side effect and returns `{}`;
+  current config-file hooks discard its output. Recall runs in `userPromptTransformed` and
+  returns `modifiedTransformedPrompt`, as defined by the
   [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference).
+- **Diagnostics**: hook invocations and non-sensitive outcomes are appended to
+  `~/.copilot/amt/hook.log`; prompts, memories, and tokens are never logged there.
 - **Windows**: PowerShell hook entries and `.ps1` twins are included.
 - **`/forget`**: no delete endpoint exists yet (AMT supersedes, not deletes).
 
@@ -56,9 +60,13 @@ plugin/
 Verify the scripts talk to AMT with your identity:
 
 ```bash
-# recall path: what would be injected for a prompt
-echo '{"prompt":"what did we decide about signing the x-amt-context header"}' \
-  | ./com.github.copilot/scripts/inject.sh
+# user capture phase
+echo '{"sessionId":"plugin-smoke","prompt":"test user turn from the plugin"}' \
+  | AMT_HOOK_PHASE=capture ./com.github.copilot/scripts/inject.sh
+
+# recall phase: what would be sent to the model
+echo '{"sessionId":"plugin-smoke","prompt":"what did we decide about signing x-amt-context?","transformedPrompt":"what did we decide about signing x-amt-context?"}' \
+  | AMT_HOOK_PHASE=recall ./com.github.copilot/scripts/inject.sh
 
 # capture path: append the last agent message from a Copilot-style transcript
 printf '%s\n' '{"type":"assistant.message","data":{"content":"test turn from the plugin"}}' \

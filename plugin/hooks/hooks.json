@@ -6,6 +6,20 @@
         "type": "command",
         "bash": "\"${PLUGIN_ROOT}/com.github.copilot/scripts/inject.sh\"",
         "powershell": "& \"${PLUGIN_ROOT}/com.github.copilot/scripts/inject.ps1\"",
+        "env": {
+          "AMT_HOOK_PHASE": "capture"
+        },
+        "timeoutSec": 30
+      }
+    ],
+    "userPromptTransformed": [
+      {
+        "type": "command",
+        "bash": "\"${PLUGIN_ROOT}/com.github.copilot/scripts/inject.sh\"",
+        "powershell": "& \"${PLUGIN_ROOT}/com.github.copilot/scripts/inject.ps1\"",
+        "env": {
+          "AMT_HOOK_PHASE": "recall"
+        },
         "timeoutSec": 30
       }
     ],

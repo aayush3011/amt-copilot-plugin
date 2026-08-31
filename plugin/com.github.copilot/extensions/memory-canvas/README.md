@@ -7,10 +7,9 @@ promote memories.
 
 ## How it fits the plugin
 
-Registered in `plugin/plugin.json` under
-`extensions.com.github.copilot.canvases`, pointing at this directory. Installing the
-plugin surfaces the canvas in the Copilot app's **Customize -> Canvas** view; open it in a
-session (it lands in the right side panel).
+Registered in `plugin/plugin.json` through the native top-level `extensions` path, pointing
+at this directory. Installing the plugin surfaces the canvas in the Copilot app's
+**Customize -> Canvas** view; `/memory-show` opens it in the session's right side panel.
 
 ## How it works
 
@@ -49,10 +48,9 @@ session (it lands in the right side panel).
 - **SDK version**: `package.json` pins `@github/copilot-sdk` at a placeholder range;
   set the version your app ships. The import path `@github/copilot-sdk/extension` matches
   the public canvas examples - confirm against your installed SDK.
-- **Registration key**: the canvas is registered via
-  `extensions.com.github.copilot.canvases`. Some examples use a bare `"extensions": "."`
-  at the extension's own `plugin.json`. Confirm the exact key the Copilot app expects for a
-  canvas bundled inside a multi-component plugin.
+- **Session loading**: after installing or updating the plugin, start a new session so the
+  app launches the updated canvas extension and adds `amt-memory` to that session's canvas
+  registry.
 - **forget / promote**: there is no AMT delete or promotion REST endpoint yet, so these
   actions delegate to the agent + MCP tools rather than calling AMT directly. A first-class
   `service/` forget endpoint and the promotion PR would let the canvas act directly.

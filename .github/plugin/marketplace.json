@@ -13,7 +13,7 @@
       "name": "amt-memory",
       "source": "./plugin",
       "description": "Persistent, scoped agent memory (personal, team, org) backed by Azure Cosmos DB, delivered through the Inference Platform gateway. Bundles the AMT MCP server, a memory skill, deterministic inject/capture hooks, a Memory canvas, and one-click import of GitHub Copilot memory and sessions.",
-      "version": "0.3.5",
+      "version": "0.3.6",
       "author": {
         "name": "Aayush Kataria",
         "url": "https://github.com/aayush3011"

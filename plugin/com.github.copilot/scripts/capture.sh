@@ -18,13 +18,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=amt-config.sh
 . "$SCRIPT_DIR/amt-config.sh"
 
-command -v jq   >/dev/null 2>&1 || { echo '{}'; exit 0; }
-command -v curl >/dev/null 2>&1 || { echo '{}'; exit 0; }
+hook_log() {
+  {
+    umask 077
+    mkdir -p "$AMT_HOME"
+    printf '%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" >>"${AMT_HOME}/hook.log"
+    chmod 600 "${AMT_HOME}/hook.log"
+  } 2>/dev/null || true
+}
+
+finish_empty() {
+  echo '{}'
+  exit 0
+}
+
+hook_log "capture:agent:invoked"
+command -v jq >/dev/null 2>&1 || { hook_log "capture:agent:skipped:jq-missing"; finish_empty; }
+command -v curl >/dev/null 2>&1 || { hook_log "capture:agent:skipped:curl-missing"; finish_empty; }
 
 payload="$(cat)"
+printf '%s' "$payload" | jq -e . >/dev/null 2>&1 || { hook_log "capture:agent:skipped:invalid-payload"; finish_empty; }
 thread="$(printf '%s' "$payload" | jq -r '.sessionId // .session_id // "copilot-app"')"
 transcript="$(printf '%s' "$payload" | jq -r '.transcriptPath // .transcript_path // empty')"
-{ [ -z "$transcript" ] || [ ! -f "$transcript" ]; } && { echo '{}'; exit 0; }
+{ [ -z "$transcript" ] || [ ! -f "$transcript" ]; } && { hook_log "capture:agent:skipped:transcript-unavailable"; finish_empty; }
 
 # Extract the last assistant/agent message text from the transcript. Current Copilot event
 # logs store it as {"type":"assistant.message","data":{"content":"..."}}; older
@@ -67,14 +83,22 @@ if [ -z "$agent_msg" ]; then
   ' "$transcript" 2>/dev/null || true)"
 fi
 
-[ -z "$agent_msg" ] && { echo '{}'; exit 0; }
+[ -z "$agent_msg" ] && { hook_log "capture:agent:skipped:no-agent-message"; finish_empty; }
 
 token="$("$SCRIPT_DIR/amt-token.sh" 2>/dev/null || true)"
-[ -z "$token" ] && { echo '{}'; exit 0; }
+[ -z "$token" ] && { hook_log "capture:agent:skipped:no-hook-token"; finish_empty; }
 
-curl -sS --max-time 12 -X POST "${AMT_HOOK_BASE}/capture" \
-  -H "Authorization: HookToken ${token}" -H "Content-Type: application/json" \
-  -d "$(jq -n --arg t "$thread" --arg c "$agent_msg" '{thread_id:$t, role:"agent", content:$c}')" \
-  >/dev/null 2>&1 || true
+capture_body="$(jq -n --arg t "$thread" --arg c "$agent_msg" '{thread_id:$t, role:"agent", content:$c}')"
+if capture_status="$(curl -sS --max-time 12 -o /dev/null -w '%{http_code}' \
+    -X POST "${AMT_HOOK_BASE}/capture" \
+    -H "Authorization: HookToken ${token}" -H "Content-Type: application/json" \
+    -d "$capture_body" 2>/dev/null)"; then
+  case "$capture_status" in
+    2??) hook_log "capture:agent:ok:${capture_status}" ;;
+    *) hook_log "capture:agent:http-error:${capture_status}" ;;
+  esac
+else
+  hook_log "capture:agent:transport-error"
+fi
 
 echo '{}'

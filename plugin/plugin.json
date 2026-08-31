@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "amt-memory",
   "description": "Persistent, scoped agent memory (personal, team, org) backed by Azure Cosmos DB, delivered through the Inference Platform gateway.",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "author": {
     "name": "Aayush Kataria",
     "url": "https://github.com/aayush3011"
@@ -21,7 +21,7 @@
     "skills/use-memory/"
   ],
   "commands": "com.github.copilot/commands/",
-  "hooks": "com.github.copilot/hooks/hooks.json",
+  "hooks": "hooks/hooks.json",
   "mcpServers": "mcp.json",
   "extensions": {
     "com.github.copilot": {

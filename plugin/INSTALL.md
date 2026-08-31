@@ -35,7 +35,8 @@ testing or merge to the default branch.
    - **MCP server** (`amt-memory`, 12 tools) -> sign in with Microsoft when prompted
      (the gateway's OAuth discovery drives this).
    - **Skill** (`use-memory`) -> appears under Customize -> Skills.
-   - **Hooks** (inject / capture) -> run locally; need `jq` and `curl` on PATH.
+   - **Hooks** (user capture / recall / agent capture) -> run locally; need `jq` and `curl`
+     on PATH. Copilot discovers them from the plugin-root `hooks/hooks.json`.
    - **Canvas** (`AMT Memory`) -> appears under Customize -> Canvas; open it in a session.
 3. Verify: in a chat, "call the amt-memory whoami tool" -> expect your `user:<oid>` and
    tenant. Then open the **AMT Memory** canvas to see facts grouped by Personal / Team / Org.
@@ -50,6 +51,9 @@ testing or merge to the default branch.
   which is the registration shape used by the Copilot app's canvas loader.
 - **Hook auth**: run `/amt-login` once after the MCP server is connected. It enrolls the
   hook scripts and caches a gateway-issued access/refresh token under the Copilot home.
+- **Hook diagnostics**: after sending a test prompt, inspect `~/.copilot/amt/hook.log`.
+  A missing file means the plugin hooks did not load; otherwise each line identifies the
+  phase and whether it succeeded, lacked a hook token, or received a transport/HTTP error.
 - **Windows**: PowerShell hook entries and `.ps1` script twins are included.
 
 ## Iterating during development

@@ -7,7 +7,7 @@ promote memories.
 
 ## How it fits the plugin
 
-Registered in `plugin/plugin.json` through the native top-level `extensions` path, pointing
+Registered in `plugin/plugin.json` under the Copilot provider's `extensions` list, pointing
 at this directory. Installing the plugin surfaces the canvas in the Copilot app's
 **Customize -> Canvas** view; `/memory-show` opens it in the session's right side panel.
 

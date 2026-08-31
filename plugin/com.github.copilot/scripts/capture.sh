@@ -26,15 +26,32 @@ thread="$(printf '%s' "$payload" | jq -r '.sessionId // .session_id // "copilot-
 transcript="$(printf '%s' "$payload" | jq -r '.transcriptPath // .transcript_path // empty')"
 { [ -z "$transcript" ] || [ ! -f "$transcript" ]; } && { echo '{}'; exit 0; }
 
-# Extract the last assistant/agent message text from the transcript. Transcripts are
-# commonly JSONL (one JSON object per line); we scan for the last line whose role/type is
-# assistant/agent and pull a text field. Multiple shapes are tried defensively.
+# Extract the last assistant/agent message text from the transcript. Current Copilot event
+# logs store it as {"type":"assistant.message","data":{"content":"..."}}; older
+# transcript formats used top-level role/content fields. Support both shapes.
 agent_msg="$(jq -rs '
+  def as_text:
+    if type == "string" then .
+    elif type == "array" then
+      [ .[]
+        | if type == "string" then .
+          elif type == "object" then (.text // .content // .message // empty)
+          else empty
+          end
+        | select(type == "string" and length > 0)
+      ] | join("\n")
+    elif type == "object" then (.text // .content // .message // .response // empty) | as_text
+    else empty
+    end;
   [ .[]
-    | select((.role // .type // .sender // "") | test("assistant|agent"; "i"))
-    | (.content // .text // .message // .response
-       // (if (.content|type)=="array" then (.content|map(.text // empty)|join("\n")) else empty end))
-    | select(type=="string" and length>0)
+    | select(
+        (.type // "") == "assistant.message"
+        or ((.role // .sender // .data.role // "") | test("assistant|agent"; "i"))
+      )
+    | (.data.content // .content // .data.text // .text // .data.message // .message
+       // .data.response // .response // empty)
+    | as_text
+    | select(length > 0)
   ] | last // empty
 ' "$transcript" 2>/dev/null || true)"
 
@@ -42,7 +59,10 @@ agent_msg="$(jq -rs '
 if [ -z "$agent_msg" ]; then
   agent_msg="$(jq -r '
     (.messages // .turns // [])
-    | map(select((.role // .type // "") | test("assistant|agent"; "i")) | (.content // .text // .message // empty))
+    | map(
+        select((.role // .type // "") | test("assistant|agent"; "i"))
+        | (.data.content // .content // .text // .message // empty)
+      )
     | map(select(type=="string" and length>0)) | last // empty
   ' "$transcript" 2>/dev/null || true)"
 fi

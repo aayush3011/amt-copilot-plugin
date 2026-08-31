@@ -17,11 +17,11 @@ try {
   Get-Content -Path $transcript | ForEach-Object {
     $line = $_.Trim(); if (-not $line) { return }
     try { $o = $line | ConvertFrom-Json } catch { return }
-    $role = "$($o.role)$($o.type)$($o.sender)"
+    $role = "$($o.role)$($o.type)$($o.sender)$($o.data.role)"
     if ($role -match 'assistant|agent') {
-      $c = $o.content; if (-not $c) { $c = $o.text }; if (-not $c) { $c = $o.message }; if (-not $c) { $c = $o.response }
+      $c = $o.data.content; if (-not $c) { $c = $o.content }; if (-not $c) { $c = $o.data.text }; if (-not $c) { $c = $o.text }; if (-not $c) { $c = $o.data.message }; if (-not $c) { $c = $o.message }; if (-not $c) { $c = $o.data.response }; if (-not $c) { $c = $o.response }
       if ($c -is [string] -and $c.Length -gt 0) { $agentMsg = $c }
-      elseif ($c -is [array]) { $t = ($c | ForEach-Object { $_.text }) -join "`n"; if ($t) { $agentMsg = $t } }
+      elseif ($c -is [array]) { $t = ($c | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.text } }) -join "`n"; if ($t) { $agentMsg = $t } }
     }
   }
 } catch { }

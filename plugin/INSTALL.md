@@ -45,9 +45,9 @@ testing or merge to the default branch.
 - **Private repo access**: the app must be able to read this repo. If the app cannot fetch
   a private repo's marketplace, make a dedicated public marketplace repo (or push the
   `plugin/` there) and point the app at that.
-- **Canvas registration key**: registered under the native top-level `extensions` field in
-  `plugin.json`, alongside the top-level `hooks`, `skills`, `commands`, and `mcpServers`
-  component paths expected by Copilot.
+- **Copilot registration**: skills, hooks, commands, and the MCP server use their top-level
+  component paths. The canvas remains under `extensions.com.github.copilot.extensions`,
+  which is the registration shape used by the Copilot app's canvas loader.
 - **Hook auth**: run `/amt-login` once after the MCP server is connected. It enrolls the
   hook scripts and caches a gateway-issued access/refresh token under the Copilot home.
 - **Windows**: PowerShell hook entries and `.ps1` script twins are included.

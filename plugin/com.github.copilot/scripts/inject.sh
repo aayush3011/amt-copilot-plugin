@@ -33,11 +33,17 @@ prompt="$(printf '%s' "$payload" | jq -r '.prompt // .userPrompt // .user_prompt
 thread="$(printf '%s' "$payload" | jq -r '.sessionId // .session_id // "copilot-app"')"
 [ -z "$prompt" ] && { echo '{}'; exit 0; }
 
-# Copilot can append runtime-only notifications to the submitted prompt. They are useful to
-# the agent but are not part of the user's message and must not be persisted as a user turn.
-capture_prompt="$(printf '%s' "$prompt" | jq -Rsr '
-  gsub("(?is)<system_notification>.*?</system_notification>"; "")
+# Copilot can expand slash commands into agent-facing skill/canvas context and append runtime
+# notifications. Reduce that envelope back to the user's command before capture and recall.
+user_prompt="$(printf '%s' "$prompt" | jq -Rsr '
+  gsub("(?is)<system_notification\\b[^>]*>.*?</system_notification>"; "")
+  | gsub("(?is)<system_reminder\\b[^>]*>.*?</system_reminder>"; "")
+  | gsub("(?is)<skill-context\\b[^>]*>.*?</skill-context>"; "")
+  | gsub("(?is)<canvas-context\\b[^>]*>.*?</canvas-context>"; "")
   | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+  | if test("(?is)^The user explicitly invoked the \\\"/[^\\\"]+\\\" skill\\.") then
+      capture("(?is)^The user explicitly invoked the \\\"(?<command>/[^\\\"]+)\\\" skill\\.").command
+    else . end
 ')"
 
 token="$("$SCRIPT_DIR/amt-token.sh" 2>/dev/null || true)"
@@ -45,10 +51,10 @@ token="$("$SCRIPT_DIR/amt-token.sh" 2>/dev/null || true)"
 
 # 1) CAPTURE the user turn (fire-and-forget; never block or fail the prompt). Skip a
 # notification-only payload instead of writing an empty turn.
-if [ -n "$capture_prompt" ]; then
+if [ -n "$user_prompt" ]; then
   curl -sS --max-time 12 -X POST "${AMT_HOOK_BASE}/capture" \
     -H "Authorization: HookToken ${token}" -H "Content-Type: application/json" \
-    -d "$(jq -n --arg t "$thread" --arg c "$capture_prompt" '{thread_id:$t, role:"user", content:$c}')" \
+    -d "$(jq -n --arg t "$thread" --arg c "$user_prompt" '{thread_id:$t, role:"user", content:$c}')" \
     >/dev/null 2>&1 || true
 fi
 
@@ -57,7 +63,7 @@ echo '{"type":"progress","message":"Recalling memory...","temporary":true}'
 
 results="$(curl -sS --max-time 12 -X POST "${AMT_HOOK_BASE}/search" \
   -H "Authorization: HookToken ${token}" -H "Content-Type: application/json" \
-  -d "$(jq -n --arg q "$prompt" --argjson k "$TOP_K" '{query:$q, top_k:$k}')" 2>/dev/null || true)"
+  -d "$(jq -n --arg q "$user_prompt" --argjson k "$TOP_K" '{query:$q, top_k:$k}')" 2>/dev/null || true)"
 [ -z "$results" ] && { echo '{}'; exit 0; }
 
 lines="$(printf '%s' "$results" | jq -r '[.items[]? | {s:(.similarity_score // 0), c:(.content // .text // "")}] | sort_by(-.s) | [.[] | "- " + .c] | map(select(. != "- ")) | join("\n")' 2>/dev/null || true)"

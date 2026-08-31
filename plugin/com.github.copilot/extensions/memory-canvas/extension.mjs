@@ -354,7 +354,8 @@ function renderPanel(token) {
   .row .meta { flex:1; min-width:0; }
   .row .lbl { font-weight:600; }
   .row .sub { opacity:0.6; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .row .q { opacity:0.75; font-size:12px; margin-top:2px; }
+  .row .q { opacity:0.75; font-size:12px; margin-top:3px; display:flex; gap:6px; align-items:baseline; }
+  .row .q .who { flex:0 0 38px; font-size:10px; text-transform:uppercase; letter-spacing:0.04em; opacity:0.55; }
   .bar { display:flex; align-items:center; gap:10px; margin-top:12px; }
   .bar .sp { flex:1; }
   .msg { font-size:12px; opacity:0.85; }
@@ -455,8 +456,9 @@ function renderPanel(token) {
       '<div class="rows">'+ sessions.map(s =>
         '<label class="row"><input type="checkbox" class="s-cb" data-id="'+esc(s.session_id)+'">'+
         '<span class="meta"><div class="lbl">'+esc(s.label)+'</div>'+
-        '<div class="sub">'+esc(s.cwd||'')+' · '+s.turn_count+' turns</div>'+
-        (s.last_user_turns||[]).map(q => '<div class="q">› '+esc(q)+'</div>').join('')+
+        '<div class="sub">'+esc((s.cwd||'').split('/').filter(Boolean).pop()||'')+' · '+s.turn_count+' turns</div>'+
+        (s.last_user_turn ? '<div class="q"><span class="who">You</span>'+esc(s.last_user_turn)+'</div>' : '')+
+        (s.last_agent_turn ? '<div class="q"><span class="who">Agent</span>'+esc(s.last_agent_turn)+'</div>' : '')+
         '</span></label>').join('') +'</div>'+
       '<div class="bar"><span id="s-msg" class="msg"></span><span class="sp"></span><button class="ghost" id="s-cancel">Cancel</button><button class="primary" id="s-import">Import</button></div>';
     const cbs = Array.from(modal.querySelectorAll('.s-cb'));

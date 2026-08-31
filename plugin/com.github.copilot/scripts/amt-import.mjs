@@ -167,26 +167,47 @@ function scanSessions(root) {
   return sessions;
 }
 
+// Flatten a turn into a short, single-line preview for the picker. Strips fenced code blocks,
+// markdown emphasis/headings, and collapses whitespace, so the list stays readable instead of
+// dumping raw prompt or answer text into the UI.
+function preview(text, max = 130) {
+  const flat = String(text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/\*\*([^*]*)\*\*/g, "$1")
+    .replace(/[*_>]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
+}
+
 function deriveLabel(session, userTurns) {
   // Copilot session state carries no title, so derive a human label: the first user prompt
   // (the best "what was this about"), falling back to the working directory or the id.
-  const first = (userTurns[0] || "").replace(/\s+/g, " ").trim();
-  if (first) return first.length > 72 ? `${first.slice(0, 69)}...` : first;
+  const first = preview(userTurns[0] || "", 72);
+  if (first) return first;
   const base = session.cwd ? session.cwd.split("/").filter(Boolean).pop() : "";
   return base || session.session_id;
 }
 
-/** List local sessions with a derived label and the last two user turns (for the picker). */
+/**
+ * List local sessions for the picker: a derived label plus the LAST user turn and the LAST
+ * agent answer only. Tool calls, reasoning, and system/transformed prompts are already excluded
+ * by the parser, and previews are flattened so the list stays scannable.
+ */
 export function listSessions(root = DEFAULT_SESSION_ROOT) {
   return scanSessions(root).map((session) => {
     const userTurns = session.turns.map((turn) => turn.question.content);
+    const lastTurn = session.turns[session.turns.length - 1];
     return {
       session_id: session.session_id,
       label: deriveLabel(session, userTurns),
       cwd: session.cwd,
       start_time: session.start_time,
       turn_count: session.turns.length,
-      last_user_turns: userTurns.slice(-2).map((t) => t.replace(/\s+/g, " ").trim()),
+      last_user_turn: preview(lastTurn ? lastTurn.question.content : ""),
+      last_agent_turn: preview(lastTurn ? lastTurn.response.content : ""),
     };
   });
 }
@@ -418,9 +439,8 @@ async function runCli(argv) {
     }
     for (const session of sessions) {
       console.log(`- ${session.session_id}  (${session.turn_count} turns)  ${session.label}`);
-      for (const turn of session.last_user_turns) {
-        console.log(`    > ${turn.length > 100 ? `${turn.slice(0, 97)}...` : turn}`);
-      }
+      if (session.last_user_turn) console.log(`    you:   ${session.last_user_turn}`);
+      if (session.last_agent_turn) console.log(`    agent: ${session.last_agent_turn}`);
     }
     return 0;
   }

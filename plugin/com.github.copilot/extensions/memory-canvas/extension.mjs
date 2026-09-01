@@ -77,38 +77,47 @@ async function amt(path, { method = "GET", body } = {}) {
   return text ? JSON.parse(text) : {};
 }
 
-function tierOf(scopeKey = "") {
+// Classify a record's scope into one of the three rendered tiers.
+//
+// Topology promotion writes shared copies under ``scope:<node>``. The panel cannot tell a
+// team node from an org node by prefix alone, so it treats the scopes matching the caller's
+// own group names as their teams and any other topology scope as broader/org-level. The
+// legacy ``team:``/``org:`` prefixes are still honored.
+function tierOf(scopeKey = "", teamScopes = []) {
   if (scopeKey.startsWith("user:")) return "personal";
+  if (teamScopes.includes(scopeKey)) return "team";
+  if (scopeKey.startsWith("scope:")) return "org";
   if (scopeKey.startsWith("team:")) return "team";
   if (scopeKey.startsWith("org:")) return "org";
   return "other";
 }
 
-// Build the three-tier view the panel renders. Personal comes from the recent-memories
-// list; team/org come from scoped searches (the only shared-read surface today).
+// Build the three-tier view the panel renders. Both calls deliberately omit an explicit
+// scope list: passing one overrides the session's read set, which is what resolves the
+// caller's topology memberships and therefore what makes promoted memories visible at all.
 async function loadMemory() {
   const who = await amt("/whoami").catch(() => null);
-  const orgScope = who && who.tenant_id ? `org:${who.tenant_id}` : null;
-  const teamScopes = ((who && who.groups) || []).map((g) => (g.startsWith("team:") ? g : `team:${g}`));
-  const sharedScopes = [...teamScopes, ...(orgScope ? [orgScope] : [])];
+  const groups = (who && who.groups) || [];
+  const teamScopes = groups.flatMap((g) => {
+    const bare = g.replace(/^(team|scope):/, "");
+    return [`scope:${bare}`, `team:${bare}`];
+  });
 
-  const personal = await amt("/memories?recent_k=30").catch(() => ({ items: [] }));
-  const shared = sharedScopes.length
-    ? await amt("/search", {
-        method: "POST",
-        body: { query: "team and organization knowledge, standards, and decisions", top_k: 25, scopes: sharedScopes },
-      }).catch(() => ({ items: [] }))
-    : { items: [] };
+  const personal = await amt("/memories?recent_k=50").catch(() => ({ items: [] }));
+  const shared = await amt("/search", {
+    method: "POST",
+    body: { query: "team and organization knowledge, standards, and decisions", top_k: 25 },
+  }).catch(() => ({ items: [] }));
 
-  const groups = { personal: [], team: [], org: [] };
-  for (const it of personal.items || []) {
-    if (tierOf(it.scope_key) === "personal") groups.personal.push(shape(it));
+  const groupsOut = { personal: [], team: [], org: [] };
+  const seen = new Set();
+  for (const it of [...(personal.items || []), ...(shared.items || [])]) {
+    if (seen.has(it.id)) continue;
+    seen.add(it.id);
+    const t = tierOf(it.scope_key, teamScopes);
+    if (t !== "other") groupsOut[t].push(shape(it));
   }
-  for (const it of shared.items || []) {
-    const t = tierOf(it.scope_key);
-    if (t === "team" || t === "org") groups[t].push(shape(it));
-  }
-  return { who: who.principal, tenant: who.tenant_id, groups };
+  return { who: who.principal, tenant: who.tenant_id, groups: groupsOut };
 }
 
 function shape(it) {
@@ -264,28 +273,6 @@ const session = await joinSession({
             if (!c) return { error: "content required" };
             await session.send(
               `Using the amt-memory tools, find the memory that matches: "${c}". Show it to me and, once I confirm, forget it. Do not delete anything without confirmation.`,
-            );
-            return { ok: true, delegated: true };
-          },
-        },
-        {
-          name: "promote_memory",
-          description:
-            "Promote a personal memory to a shared team or org scope. Delegates to the host agent to run the promotion via the amt-memory tools.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              content: { type: "string", description: "The personal memory text to promote." },
-              to_scope: { type: "string", description: "Target scope, e.g. team:inference-memory or org:<tenant>." },
-            },
-            required: ["content", "to_scope"],
-          },
-          handler: async (ctx) => {
-            const c = String(ctx.input?.content || "").slice(0, 500);
-            const to = String(ctx.input?.to_scope || "").slice(0, 200);
-            if (!c || !to) return { error: "content and to_scope required" };
-            await session.send(
-              `Using the amt-memory tools, promote this personal memory to ${to}: "${c}". Confirm the target scope with me first if it is not one I belong to.`,
             );
             return { ok: true, delegated: true };
           },

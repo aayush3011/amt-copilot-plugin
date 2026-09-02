@@ -34,7 +34,7 @@ testing or merge to the default branch.
 2. The app loads its pieces:
    - **MCP server** (`amt-memory`, 12 tools) -> sign in with Microsoft when prompted
      (the gateway's OAuth discovery drives this).
-   - **Skill** (`use-memory`) -> appears under Customize -> Skills.
+   - **Skills** (`use-memory`, `amt-login`) -> appear under Customize -> Skills.
    - **Hooks** (user capture / recall / agent capture) -> run locally; need `jq` and `curl`
      on PATH. Copilot discovers them from the plugin-root `hooks/hooks.json`.
    - **Canvas** (`AMT Memory`) -> appears under Customize -> Canvas; open it in a session.
@@ -49,8 +49,9 @@ testing or merge to the default branch.
 - **Copilot registration**: skills, hooks, commands, and the MCP server use their top-level
   component paths. The canvas remains under `extensions.com.github.copilot.extensions`,
   which is the registration shape used by the Copilot app's canvas loader.
-- **Hook auth**: run `/amt-login` once after the MCP server is connected. It enrolls the
-  hook scripts and caches a gateway-issued access/refresh token under the Copilot home.
+- **Hook auth**: run `/amt-login` once after the MCP server is connected. A `postToolUse`
+  hook automatically redeems the MCP enrollment credential and caches the gateway-issued
+  access/refresh token; the agent never needs to print the credential or perform step 2.
 - **Hook diagnostics**: after sending a test prompt, inspect `~/.copilot/amt/hook.log`.
   A missing file means the plugin hooks did not load; otherwise each line identifies the
   phase and whether it succeeded, lacked a hook token, or received a transport/HTTP error.

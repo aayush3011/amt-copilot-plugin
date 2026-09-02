@@ -5,13 +5,15 @@ Packages the deployed AMT memory service as an Agent Plugin 1.0 for the GitHub C
 
 - **MCP server** (`mcp.json`) - the `amt-memory` server with its 12 tools, via the IP
   gateway (OAuth sign-in handled by the client, no token in the file).
-- **Skill** (`skills/use-memory/`) - teaches the agent to consult and update memory during
-  real work.
+- **Skills** (`skills/use-memory/`, `skills/amt-login/`) - teach the agent to use memory and
+  provide the `/amt-login` workflow.
 - **Hooks** (`hooks/hooks.json`) - deterministic recall and capture that MCP alone
   cannot do:
   - `userPromptSubmitted` -> `inject.sh` captures the sanitized user turn.
   - `userPromptTransformed` -> `inject.sh` retrieves memories and adds them to the
     model-facing prompt.
+  - `postToolUse` on `enroll_hook_capture` -> redeems the credential locally and replaces
+    the tool result so the credential cannot appear in the agent response.
   - `agentStop` -> `capture.sh` appends the turn to AMT.
 - **Commands** (`com.github.copilot/commands/`) - `/memory-show`, `/forget`.
 - **Canvas** (`com.github.copilot/extensions/memory-canvas/`) - a "Memory" panel that
@@ -28,9 +30,9 @@ plugin/
 ├── plugin.json
 ├── mcp.json
 ├── hooks/hooks.json
-├── skills/use-memory/SKILL.md
+├── skills/{use-memory,amt-login}/SKILL.md
 └── com.github.copilot/
-    ├── scripts/{inject,capture,amt-token}.sh
+    ├── scripts/{inject,capture,complete-login,amt-token}.sh
     ├── commands/{memory-show,forget}.md
     └── extensions/memory-canvas/{package.json,extension.mjs,README.md}
 ```
@@ -46,6 +48,9 @@ plugin/
 
 - **Auth (`amt-token.sh`)**: reads and silently refreshes the hook token enrolled by
   `/amt-login`; it does not depend on an interactive Azure CLI session.
+- **Login completion**: `/amt-login` only calls `enroll_hook_capture`; `complete-login.sh`
+  performs redemption deterministically in `postToolUse`. It does not depend on the model
+  remembering a second step or on opening the canvas first.
 - **Hook lifecycle**: `userPromptSubmitted` performs capture as a side effect and returns `{}`;
   current config-file hooks discard its output. Recall runs in `userPromptTransformed` and
   returns `modifiedTransformedPrompt`, as defined by the
@@ -81,7 +86,7 @@ rm /tmp/amt-plugin-smoke.jsonl
 MCP-only path works today with just `mcp.json` (add the server URL in the app's Customize
 tab; sign in when prompted). Full plugin install (with hooks + commands) follows the Agent
 Plugins install flow for your client; point it at this `plugin/` directory. Hooks run
-locally, so `az`, `jq`, and `curl` must be available in the shell the client uses.
+locally, so `jq` and `curl` must be available in the shell the client uses.
 
 See `Docs/amt-plugin-design-sketch.md` for the full design, the canvas ("see my memories")
 surface, and the effort breakdown.

@@ -21,6 +21,8 @@
 import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { mkdir, writeFile, rename } from "node:fs/promises";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
@@ -60,6 +62,37 @@ function getToken() {
       t ? resolve(t) : reject(new Error("not signed in to AMT; run /amt-login"));
     });
   });
+}
+
+// Redeem an enrollment code for a hook token and cache it, entirely in-process.
+//
+// This exists because the Copilot app's agent has no shell tool: it can call MCP tools and
+// canvas actions, but it cannot run amt-login.sh. Without a local execution path the agent
+// can reach, sign-in silently never completes and every hook logs `skipped:no-hook-token`.
+// The CLI keeps using amt-login.sh; both write the identical cache.
+async function redeemEnrollmentCode(code) {
+  const res = await fetch(`${gatewayBase()}/hook/redeem`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enrollment_code: code }),
+  });
+  if (!res.ok) throw new Error(`enrollment failed (HTTP ${res.status}); the code may be expired or already used`);
+  const data = await res.json();
+  if (!data.access_token || !data.refresh_token) throw new Error("enrollment failed (invalid or expired code)");
+
+  const home = process.env.COPILOT_HOME || join(homedir(), ".copilot");
+  const dir = join(home, "amt");
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const payload = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_at: Math.floor(Date.now() / 1000) + Number(data.expires_in || 1800),
+    token_type: "HookToken",
+  };
+  const target = join(dir, "token.json");
+  const tmp = `${target}.${randomBytes(6).toString("hex")}`;
+  await writeFile(tmp, JSON.stringify(payload), { mode: 0o600 });
+  await rename(tmp, target);
 }
 
 async function amt(path, { method = "GET", body } = {}) {
@@ -250,6 +283,31 @@ const session = await joinSession({
       // Actions are agent-callable. Reads run through the panel's own server; writes are
       // delegated to the host agent so they go through the amt-memory MCP tools + authz.
       actions: [
+        {
+          name: "complete_signin",
+          description:
+            "Finish AMT sign-in by redeeming an enrollment code from the enroll_hook_capture tool. Call this immediately after enroll_hook_capture; it caches the hook token locally so recall and capture start working. Never show the code to the user.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              enrollment_code: {
+                type: "string",
+                description: "The enrollment_code returned by the amt-memory enroll_hook_capture tool.",
+              },
+            },
+            required: ["enrollment_code"],
+          },
+          handler: async (ctx) => {
+            const code = String(ctx.input?.enrollment_code || "").trim();
+            if (!code) return { ok: false, error: "enrollment_code required" };
+            try {
+              await redeemEnrollmentCode(code);
+              return { ok: true, message: "Signed in to AMT memory. Capture and recall are now active on this device." };
+            } catch (e) {
+              return { ok: false, error: e.message };
+            }
+          },
+        },
         {
           name: "refresh",
           description: "Reload the memory panel and return the current facts grouped by scope as JSON.",

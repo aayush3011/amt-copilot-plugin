@@ -19,8 +19,8 @@ at this directory. Installing the plugin surfaces the canvas in the Copilot app'
 - On open, it starts a local `node:http` server that serves the panel HTML and one
   read-only JSON endpoint (`/api/memory`). Every request is guarded by a per-server
   capability token plus a cross-site check.
-- **Reads** come straight from the AMT REST API over the IP gateway, using a delegated
-  `az` token (same identity path as the plugin hooks, `amt-token.sh`). `whoami` resolves
+- **Reads** come straight from the AMT REST API over the IP gateway, using the gateway-issued
+  hook token from `amt-token.sh`. `whoami` resolves
   the caller; personal memories come from `GET /memories`, and team/org from scoped
   `POST /search`.
 - **Writes** (`forget_memory`, `promote_memory`) do not touch AMT directly. They call
@@ -31,20 +31,20 @@ at this directory. Installing the plugin surfaces the canvas in the Copilot app'
 
 | Action | What it does |
 | --- | --- |
+| `complete_signin` | Fallback redemption action for clients where the automatic login hook is unavailable. |
 | `refresh` | Reload and return the three-tier memory view as JSON. |
 | `forget_memory` | Delegate to the host agent to find and (on confirmation) forget a memory. |
-| `promote_memory` | Delegate to the host agent to promote a personal memory to a team/org scope. |
 
 ## Prerequisites
 
 - Node.js (the app runs `extension.mjs`).
-- Azure CLI signed in (`az login`) - used for the delegated read token.
+- `/amt-login` completed once so the canvas can reuse the plugin's hook token.
 - The plugin installed so the app discovers the canvas.
 
 ## Demo-grade vs. real (known gaps)
 
-- **Auth**: `az account get-access-token` for reads (expires ~1h). Productizing shares the
-  same token path as `amt-token.sh`.
+- **Auth**: the canvas, automatic hooks, and import workflow share the same locally cached
+  gateway hook token. `/amt-login` creates it and `amt-token.sh` refreshes it silently.
 - **SDK version**: `package.json` pins `@github/copilot-sdk` at a placeholder range;
   set the version your app ships. The import path `@github/copilot-sdk/extension` matches
   the public canvas examples - confirm against your installed SDK.

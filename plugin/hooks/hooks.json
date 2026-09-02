@@ -23,6 +23,15 @@
         "timeoutSec": 30
       }
     ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "matcher": ".*enroll_hook_capture",
+        "bash": "\"${PLUGIN_ROOT}/com.github.copilot/scripts/complete-login.sh\"",
+        "powershell": "& \"${PLUGIN_ROOT}/com.github.copilot/scripts/complete-login.ps1\"",
+        "timeoutSec": 30
+      }
+    ],
     "agentStop": [
       {
         "type": "command",

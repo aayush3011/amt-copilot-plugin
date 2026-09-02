@@ -129,8 +129,8 @@ function tierOf(scopeKey = "", teamScopes = []) {
 // scope list: passing one overrides the session's read set, which is what resolves the
 // caller's topology memberships and therefore what makes promoted memories visible at all.
 async function loadMemory() {
-  const who = await amt("/whoami").catch(() => null);
-  const groups = (who && who.groups) || [];
+  const who = await amt("/whoami");
+  const groups = who.groups || [];
   const teamScopes = groups.flatMap((g) => {
     const bare = g.replace(/^(team|scope):/, "");
     return [`scope:${bare}`, `team:${bare}`];
@@ -217,9 +217,17 @@ async function startServer(instanceId) {
           res.writeHead(403, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: "forbidden" }));
         }
-        const data = await loadMemory();
-        res.writeHead(200, { "Content-Type": "application/json" });
-        return res.end(JSON.stringify(data));
+        try {
+          const data = await loadMemory();
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify(data));
+        } catch (e) {
+          if (String(e?.message || e).includes("not signed in to AMT")) {
+            res.writeHead(401, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: "not_signed_in" }));
+          }
+          throw e;
+        }
       }
 
       // Import: list local Copilot sessions (label + last two user turns). Local files only,
@@ -302,7 +310,12 @@ const session = await joinSession({
             if (!code) return { ok: false, error: "enrollment_code required" };
             try {
               await redeemEnrollmentCode(code);
-              return { ok: true, message: "Signed in to AMT memory. Capture and recall are now active on this device." };
+              const data = await loadMemory();
+              return {
+                ok: true,
+                principal: data.who,
+                message: "Signed in to AMT memory. Capture and recall are now active on this device.",
+              };
             } catch (e) {
               return { ok: false, error: e.message };
             }
@@ -436,14 +449,21 @@ function renderPanel(token) {
   async function load(){
     try {
       const r = await fetch('/api/memory', { headers: { 'x-amt-canvas-token': TOKEN } });
-      if (!r.ok) throw new Error('HTTP '+r.status);
       const d = await r.json();
+      if (r.status === 401 && d.error === 'not_signed_in') {
+        document.getElementById('who').innerHTML = '<span class="empty">Sign in required — run /amt-login</span>';
+        document.getElementById('import').disabled = true;
+        fill('personal', []); fill('team', []); fill('org', []);
+        return;
+      }
+      if (!r.ok) throw new Error('HTTP '+r.status);
       document.getElementById('who').textContent = d.who + ' · ' + d.tenant;
+      document.getElementById('import').disabled = false;
       fill('personal', d.groups.personal || []);
       fill('team', d.groups.team || []);
       fill('org', d.groups.org || []);
     } catch (e) {
-      document.getElementById('who').innerHTML = '<span class="err">could not load ('+esc(e.message)+') - run /amt-login?</span>';
+      document.getElementById('who').innerHTML = '<span class="err">Could not load AMT memory ('+esc(e.message)+')</span>';
     }
   }
   // --- Import memory flow ---------------------------------------------------------------

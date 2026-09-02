@@ -8,8 +8,8 @@ marketplace ->** `aayush3011/amt-copilot-plugin`, then install **amt-memory**.
 ## What the plugin gives you
 
 - **MCP server** (`amt-memory`, 12 tools) - persistent, scoped memory over the AMT gateway.
-- **Skill** - teaches the agent to consult and update memory during real work.
-- **Hooks** - deterministic recall (before each prompt) and capture (on turn end).
+- **Skills** - teach the agent to use memory and provide `/amt-login`.
+- **Hooks** - deterministic recall/capture plus automatic, redacted login completion.
 - **Canvas** - a "AMT Memory" panel showing your facts grouped Personal / Team / Org.
 
 ## How it talks to AMT

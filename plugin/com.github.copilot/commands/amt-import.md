@@ -15,16 +15,20 @@ Everything is read-only against `~/.copilot/session-state` (nothing there is mod
 each item keeps its original timestamp. Auth uses the plugin's hook token; if any step
 reports "not signed in", run `/amt-login` first, then retry.
 
-First locate the plugin's scripts dir:
+Run these commands yourself in this turn. Never print a command for the user to run. In the
+commands below, `$SCRIPTS` is the plugin's scripts directory:
 
-- macOS / Linux:
-  ```
-  SCRIPTS="$(find "${COPILOT_HOME:-$HOME/.copilot}/installed-plugins" -type d -path '*amt-memory/com.github.copilot/scripts' 2>/dev/null | head -1)"
-  ```
-- Windows (PowerShell):
-  ```
-  $Scripts = (Get-ChildItem -Recurse -Directory "$env:COPILOT_HOME","$HOME/.copilot" -Filter scripts -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'amt-memory' } | Select-Object -First 1).FullName
-  ```
+macOS and Linux:
+
+```bash
+SCRIPTS="$(ls -d "${COPILOT_HOME:-$HOME/.copilot}"/installed-plugins/*/amt-memory/com.github.copilot/scripts | head -1)"
+```
+
+Windows (PowerShell):
+
+```powershell
+$SCRIPTS = (Get-ChildItem -Path (Join-Path $HOME '.copilot/installed-plugins') -Recurse -Directory -Filter scripts | Where-Object { $_.FullName -match 'amt-memory' } | Select-Object -First 1).FullName
+```
 
 ### Copilot memory
 Run the engine and report how many memories were imported:
@@ -33,8 +37,8 @@ node "$SCRIPTS/amt-import.mjs" import-memories
 ```
 
 ### Local sessions
-1. List the available sessions (each line shows an id, a derived label, and the last two
-   user turns):
+1. List the available sessions. Each entry shows an id, a turn count, a derived label, and a
+   short preview of the last exchange (`you:` and `agent:`):
    ```
    node "$SCRIPTS/amt-import.mjs" list-sessions
    ```

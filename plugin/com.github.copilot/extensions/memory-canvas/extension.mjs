@@ -125,10 +125,12 @@ function tierOf(scopeKey = "", teamScopes = []) {
   return "other";
 }
 
-// Build the three-tier view the panel renders. Both calls deliberately omit an explicit
+// Build the scope-grouped view the panel renders. Both calls deliberately omit an explicit
 // scope list: passing one overrides the session's read set, which is what resolves the
 // caller's topology memberships and therefore what makes promoted memories visible at all.
-async function loadMemory() {
+// The gateway exposes no topology endpoint, so the scope tree is derived from the scopes
+// actually present on the records the caller can read.
+async function loadMemory(filters = {}) {
   const who = await amt("/whoami");
   const groups = who.groups || [];
   const teamScopes = groups.flatMap((g) => {
@@ -136,29 +138,84 @@ async function loadMemory() {
     return [`scope:${bare}`, `team:${bare}`];
   });
 
-  const personal = await amt("/memories?recent_k=50").catch(() => ({ items: [] }));
+  const limit = Math.min(Math.max(Number(filters.limit) || 50, 1), 200);
+  const types = (filters.memoryTypes || []).filter((t) => MEMORY_TYPES.includes(t));
+  const query = new URLSearchParams();
+  query.set("recent_k", String(limit));
+  for (const t of types) query.append("memory_types", t);
+  if (filters.includeSuperseded) query.set("include_superseded", "true");
+
+  const personal = await amt(`/memories?${query}`).catch(() => ({ items: [] }));
   const shared = await amt("/search", {
     method: "POST",
-    body: { query: "team and organization knowledge, standards, and decisions", top_k: 25 },
+    body: {
+      query: filters.search || "team and organization knowledge, standards, and decisions",
+      top_k: limit,
+      ...(types.length ? { memory_types: types } : {}),
+    },
   }).catch(() => ({ items: [] }));
 
-  const groupsOut = { personal: [], team: [], org: [] };
+  const needle = String(filters.search || "").trim().toLowerCase();
+  const byScope = {};
   const seen = new Set();
+  let total = 0;
   for (const it of [...(personal.items || []), ...(shared.items || [])]) {
-    if (seen.has(it.id)) continue;
+    if (!it || seen.has(it.id)) continue;
     seen.add(it.id);
-    const t = tierOf(it.scope_key, teamScopes);
-    if (t !== "other") groupsOut[t].push(shape(it));
+    const record = shape(it, teamScopes);
+    if (record.tier === "other") continue;
+    if (needle && !matchesSearch(record, needle)) continue;
+    (byScope[record.scope_key] ||= []).push(record);
+    total += 1;
   }
-  return { who: who.principal, tenant: who.tenant_id, groups: groupsOut };
+  for (const list of Object.values(byScope)) {
+    list.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  }
+  return {
+    who: who.principal,
+    tenant: who.tenant_id,
+    teamScopes,
+    scopes: Object.keys(byScope).sort(scopeOrder(teamScopes)),
+    groupsByScope: byScope,
+    total,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
-function shape(it) {
+const MEMORY_TYPES = ["fact", "episodic", "procedural"];
+
+// Personal first, then the caller's own teams, then broader scopes: the tree reads from
+// "mine" outwards, which is the order the scopes were earned in.
+function scopeOrder(teamScopes) {
+  const rank = (s) => {
+    const tier = tierOf(s, teamScopes);
+    return tier === "personal" ? 0 : tier === "team" ? 1 : 2;
+  };
+  return (a, b) => rank(a) - rank(b) || a.localeCompare(b);
+}
+
+function matchesSearch(record, needle) {
+  return (
+    String(record.content || "").toLowerCase().includes(needle) ||
+    String(record.id || "").toLowerCase().includes(needle) ||
+    (record.tags || []).some((t) => String(t).toLowerCase().includes(needle))
+  );
+}
+
+function shape(it, teamScopes = []) {
+  const provenance = it.provenance || {};
   return {
     id: it.id,
     scope_key: it.scope_key,
+    tier: tierOf(it.scope_key, teamScopes),
     type: it.memory_type || it.type,
     content: it.content || it.text || "",
+    tags: it.tags || [],
+    created_at: it.created_at,
+    salience: it.salience,
+    confidence: it.confidence,
+    source: provenance.source,
+    superseded: Boolean(it.superseded_by),
   };
 }
 
@@ -218,7 +275,12 @@ async function startServer(instanceId) {
           return res.end(JSON.stringify({ error: "forbidden" }));
         }
         try {
-          const data = await loadMemory();
+          const data = await loadMemory({
+            search: url.searchParams.get("search") || "",
+            memoryTypes: url.searchParams.getAll("memory_types"),
+            includeSuperseded: url.searchParams.get("include_superseded") === "true",
+            limit: url.searchParams.get("limit"),
+          });
           res.writeHead(200, { "Content-Type": "application/json" });
           return res.end(JSON.stringify(data));
         } catch (e) {
@@ -371,102 +433,262 @@ const session = await joinSession({
 // --- Panel UI (served by the local server) --------------------------------------------
 
 function renderPanel(token) {
-  // The page fetches /api/memory with the capability token and renders three columns.
-  // Kept dependency-free: one file, inline styles and script.
   return `<!doctype html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>AMT Memory</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 13px/1.45 -apple-system, Segoe UI, sans-serif; margin: 0; padding: 12px; }
-  header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-  h1 { font-size: 15px; margin: 0; }
-  .who { opacity: 0.6; font-size: 12px; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-  .col { border: 1px solid rgba(128,128,128,0.25); border-radius: 8px; padding: 8px; min-height: 80px; }
-  .col h2 { font-size: 12px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
-  .count { opacity: 0.5; font-weight: normal; }
-  ul { list-style: none; margin: 0; padding: 0; }
-  li { padding: 6px 8px; border-radius: 6px; margin-bottom: 5px; background: rgba(128,128,128,0.08); }
-  .tag { font-size: 10px; opacity: 0.55; }
-  .empty { opacity: 0.5; font-style: italic; }
-  .err { color: #c00; }
-  button { font: inherit; cursor: pointer; }
-  button.primary { background:#0969da; color:#fff; border:1px solid #0969da; border-radius:6px; padding:5px 12px; }
-  button.ghost { background:transparent; border:1px solid rgba(128,128,128,0.4); border-radius:6px; padding:5px 12px; }
-  .overlay { position:fixed; inset:0; background:rgba(0,0,0,0.45); display:none; align-items:center; justify-content:center; z-index:10; }
-  .overlay.show { display:flex; }
-  .modal { background:Canvas; color:CanvasText; border:1px solid rgba(128,128,128,0.35); border-radius:10px; padding:16px; width:min(680px,92vw); max-height:82vh; overflow:auto; box-shadow:0 12px 40px rgba(0,0,0,0.45); }
-  .modal h2 { font-size:14px; margin:0 0 12px; }
-  .choice { display:flex; gap:10px; }
-  .choice button { flex:1; text-align:left; padding:14px; border-radius:8px; border:1px solid rgba(128,128,128,0.35); background:rgba(128,128,128,0.06); }
-  .choice .t { font-weight:600; display:block; margin-bottom:4px; }
-  .choice .d { opacity:0.65; font-size:12px; }
-  .selall { display:flex; gap:8px; align-items:center; padding:6px 8px; border-bottom:1px solid rgba(128,128,128,0.2); margin-bottom:6px; }
-  .rows { margin:6px 0; }
-  .row { display:flex; gap:8px; padding:8px; border-radius:6px; align-items:flex-start; cursor:pointer; }
-  .row:hover { background:rgba(128,128,128,0.08); }
-  .row .meta { flex:1; min-width:0; }
-  .row .lbl { font-weight:600; }
-  .row .sub { opacity:0.6; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .row .q { opacity:0.75; font-size:12px; margin-top:3px; display:flex; gap:6px; align-items:baseline; }
-  .row .q .who { flex:0 0 38px; font-size:10px; text-transform:uppercase; letter-spacing:0.04em; opacity:0.55; }
-  .bar { display:flex; align-items:center; gap:10px; margin-top:12px; }
-  .bar .sp { flex:1; }
-  .msg { font-size:12px; opacity:0.85; }
+  :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  body { margin: 0; background: Canvas; color: CanvasText; }
+  header { padding: 14px 18px; border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent); display: flex; gap: 14px; align-items: center; }
+  header h1 { font-size: 16px; margin: 0; }
+  .who { font-size: 12px; opacity: .72; overflow-wrap: anywhere; }
+  main { display: grid; grid-template-columns: minmax(300px, 34%) 1fr; min-height: calc(100vh - 64px); }
+  aside { border-right: 1px solid color-mix(in srgb, CanvasText 16%, transparent); padding: 14px; overflow: auto; }
+  section { padding: 14px 18px; overflow: auto; }
+  label { display: block; font-size: 12px; opacity: .75; margin: 12px 0 4px; }
+  input, select, button { box-sizing: border-box; width: 100%; padding: 8px; border-radius: 8px; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); background: Canvas; color: CanvasText; }
+  button { cursor: pointer; font-weight: 600; background: color-mix(in srgb, Highlight 16%, Canvas); transition: transform 80ms ease, background-color 120ms ease, border-color 120ms ease; }
+  button:hover { border-color: color-mix(in srgb, Highlight 70%, CanvasText); background: color-mix(in srgb, Highlight 24%, Canvas); }
+  button:active { transform: translateY(1px); }
+  button:disabled { cursor: wait; opacity: .7; }
+  header button { width: auto; min-width: 96px; }
+  header .primary { background: color-mix(in srgb, Highlight 34%, Canvas); }
+  .identity-value { box-sizing: border-box; width: 100%; padding: 8px; border-radius: 8px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); background: color-mix(in srgb, CanvasText 4%, Canvas); overflow-wrap: anywhere; font-size: 12px; }
+  .filter-toolbar { display: flex; justify-content: flex-end; margin-top: 10px; }
+  .filter-toggle { width: auto; min-width: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin: 0; padding: 7px 10px; }
+  .filter-toggle svg { width: 16px; height: 16px; fill: currentColor; }
+  .filter-panel { margin-top: 8px; padding: 4px 10px 12px; border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 10px; background: color-mix(in srgb, CanvasText 3%, Canvas); }
+  .filter-panel[hidden] { display: none; }
+  .filter-count { min-width: 18px; padding: 1px 5px; border-radius: 999px; background: Highlight; color: HighlightText; font-size: 10px; text-align: center; }
+  .filter-panel button { margin-top: 12px; }
+  .checkline { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; }
+  .checkline input { width: auto; }
+  .hierarchy { margin-top: 8px; padding: 6px 0 16px; }
+  .tree-node { --indent: 0px; --line: 0px; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 7px; align-items: center; text-align: left; padding: 8px 8px 8px calc(8px + var(--indent)); border-radius: 8px; margin: 2px 0; border: 1px solid transparent; background: transparent; font-weight: 400; }
+  .tree-node[data-depth]:not([data-depth="0"]) { background-image: linear-gradient(90deg, transparent var(--line), color-mix(in srgb, CanvasText 20%, transparent) var(--line), color-mix(in srgb, CanvasText 20%, transparent) calc(var(--line) + 1px), transparent calc(var(--line) + 1px)); }
+  .tree-node.active { border-color: Highlight; background-color: color-mix(in srgb, Highlight 22%, Canvas); font-weight: 700; }
+  .tree-icon { opacity: .72; text-align: center; }
+  .tree-label { min-width: 0; }
+  .tree-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-id { display: block; margin-top: 2px; font-size: 10px; opacity: .62; overflow-wrap: anywhere; font-weight: 400; }
+  .tree-section { margin: 12px 8px 4px; font-size: 11px; font-weight: 700; opacity: .62; text-transform: uppercase; letter-spacing: .05em; }
+  .card { border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 12px; padding: 13px; margin-bottom: 11px; }
+  .card p { margin: 6px 0 0; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 7px 0 0; }
+  .pill { font-size: 11px; border-radius: 999px; padding: 3px 8px; background: color-mix(in srgb, CanvasText 10%, transparent); }
+  .pill.tier-personal { background: color-mix(in srgb, Highlight 16%, transparent); }
+  .pill.tier-team { background: color-mix(in srgb, green 20%, transparent); }
+  .pill.tier-org { background: color-mix(in srgb, orange 22%, transparent); }
+  details { margin-top: 9px; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); padding-top: 7px; }
+  summary { cursor: pointer; width: fit-content; font-size: 12px; font-weight: 700; color: LinkText; user-select: none; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; opacity: .82; }
+  .err { color: #d1242f; white-space: pre-wrap; }
+  .empty { opacity: .7; padding: 22px; text-align: center; }
+  .overlay { position: fixed; inset: 0; background: color-mix(in srgb, CanvasText 45%, transparent); display: none; align-items: center; justify-content: center; z-index: 900; }
+  .overlay.show { display: flex; }
+  .modal { background: Canvas; color: CanvasText; border-radius: 12px; padding: 18px; max-width: 640px; width: 90%; max-height: 80vh; overflow: auto; box-shadow: 0 10px 40px color-mix(in srgb, CanvasText 30%, transparent); }
+  .modal h3 { margin-top: 0; }
+  .modal button { width: auto; min-width: 110px; margin-right: 8px; margin-top: 12px; }
+  .row { border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 8px; padding: 9px; margin-bottom: 8px; font-size: 12px; }
+  .row .q { margin-top: 5px; opacity: .8; }
+  .row .q .who { font-weight: 700; opacity: .9; }
 </style>
 </head>
 <body>
-  <header>
-    <h1>AMT Memory</h1>
-    <span id="who" class="who">loading...</span>
-    <span style="flex:1"></span>
-    <button id="import" class="primary">Import memory</button>
-    <button id="refresh">Refresh</button>
-  </header>
-  <div class="cols">
-    <div class="col"><h2>Personal <span id="c-personal" class="count"></span></h2><ul id="personal"></ul></div>
-    <div class="col"><h2>Team <span id="c-team" class="count"></span></h2><ul id="team"></ul></div>
-    <div class="col"><h2>Org <span id="c-org" class="count"></span></h2><ul id="org"></ul></div>
-  </div>
+<header>
+  <h1>AMT Memory</h1>
+  <span id="who" class="who">loading...</span>
+  <span style="flex:1"></span>
+  <button id="import" class="primary">Import memory</button>
+  <button id="refresh">Refresh</button>
+</header>
+<main>
+  <aside>
+    <label>Signed-in principal</label><div id="principal" class="identity-value">Loading...</div>
+    <label>Tenant</label><div id="tenantId" class="identity-value">Loading...</div>
 
-  <div id="overlay" class="overlay" role="dialog" aria-modal="true">
-    <div class="modal" id="modal"></div>
-  </div>
+    <div class="filter-toolbar">
+      <button id="filterToggle" class="filter-toggle" type="button" aria-expanded="false" aria-controls="filterPanel" title="Show filters">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 2.25A.75.75 0 0 1 2.25 1.5h11.5a.75.75 0 0 1 .58 1.225L9.5 8.628v4.122a.75.75 0 0 1-.416.671l-2 1A.75.75 0 0 1 6 13.75V8.628L1.67 2.725a.75.75 0 0 1-.17-.475Z"/></svg>
+        <span id="filterCount" class="filter-count" hidden>0</span>
+      </button>
+    </div>
+    <div id="filterPanel" class="filter-panel" hidden>
+      <label>Search</label><input id="search" placeholder="content, id, or tag" />
+      <label>Memory type</label>
+      <select id="memoryType">
+        <option value="">All</option><option>fact</option><option>episodic</option><option>procedural</option>
+      </select>
+      <label>Limit</label><input id="limit" type="number" min="1" max="200" value="50" />
+      <div class="checkline"><input id="includeSuperseded" type="checkbox" /><span>Include superseded</span></div>
+      <button id="apply">Apply filters</button>
+    </div>
+
+    <h3 style="margin-bottom:2px">Memory scopes</h3>
+    <div style="font-size:11px; opacity:.65">Personal to shared; select a scope to view its memories.</div>
+    <div id="hierarchy" class="hierarchy" role="tree" aria-label="Memory scopes"></div>
+  </aside>
+  <section>
+    <h3 id="heading" style="margin-top:0">Memories</h3>
+    <div id="err" class="err"></div>
+    <div id="cards"></div>
+  </section>
+</main>
+
+<div id="overlay" class="overlay" role="dialog" aria-modal="true">
+  <div class="modal" id="modal"></div>
+</div>
+
 <script>
   const TOKEN = ${JSON.stringify(token)};
-  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-  function fill(id, items){
-    const ul = document.getElementById(id);
-    document.getElementById('c-'+id).textContent = items.length ? '('+items.length+')' : '';
-    if (!items.length){ ul.innerHTML = '<li class="empty">nothing yet</li>'; return; }
-    ul.innerHTML = items.map(it =>
-      '<li>'+esc(it.content)+' <span class="tag">'+esc(it.type||'')+'</span></li>').join('');
+  function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  const state = { selectedScope: null, data: null, filters: { search: '', memoryTypes: [], limit: 50, includeSuperseded: false } };
+
+  function tierOf(scope){
+    const d = state.data || {};
+    const teams = d.teamScopes || [];
+    if (scope.startsWith('user:')) return 'personal';
+    if (teams.includes(scope)) return 'team';
+    if (scope.startsWith('scope:') || scope.startsWith('org:')) return 'org';
+    if (scope.startsWith('team:')) return 'team';
+    return 'other';
   }
+  function scopeLabel(scope){
+    const sep = scope.indexOf(':');
+    if (sep < 0) return scope;
+    const kind = scope.slice(0, sep), value = scope.slice(sep + 1);
+    if (kind === 'user') return 'Personal';
+    return value.replace(/[-_]/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
+  }
+  // Depth encodes the sharing tier: personal sits under the caller, teams under the tenant
+  // root, and broader scopes one level further out. The gateway exposes no topology graph,
+  // so this is derived from the scopes present on the records the caller can actually read.
+  function depthOf(tier){ return tier === 'personal' ? 1 : tier === 'team' ? 1 : 2; }
+
+  function hierarchyHtml(){
+    const d = state.data || {};
+    const scopes = d.scopes || [];
+    const groups = d.groupsByScope || {};
+    const row = (scope, name, id, depth, icon) => {
+      const selected = scope === state.selectedScope;
+      const count = scope && Object.prototype.hasOwnProperty.call(groups, scope) ? (groups[scope] || []).length : null;
+      const indent = depth * 22, line = Math.max(0, (depth - 1) * 22 + 14);
+      return '<button class="tree-node ' + (selected ? 'active' : '') + '" role="treeitem" data-scope="' + esc(scope) +
+        '" data-depth="' + depth + '" style="--indent:' + indent + 'px;--line:' + line + 'px" aria-level="' + (depth + 1) +
+        '" aria-pressed="' + String(selected) + '"><span class="tree-icon">' + icon + '</span><span class="tree-label"><span class="tree-name">' +
+        esc(name) + '</span><span class="tree-id">' + esc(id) + '</span></span>' +
+        (count === null ? '' : '<span class="pill">' + count + '</span>') + '</button>';
+    };
+    let out = row('', 'All memories', d.tenant || 'tenant', 0, '&#9670;');
+    const sections = [['personal', 'Personal'], ['team', 'Team'], ['org', 'Organization']];
+    for (const [tier, title] of sections) {
+      const inTier = scopes.filter(s => tierOf(s) === tier);
+      if (!inTier.length) continue;
+      out += '<div class="tree-section">' + title + '</div>';
+      for (const s of inTier) {
+        out += row(s, scopeLabel(s), s, depthOf(tier), tier === 'personal' ? '&#9679;' : '&#9632;');
+      }
+    }
+    if (!scopes.length) out += '<div class="tree-section">No scopes yet</div>';
+    return out;
+  }
+
+  function card(m){
+    const pills = [
+      '<span class="pill tier-' + esc(m.tier) + '">' + esc(m.tier) + '</span>',
+      m.type ? '<span class="pill">' + esc(m.type) + '</span>' : '',
+      m.source ? '<span class="pill">via ' + esc(m.source) + '</span>' : '',
+      ...(m.tags || []).slice(0, 4).map(t => '<span class="pill">' + esc(t) + '</span>'),
+    ].filter(Boolean).join('');
+    const details = { id: m.id, scope_key: m.scope_key, created_at: m.created_at, salience: m.salience, confidence: m.confidence, source: m.source };
+    return '<article class="card"><p>' + esc(m.content) + '</p><div class="meta">' + pills +
+      '</div><details><summary>Details</summary><pre>' + esc(JSON.stringify(details, null, 2)) + '</pre></details></article>';
+  }
+
+  function visibleMemories(){
+    const groups = (state.data || {}).groupsByScope || {};
+    if (state.selectedScope) return groups[state.selectedScope] || [];
+    return Object.values(groups).flat();
+  }
+
+  function render(){
+    const d = state.data || {};
+    document.getElementById('who').textContent = d.who || '';
+    document.getElementById('principal').textContent = d.who || 'unknown';
+    document.getElementById('tenantId').textContent = d.tenant || 'unknown';
+    document.getElementById('hierarchy').innerHTML = hierarchyHtml();
+    const list = visibleMemories();
+    const label = state.selectedScope ? scopeLabel(state.selectedScope) : 'All memories';
+    document.getElementById('heading').textContent = label + ' (' + list.length + ')';
+    document.getElementById('cards').innerHTML = list.length
+      ? list.map(card).join('')
+      : '<div class="empty">No memories in this scope yet.</div>';
+    const active = [state.filters.search, state.filters.memoryTypes.length, state.filters.includeSuperseded].filter(Boolean).length;
+    const badge = document.getElementById('filterCount');
+    badge.textContent = String(active);
+    badge.hidden = active === 0;
+  }
+
+  function filterQuery(){
+    const q = new URLSearchParams();
+    if (state.filters.search) q.set('search', state.filters.search);
+    for (const t of state.filters.memoryTypes) q.append('memory_types', t);
+    if (state.filters.includeSuperseded) q.set('include_superseded', 'true');
+    q.set('limit', String(state.filters.limit));
+    return q;
+  }
+
   async function load(){
+    const err = document.getElementById('err');
+    err.textContent = '';
     try {
-      const r = await fetch('/api/memory', { headers: { 'x-amt-canvas-token': TOKEN } });
-      const d = await r.json();
-      if (r.status === 401 && d.error === 'not_signed_in') {
-        document.getElementById('who').innerHTML = '<span class="empty">Sign in required — run /amt-login</span>';
-        document.getElementById('import').disabled = true;
-        fill('personal', []); fill('team', []); fill('org', []);
+      const r = await fetch('/api/memory?' + filterQuery(), { headers: { 'x-amt-canvas-token': TOKEN } });
+      if (r.status === 401) {
+        err.innerHTML = 'Not signed in to AMT. Run <code>/amt-login</code> in a chat, then refresh.';
         return;
       }
-      if (!r.ok) throw new Error('HTTP '+r.status);
-      document.getElementById('who').textContent = d.who + ' · ' + d.tenant;
-      document.getElementById('import').disabled = false;
-      fill('personal', d.groups.personal || []);
-      fill('team', d.groups.team || []);
-      fill('org', d.groups.org || []);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      state.data = await r.json();
+      if (state.selectedScope && !(state.data.scopes || []).includes(state.selectedScope)) state.selectedScope = null;
+      render();
     } catch (e) {
-      document.getElementById('who').innerHTML = '<span class="err">Could not load AMT memory ('+esc(e.message)+')</span>';
+      err.textContent = 'could not load (' + e.message + ')';
     }
   }
-  // --- Import memory flow ---------------------------------------------------------------
+
+  document.getElementById('refresh').addEventListener('click', load);
+  document.getElementById('filterToggle').addEventListener('click', () => {
+    const panel = document.getElementById('filterPanel');
+    const toggle = document.getElementById('filterToggle');
+    const show = panel.hidden;
+    panel.hidden = !show;
+    toggle.setAttribute('aria-expanded', String(show));
+  });
+  document.getElementById('apply').addEventListener('click', () => {
+    const type = document.getElementById('memoryType').value;
+    state.filters = {
+      search: document.getElementById('search').value.trim(),
+      memoryTypes: type ? [type] : [],
+      limit: Math.min(Math.max(Number(document.getElementById('limit').value) || 50, 1), 200),
+      includeSuperseded: document.getElementById('includeSuperseded').checked,
+    };
+    load();
+  });
+  document.getElementById('search').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('apply').click();
+  });
+  document.getElementById('hierarchy').addEventListener('click', e => {
+    const node = e.target.closest('.tree-node');
+    if (!node) return;
+    const scope = node.getAttribute('data-scope');
+    state.selectedScope = scope || null;
+    render();
+  });
+
   const overlay = document.getElementById('overlay');
   const modal = document.getElementById('modal');
   function closeModal(){ overlay.classList.remove('show'); modal.innerHTML=''; }

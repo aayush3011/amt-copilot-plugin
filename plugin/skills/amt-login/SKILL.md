@@ -1,6 +1,6 @@
 ---
 name: amt-login
-description: Sign in this device to AMT so automatic memory capture, recall, and the AMT Memory canvas work.
+description: Sign in this device to AMT so automatic memory capture, recall, and the Memory House canvas work.
 ---
 
 # Sign in to AMT

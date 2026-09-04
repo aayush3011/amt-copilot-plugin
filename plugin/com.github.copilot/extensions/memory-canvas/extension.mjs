@@ -350,8 +350,8 @@ async function startServer(instanceId) {
 const session = await joinSession({
   canvases: [
     createCanvas({
-      id: "amt-memory",
-      displayName: "AMT Memory",
+      id: "memory-house",
+      displayName: "Memory House",
       description:
         "See what AMT remembers about you - personal, team, and org - and act on it. Reads live from the AMT gateway.",
       // Actions are agent-callable. Reads run through the panel's own server; writes are
@@ -421,7 +421,7 @@ const session = await joinSession({
           entry = await startServer(ctx.instanceId);
           servers.set(ctx.instanceId, entry);
         }
-        return { title: "AMT Memory", url: entry.url };
+        return { title: "Memory House", url: entry.url };
       },
       onClose: async (ctx) => {
         const entry = servers.get(ctx.instanceId);
@@ -442,7 +442,7 @@ function renderPanel(token) {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AMT Memory</title>
+<title>Memory House</title>
 <style>
   :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   body { margin: 0; background: Canvas; color: CanvasText; }
@@ -470,6 +470,9 @@ function renderPanel(token) {
   .filter-panel button { margin-top: 12px; }
   .checkline { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; }
   .checkline input { width: auto; }
+  .range-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+  .range-row input { padding: 0; }
+  .range-value { min-width: 44px; text-align: right; font-size: 12px; font-weight: 700; }
   .hierarchy { margin-top: 8px; padding: 6px 0 16px; }
   .tree-node { --indent: 0px; --line: 0px; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 7px; align-items: center; text-align: left; padding: 8px 8px 8px calc(8px + var(--indent)); border-radius: 8px; margin: 2px 0; border: 1px solid transparent; background: transparent; font-weight: 400; }
   .tree-node[data-depth]:not([data-depth="0"]) { background-image: linear-gradient(90deg, transparent var(--line), color-mix(in srgb, CanvasText 20%, transparent) var(--line), color-mix(in srgb, CanvasText 20%, transparent) calc(var(--line) + 1px), transparent calc(var(--line) + 1px)); }
@@ -503,7 +506,7 @@ function renderPanel(token) {
 </head>
 <body>
 <header>
-  <h1>AMT Memory</h1>
+  <h1>Memory House</h1>
   <span id="who" class="who">loading...</span>
   <span style="flex:1"></span>
   <button id="import" class="primary">Import memory</button>
@@ -530,6 +533,13 @@ function renderPanel(token) {
       <div class="checkline"><input id="includeSuperseded" type="checkbox" /><span>Include superseded</span></div>
       <button id="apply">Apply filters</button>
     </div>
+
+    <label for="autoRefresh">Background auto-refresh</label>
+    <div class="range-row">
+      <input id="autoRefresh" type="range" min="0" max="300" step="5" value="15" />
+      <span id="autoRefreshValue" class="range-value">15s</span>
+    </div>
+    <div style="font-size:10px; opacity:.62; margin-top:3px">0 disables auto-refresh; maximum 5 minutes.</div>
 
     <h3 style="margin-bottom:2px">Memory scopes</h3>
     <div style="font-size:11px; opacity:.65">Personal to shared; select a scope to view its memories.</div>
@@ -790,8 +800,26 @@ function renderPanel(token) {
 
   document.getElementById('import').addEventListener('click', openChoice);
   document.getElementById('refresh').addEventListener('click', load);
+
+  // Background auto-refresh. The panel polls because promotion and consolidation happen
+  // server-side on their own cadence, so memories can appear without any action here.
+  let autoRefreshTimer = null;
+  function applyAutoRefresh(seconds){
+    const value = Math.min(Math.max(Number(seconds) || 0, 0), 300);
+    document.getElementById('autoRefreshValue').textContent = value ? value + 's' : 'off';
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    if (value > 0) autoRefreshTimer = setInterval(load, value * 1000);
+    return value;
+  }
+  const autoRefreshInput = document.getElementById('autoRefresh');
+  autoRefreshInput.addEventListener('input', e => {
+    const value = Math.min(Math.max(Number(e.target.value) || 0, 0), 300);
+    document.getElementById('autoRefreshValue').textContent = value ? value + 's' : 'off';
+  });
+  autoRefreshInput.addEventListener('change', e => applyAutoRefresh(e.target.value));
+
   load();
-  setInterval(load, 15000);
+  applyAutoRefresh(autoRefreshInput.value);
 </script>
 </body>
 </html>`;

@@ -184,12 +184,13 @@ async function loadMemory(filters = {}) {
 
 const MEMORY_TYPES = ["fact", "episodic", "procedural"];
 
-// Personal first, then the caller's own teams, then broader scopes: the tree reads from
-// "mine" outwards, which is the order the scopes were earned in.
+// Organization first, then the caller's teams, then personal: the same order the tree renders
+// and the reverse of the promotion path, so a scope always appears below the scope it can be
+// promoted into.
 function scopeOrder(teamScopes) {
   const rank = (s) => {
     const tier = tierOf(s, teamScopes);
-    return tier === "personal" ? 0 : tier === "team" ? 1 : 2;
+    return tier === "org" ? 0 : tier === "team" ? 1 : 2;
   };
   return (a, b) => rank(a) - rank(b) || a.localeCompare(b);
 }
@@ -564,11 +565,15 @@ function renderPanel(token) {
     if (kind === 'user') return 'Personal';
     return value.replace(/[-_]/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
   }
-  // Depth encodes the sharing tier: personal sits under the caller, teams under the tenant
-  // root, and broader scopes one level further out. The gateway exposes no topology graph,
-  // so this is derived from the scopes present on the records the caller can actually read.
-  function depthOf(tier){ return tier === 'personal' ? 1 : tier === 'team' ? 1 : 2; }
 
+  // Render the scopes as a nested tree that mirrors the promotion path in reverse:
+  // organization at the root, then the caller's teams, then their personal scope as the leaf.
+  // A memory is promoted personal -> team -> org, so reading the tree downward shows where a
+  // memory starts and reading upward shows where it can travel.
+  //
+  // The gateway exposes no topology graph, so the parent/child links are inferred from tier
+  // rather than read from promotion edges. If a GET /topology is added later, replace the
+  // tier nesting below with the real edges.
   function hierarchyHtml(){
     const d = state.data || {};
     const scopes = d.scopes || [];
@@ -583,16 +588,21 @@ function renderPanel(token) {
         esc(name) + '</span><span class="tree-id">' + esc(id) + '</span></span>' +
         (count === null ? '' : '<span class="pill">' + count + '</span>') + '</button>';
     };
-    let out = row('', 'All memories', d.tenant || 'tenant', 0, '&#9670;');
-    const sections = [['personal', 'Personal'], ['team', 'Team'], ['org', 'Organization']];
-    for (const [tier, title] of sections) {
-      const inTier = scopes.filter(s => tierOf(s) === tier);
-      if (!inTier.length) continue;
-      out += '<div class="tree-section">' + title + '</div>';
-      for (const s of inTier) {
-        out += row(s, scopeLabel(s), s, depthOf(tier), tier === 'personal' ? '&#9679;' : '&#9632;');
-      }
-    }
+
+    const byTier = tier => scopes.filter(s => tierOf(s) === tier);
+    const orgScopes = byTier('org');
+    const teamScopes = byTier('team');
+    const personalScopes = byTier('personal');
+
+    // The tenant is the organization, so it is the root even when no org-tier scope exists.
+    let out = row('', 'Organization', d.tenant || 'tenant', 0, '&#9670;');
+    let depth = 1;
+    for (const s of orgScopes) out += row(s, scopeLabel(s), s, depth, '&#9632;');
+    if (orgScopes.length) depth += 1;
+    for (const s of teamScopes) out += row(s, scopeLabel(s), s, depth, '&#9632;');
+    if (teamScopes.length) depth += 1;
+    for (const s of personalScopes) out += row(s, scopeLabel(s), s, depth, '&#9679;');
+
     if (!scopes.length) out += '<div class="tree-section">No scopes yet</div>';
     return out;
   }

@@ -1,6 +1,6 @@
 ---
 name: import-copilot-memory
-description: Import the memories GitHub Copilot already distilled into Memory House, then reconcile them against what is already stored.
+description: Import Copilot distilled memories.
 ---
 
 Import GitHub Copilot's own saved memories into Memory House. Run this immediately, without

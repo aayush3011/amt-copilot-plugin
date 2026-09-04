@@ -791,10 +791,10 @@ function renderPanel(token) {
   const SOURCES = {
     copilot: { label: 'GitHub Copilot', memoryTitle: 'Copilot Memory',
       memoryDesc: 'Import the distilled memories Copilot already saved.',
-      sessionDesc: 'Pick past Copilot sessions; import their turns for Memory House to distill.' },
+      sessionDesc: 'Pick past Copilot sessions; import their turns.' },
     claude: { label: 'Claude', memoryTitle: 'Claude Memory',
       memoryDesc: 'Import the distilled memories Claude already saved.',
-      sessionDesc: 'Pick past Claude sessions; import their turns for Memory House to distill.' },
+      sessionDesc: 'Pick past Claude sessions; import their turns.' },
   };
   let importSource = 'copilot';
 
@@ -803,7 +803,7 @@ function renderPanel(token) {
       '<h2>Import memory</h2>'+
       '<p class="msg">Which agent should Memory House import from?</p>'+
       '<div class="choice">'+
-        '<button id="src-copilot"><span class="t">GitHub Copilot</span><span class="d">Memories and sessions from the Copilot CLI on this device.</span></button>'+
+        '<button id="src-copilot"><span class="t">GitHub Copilot</span><span class="d">Memories and sessions from the Copilot on this device.</span></button>'+
         '<button id="src-claude"><span class="t">Claude</span><span class="d">Memories and sessions from Claude Code on this device.</span></button>'+
       '</div>'+
       '<div class="bar"><span id="m-msg" class="msg"></span><span class="sp"></span><button class="ghost" id="ch-cancel">Cancel</button></div>';

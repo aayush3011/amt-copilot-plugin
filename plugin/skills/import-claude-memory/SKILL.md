@@ -1,6 +1,6 @@
 ---
 name: import-claude-memory
-description: Import the memories Claude Code already distilled into Memory House, then reconcile them against what is already stored.
+description: Import Claude distilled memories.
 ---
 
 Import Claude Code's own saved memories into Memory House. Run this immediately, without

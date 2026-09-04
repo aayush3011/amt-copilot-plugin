@@ -174,6 +174,9 @@ async function loadMemory(filters = {}) {
   return {
     who: who.principal,
     tenant: who.tenant_id,
+    // Demo default. The tenant's scope key is a GUID and no gateway route returns an
+    // organization name, so the display name is supplied here until one exists.
+    orgLabel: process.env.AMT_ORG_DISPLAY_NAME || "Cosmos DB",
     teamScopes,
     scopes: Object.keys(byScope).sort(scopeOrder(teamScopes)),
     groupsByScope: byScope,
@@ -559,10 +562,14 @@ function renderPanel(token) {
     return 'other';
   }
   function scopeLabel(scope){
+    const d = state.data || {};
     const sep = scope.indexOf(':');
     if (sep < 0) return scope;
     const kind = scope.slice(0, sep), value = scope.slice(sep + 1);
     if (kind === 'user') return 'Personal';
+    // The tenant is the organization. Its key is a GUID, so it needs a display name rather
+    // than a title-cased id; AMT_ORG_DISPLAY_NAME supplies one.
+    if (kind === 'org') return d.orgLabel || 'Cosmos DB';
     return value.replace(/[-_]/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
   }
 
@@ -594,11 +601,18 @@ function renderPanel(token) {
     const teamScopes = byTier('team');
     const personalScopes = byTier('personal');
 
-    // The tenant is the organization, so it is the root even when no org-tier scope exists.
-    let out = row('', 'Organization', d.tenant || 'tenant', 0, '&#9670;');
+    // The tenant is the organization, so an org-tier scope is the root rather than sitting
+    // under a synthetic one; rendering both showed the same organization twice. The tenant's
+    // own scope wins the root when present, and any broader topology scope nests beneath it.
+    const rootScope = orgScopes.find(s => s === 'org:' + d.tenant) || orgScopes[0] || null;
+    const nestedOrgScopes = orgScopes.filter(s => s !== rootScope);
+
+    let out = rootScope
+      ? row(rootScope, scopeLabel(rootScope), rootScope, 0, '&#9670;')
+      : row('', d.orgLabel || 'Cosmos DB', d.tenant || 'tenant', 0, '&#9670;');
     let depth = 1;
-    for (const s of orgScopes) out += row(s, scopeLabel(s), s, depth, '&#9632;');
-    if (orgScopes.length) depth += 1;
+    for (const s of nestedOrgScopes) out += row(s, scopeLabel(s), s, depth, '&#9632;');
+    if (nestedOrgScopes.length) depth += 1;
     for (const s of teamScopes) out += row(s, scopeLabel(s), s, depth, '&#9632;');
     if (teamScopes.length) depth += 1;
     for (const s of personalScopes) out += row(s, scopeLabel(s), s, depth, '&#9679;');

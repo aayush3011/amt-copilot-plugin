@@ -130,11 +130,6 @@ function tierOf(scopeKey = "", teamScopes = []) {
   return "other";
 }
 
-// Build the scope-grouped view the panel renders. Both calls deliberately omit an explicit
-// scope list: passing one overrides the session's read set, which is what resolves the
-// caller's topology memberships and therefore what makes promoted memories visible at all.
-// The gateway exposes no topology endpoint, so the scope tree is derived from the scopes
-// actually present on the records the caller can read.
 async function loadMemory(filters = {}) {
   const who = await amt("/whoami");
   const groups = who.groups || [];
@@ -145,26 +140,32 @@ async function loadMemory(filters = {}) {
 
   const limit = Math.min(Math.max(Number(filters.limit) || 50, 1), 200);
   const types = (filters.memoryTypes || []).filter((t) => MEMORY_TYPES.includes(t));
-  const query = new URLSearchParams();
-  query.set("recent_k", String(limit));
-  for (const t of types) query.append("memory_types", t);
-  if (filters.includeSuperseded) query.set("include_superseded", "true");
 
-  const personal = await amt(`/memories?${query}`).catch(() => ({ items: [] }));
-  const shared = await amt("/search", {
-    method: "POST",
-    body: {
-      query: filters.search || "team and organization knowledge, standards, and decisions",
-      top_k: limit,
-      ...(types.length ? { memory_types: types } : {}),
-    },
-  }).catch(() => ({ items: [] }));
+  const listQuery = (scopes) => {
+    const query = new URLSearchParams();
+    query.set("recent_k", String(limit));
+    for (const t of types) query.append("memory_types", t);
+    if (filters.includeSuperseded) query.set("include_superseded", "true");
+    for (const scope of scopes || []) query.append("scopes", scope);
+    return query;
+  };
+
+  const first = await amt(`/memories?${listQuery()}`).catch(() => ({ items: [] }));
+  const discovered = new Set(
+    (first.items || [])
+      .map((it) => String(it.scope_key || ""))
+      .filter((s) => s && !s.startsWith("user:")),
+  );
+  for (const scope of teamScopes) discovered.add(scope);
+  const shared = discovered.size
+    ? await amt(`/memories?${listQuery([...discovered])}`).catch(() => ({ items: [] }))
+    : { items: [] };
 
   const needle = String(filters.search || "").trim().toLowerCase();
   const byScope = {};
   const seen = new Set();
   let total = 0;
-  for (const it of [...(personal.items || []), ...(shared.items || [])]) {
+  for (const it of [...(first.items || []), ...(shared.items || [])]) {
     if (!it || seen.has(it.id)) continue;
     seen.add(it.id);
     const record = shape(it, teamScopes);

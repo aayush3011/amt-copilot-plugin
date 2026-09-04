@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "amt-memory",
   "description": "Persistent, scoped agent memory (personal, team, org) backed by Azure Cosmos DB, delivered through the Inference Platform gateway.",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "author": {
     "name": "Aayush Kataria",
     "url": "https://github.com/aayush3011"

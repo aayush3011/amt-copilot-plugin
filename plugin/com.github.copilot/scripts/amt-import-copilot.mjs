@@ -84,13 +84,19 @@ function citationContent(citation) {
 // --- sessions ---------------------------------------------------------------------------
 
 function readSession(file, folderName) {
-  // Parse original user prompts paired only with FINAL assistant answers. Transformed
-  // prompts, reasoning, tool calls, and non-final assistant events are intentionally ignored.
+  // Pair each original user prompt with the assistant's answer for the same interaction.
+  //
+  // `phase: "final_answer"` only exists in older session files; current Copilot CLI events
+  // carry no `phase` at all, so requiring it silently dropped ~87% of sessions and the picker
+  // reported "no sessions found". An interaction's answer is therefore the LAST assistant
+  // message carrying non-empty text, with an explicit final_answer preferred when present.
+  // Streaming partials and commentary are superseded by that later text, and pure tool-call
+  // events carry no text so they never qualify.
   let sessionId = folderName;
   let startTime = "";
   let cwd = "";
   const questions = new Map();
-  const turns = [];
+  const answers = new Map();
 
   for (const event of readEvents(file)) {
     const data = event.data;
@@ -104,7 +110,7 @@ function readSession(file, folderName) {
     } else if (event.type === "user.message") {
       const interactionId = data.interactionId;
       const content = data.content;
-      if (typeof interactionId === "string" && typeof content === "string") {
+      if (typeof interactionId === "string" && typeof content === "string" && content.trim()) {
         questions.set(interactionId, {
           role: "user",
           content,
@@ -114,24 +120,31 @@ function readSession(file, folderName) {
           parent_agent_task_id: data.parentAgentTaskId ?? null,
         });
       }
-    } else if (event.type === "assistant.message" && data.phase === "final_answer") {
+    } else if (event.type === "assistant.message") {
       const interactionId = data.interactionId;
       const content = data.content;
-      const question = typeof interactionId === "string" ? questions.get(interactionId) : null;
-      if (question && typeof content === "string") {
-        turns.push({
-          question,
-          response: {
-            role: "agent",
-            content,
-            created_at: String(event.timestamp || ""),
-            event_id: String(event.id || ""),
-            interaction_id: interactionId,
-            parent_agent_task_id: data.parentAgentTaskId ?? null,
-          },
-        });
-      }
+      if (typeof interactionId !== "string" || !questions.has(interactionId)) continue;
+      if (typeof content !== "string" || !content.trim()) continue;
+      const isFinal = data.phase === "final_answer";
+      if (answers.get(interactionId)?.is_final && !isFinal) continue;
+      answers.set(interactionId, {
+        role: "agent",
+        content,
+        created_at: String(event.timestamp || ""),
+        event_id: String(event.id || ""),
+        interaction_id: interactionId,
+        parent_agent_task_id: data.parentAgentTaskId ?? null,
+        is_final: isFinal,
+      });
     }
+  }
+
+  const turns = [];
+  for (const [interactionId, question] of questions) {
+    const answer = answers.get(interactionId);
+    if (!answer) continue;
+    const { is_final, ...response } = answer;
+    turns.push({ question, response });
   }
 
   return { session_id: sessionId, start_time: startTime, cwd, turns };

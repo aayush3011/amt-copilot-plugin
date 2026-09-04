@@ -537,6 +537,10 @@ function renderPanel(token) {
   .modal .row .sub { opacity: .6; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .modal .row .q { opacity: .75; font-size: 12px; margin-top: 3px; display: flex; gap: 6px; align-items: baseline; }
   .modal .row .q .who { flex: 0 0 38px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; opacity: .55; }
+  .modal input[type="checkbox"] { width: auto; flex: 0 0 auto; padding: 0; margin: 0; }
+  .modal .row input[type="checkbox"] { margin-top: 2px; }
+  .modal .selall { display: flex; align-items: center; gap: 8px; font-size: 12px; opacity: .8; }
+  .modal .selall label { cursor: pointer; }
 </style>
 </head>
 <body>

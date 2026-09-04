@@ -26,7 +26,12 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
-import { listSessions, importSessions, importMemories, resolveGatewayBase } from "../../scripts/amt-import.mjs";
+import { listSessions, importSessions, importMemories, resolveGatewayBase } from "../../scripts/amt-import-copilot.mjs";
+import {
+  listClaudeSessions,
+  importClaudeSessions,
+  importClaudeMemories,
+} from "../../scripts/amt-import-claude.mjs";
 
 // The gateway data-plane base is customer-configured in exactly one place (the plugin's
 // mcp.json) and resolved by the shared engine; nothing is hardcoded here. Memoized after the
@@ -296,12 +301,14 @@ async function startServer(instanceId) {
         }
       }
 
-      // Import: list local Copilot sessions (label + last two user turns). Local files only,
-      // still guarded so only the same-origin panel can enumerate them.
+      // Import: list local sessions for one source (label + last exchange). Local files
+      // only, still guarded so only the same-origin panel can enumerate them.
       if (url.pathname === "/api/import/sessions" && req.method === "GET") {
         if (!guard(req, res, capabilityToken)) return;
+        const source = url.searchParams.get("source") === "claude" ? "claude" : "copilot";
+        const sessions = source === "claude" ? listClaudeSessions() : listSessions();
         res.writeHead(200, { "Content-Type": "application/json" });
-        return res.end(JSON.stringify({ sessions: listSessions() }));
+        return res.end(JSON.stringify({ sessions, source }));
       }
 
       // Import: ingest the selected sessions' turns into AMT (POST /memory, original
@@ -314,16 +321,25 @@ async function startServer(instanceId) {
           res.writeHead(400, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ error: "no sessions selected" }));
         }
-        const result = await importSessions(ids, { token: await getToken() });
+        const token = await getToken();
+        const result =
+          body.source === "claude"
+            ? await importClaudeSessions(ids, { token })
+            : await importSessions(ids, { token });
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify(result));
       }
 
-      // Import: publish Copilot's own distilled memories as facts (POST /facts) and run one
-      // reconciliation pass so they consolidate against existing memories.
+      // Import: publish a source's already-distilled memories as facts (POST /facts) and
+      // run one reconciliation pass so they consolidate against existing memories.
       if (url.pathname === "/api/import/memories" && req.method === "POST") {
         if (!guard(req, res, capabilityToken)) return;
-        const result = await importMemories({ token: await getToken() });
+        const body = await readJsonBody(req);
+        const token = await getToken();
+        const result =
+          body.source === "claude"
+            ? await importClaudeMemories({ token })
+            : await importMemories({ token });
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify(result));
       }
@@ -473,6 +489,10 @@ function renderPanel(token) {
   .range-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
   .range-row input { padding: 0; }
   .range-value { min-width: 44px; text-align: right; font-size: 12px; font-weight: 700; }
+  .scopes-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 16px; }
+  .link-button { width: auto; margin: 0; padding: 2px 8px; border: 1px solid transparent; border-radius: 999px; background: transparent; font-size: 12px; font-weight: 600; color: LinkText; }
+  .link-button:hover { background: color-mix(in srgb, Highlight 16%, Canvas); border-color: transparent; }
+  .link-button[aria-pressed="true"] { border-color: Highlight; background: color-mix(in srgb, Highlight 22%, Canvas); color: CanvasText; }
   .hierarchy { margin-top: 8px; padding: 6px 0 16px; }
   .tree-node { --indent: 0px; --line: 0px; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 7px; align-items: center; text-align: left; padding: 8px 8px 8px calc(8px + var(--indent)); border-radius: 8px; margin: 2px 0; border: 1px solid transparent; background: transparent; font-weight: 400; }
   .tree-node[data-depth]:not([data-depth="0"]) { background-image: linear-gradient(90deg, transparent var(--line), color-mix(in srgb, CanvasText 20%, transparent) var(--line), color-mix(in srgb, CanvasText 20%, transparent) calc(var(--line) + 1px), transparent calc(var(--line) + 1px)); }
@@ -499,9 +519,24 @@ function renderPanel(token) {
   .modal { background: Canvas; color: CanvasText; border-radius: 12px; padding: 18px; max-width: 640px; width: 90%; max-height: 80vh; overflow: auto; box-shadow: 0 10px 40px color-mix(in srgb, CanvasText 30%, transparent); }
   .modal h3 { margin-top: 0; }
   .modal button { width: auto; min-width: 110px; margin-right: 8px; margin-top: 12px; }
-  .row { border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 8px; padding: 9px; margin-bottom: 8px; font-size: 12px; }
-  .row .q { margin-top: 5px; opacity: .8; }
-  .row .q .who { font-weight: 700; opacity: .9; }
+  /* Import dialog. Scoped under .modal so these do not collide with the panel's own
+     .row / .meta / .who rules, which mean different things outside the dialog. */
+  .modal .choice { display: flex; gap: 10px; }
+  .modal .choice button { flex: 1; text-align: left; padding: 14px; margin: 0; border-radius: 8px; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); background: color-mix(in srgb, CanvasText 6%, Canvas); font-weight: 400; }
+  .modal .choice .t { font-weight: 600; display: block; margin-bottom: 4px; }
+  .modal .choice .d { display: block; opacity: .65; font-size: 12px; }
+  .modal .bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .modal .bar .sp { flex: 1; }
+  .modal .msg { font-size: 12px; opacity: .85; }
+  .modal .ghost { background: transparent; }
+  .modal .rows { margin: 6px 0; max-height: 46vh; overflow: auto; }
+  .modal .row { display: flex; gap: 8px; padding: 8px; border: 0; border-radius: 6px; align-items: flex-start; cursor: pointer; margin-bottom: 0; }
+  .modal .row:hover { background: color-mix(in srgb, CanvasText 8%, transparent); }
+  .modal .row .meta { display: block; flex: 1; min-width: 0; margin: 0; }
+  .modal .row .lbl { font-weight: 600; }
+  .modal .row .sub { opacity: .6; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .modal .row .q { opacity: .75; font-size: 12px; margin-top: 3px; display: flex; gap: 6px; align-items: baseline; }
+  .modal .row .q .who { flex: 0 0 38px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; opacity: .55; }
 </style>
 </head>
 <body>
@@ -541,7 +576,10 @@ function renderPanel(token) {
     </div>
     <div style="font-size:10px; opacity:.62; margin-top:3px">0 disables auto-refresh; maximum 5 minutes.</div>
 
-    <h3 style="margin-bottom:2px">Memory scopes</h3>
+    <div class="scopes-head">
+      <h3 style="margin:0">Memory scopes</h3>
+      <button id="showAll" class="link-button" type="button" aria-pressed="true">All</button>
+    </div>
     <div style="font-size:11px; opacity:.65">Personal to shared; select a scope to view its memories.</div>
     <div id="hierarchy" class="hierarchy" role="tree" aria-label="Memory scopes"></div>
   </aside>
@@ -655,6 +693,7 @@ function renderPanel(token) {
     document.getElementById('principal').textContent = d.who || 'unknown';
     document.getElementById('tenantId').textContent = d.tenant || 'unknown';
     document.getElementById('hierarchy').innerHTML = hierarchyHtml();
+    document.getElementById('showAll').setAttribute('aria-pressed', String(!state.selectedScope));
     const list = visibleMemories();
     const label = state.selectedScope ? scopeLabel(state.selectedScope) : 'All memories';
     document.getElementById('heading').textContent = label + ' (' + list.length + ')';
@@ -722,6 +761,13 @@ function renderPanel(token) {
     state.selectedScope = scope || null;
     render();
   });
+  // Selecting a scope filters the list, so "All" is the way back to the unfiltered view.
+  // The tree has no row for it: every row is a real scope now that the tenant scope is the
+  // root, and adding a synthetic one would put a fourth level above the organization.
+  document.getElementById('showAll').addEventListener('click', () => {
+    state.selectedScope = null;
+    render();
+  });
 
   const overlay = document.getElementById('overlay');
   const modal = document.getElementById('modal');
@@ -734,25 +780,57 @@ function renderPanel(token) {
     return r.json();
   }
 
+  // Import is a two-step choice: pick the source agent, then pick what to import from it.
+  // Each source offers the same two kinds, so a flat list would be four side-by-side
+  // buttons; splitting it keeps the dialog two wide and scales to further sources.
+  const SOURCES = {
+    copilot: { label: 'GitHub Copilot', memoryTitle: 'Copilot Memory',
+      memoryDesc: 'Import the distilled memories Copilot already saved.',
+      sessionDesc: 'Pick past Copilot sessions; import their turns for Memory House to distill.' },
+    claude: { label: 'Claude', memoryTitle: 'Claude Memory',
+      memoryDesc: 'Import the distilled memories Claude already saved.',
+      sessionDesc: 'Pick past Claude sessions; import their turns for Memory House to distill.' },
+  };
+  let importSource = 'copilot';
+
   function openChoice(){
     modal.innerHTML =
       '<h2>Import memory</h2>'+
+      '<p class="msg">Which agent should Memory House import from?</p>'+
       '<div class="choice">'+
-        '<button id="ch-mem"><span class="t">Copilot memory</span><span class="d">Import the distilled memories Copilot already saved, as facts, then reconcile.</span></button>'+
-        '<button id="ch-sess"><span class="t">Local sessions</span><span class="d">Pick past Copilot CLI sessions; import their turns for AMT to distill.</span></button>'+
+        '<button id="src-copilot"><span class="t">GitHub Copilot</span><span class="d">Memories and sessions from the Copilot CLI on this device.</span></button>'+
+        '<button id="src-claude"><span class="t">Claude</span><span class="d">Memories and sessions from Claude Code on this device.</span></button>'+
       '</div>'+
       '<div class="bar"><span id="m-msg" class="msg"></span><span class="sp"></span><button class="ghost" id="ch-cancel">Cancel</button></div>';
     overlay.classList.add('show');
     document.getElementById('ch-cancel').onclick = closeModal;
+    document.getElementById('src-copilot').onclick = () => openKind('copilot');
+    document.getElementById('src-claude').onclick = () => openKind('claude');
+  }
+
+  function openKind(source){
+    importSource = source;
+    const s = SOURCES[source];
+    modal.innerHTML =
+      '<h2>Import from '+esc(s.label)+'</h2>'+
+      '<div class="choice">'+
+        '<button id="ch-mem"><span class="t">'+esc(s.memoryTitle)+'</span><span class="d">'+esc(s.memoryDesc)+'</span></button>'+
+        '<button id="ch-sess"><span class="t">Local sessions</span><span class="d">'+esc(s.sessionDesc)+'</span></button>'+
+      '</div>'+
+      '<div class="bar"><span id="m-msg" class="msg"></span><span class="sp"></span>'+
+        '<button class="ghost" id="ch-back">Back</button>'+
+        '<button class="ghost" id="ch-cancel">Cancel</button></div>';
+    document.getElementById('ch-cancel').onclick = closeModal;
+    document.getElementById('ch-back').onclick = openChoice;
     document.getElementById('ch-mem').onclick = doImportMemories;
     document.getElementById('ch-sess').onclick = openSessions;
   }
 
   async function doImportMemories(){
     const msg = document.getElementById('m-msg');
-    msg.textContent = 'Importing Copilot memories...';
+    msg.textContent = 'Importing '+SOURCES[importSource].label+' memories...';
     try {
-      const res = await post('/api/import/memories');
+      const res = await post('/api/import/memories', { source: importSource });
       msg.textContent = 'Imported '+res.memories+' memories and reconciled.';
       setTimeout(() => { closeModal(); load(); }, 1300);
     } catch(e){ msg.innerHTML = '<span class="err">'+esc(e.message)+'</span>'; }
@@ -762,7 +840,7 @@ function renderPanel(token) {
     modal.innerHTML = '<h2>Import local sessions</h2><div class="msg">Loading sessions...</div>';
     let sessions = [];
     try {
-      const r = await fetch('/api/import/sessions', { headers:{ 'x-amt-canvas-token':TOKEN } });
+      const r = await fetch('/api/import/sessions?source='+encodeURIComponent(importSource), { headers:{ 'x-amt-canvas-token':TOKEN } });
       sessions = (await r.json()).sessions || [];
     } catch(e){ modal.innerHTML = '<h2>Import local sessions</h2><div class="err">'+esc(e.message)+'</div>'; return; }
     if (!sessions.length){
@@ -791,7 +869,7 @@ function renderPanel(token) {
       if (!ids.length){ msg.innerHTML = '<span class="err">Select at least one session.</span>'; return; }
       msg.textContent = 'Importing '+ids.length+' session(s)...';
       try {
-        const res = await post('/api/import/sessions', { ids });
+        const res = await post('/api/import/sessions', { ids, source: importSource });
         msg.textContent = 'Imported '+res.messages+' messages from '+res.sessions+' session(s).';
         setTimeout(() => { closeModal(); load(); }, 1500);
       } catch(e){ msg.innerHTML = '<span class="err">'+esc(e.message)+'</span>'; }

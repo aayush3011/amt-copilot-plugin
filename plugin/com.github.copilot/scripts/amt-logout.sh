@@ -25,4 +25,5 @@ if command -v jq >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
 fi
 
 rm -f "$AMT_TOKEN_CACHE"
+rm -rf "$AMT_LOCK_DIR" 2>/dev/null || true
 echo "  Signed out of AMT memory (token revoked and local cache cleared)."

@@ -45,3 +45,16 @@ AMT_TOKEN_CACHE="${AMT_HOME}/token.json"
 
 # Refresh when fewer than this many seconds of access-token life remain.
 AMT_TOKEN_SKEW_SECONDS="${AMT_TOKEN_SKEW_SECONDS:-120}"
+
+AMT_LOCK_DIR="${AMT_TOKEN_CACHE}.lock"
+AMT_LOCK_TIMEOUT_DS="${AMT_LOCK_TIMEOUT_DS:-100}"        # deciseconds; 100 = 10s
+AMT_LOCK_STALE_SECONDS="${AMT_LOCK_STALE_SECONDS:-60}"
+
+# GNU stat rejects -c, BSD stat rejects -f, so try both and fall back to 0 (treat as stale).
+_amt_mtime() {
+  _amt_m="$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || true)"
+  case "$_amt_m" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$_amt_m" ;;
+  esac
+}

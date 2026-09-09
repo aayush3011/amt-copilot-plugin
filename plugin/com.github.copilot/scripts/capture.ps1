@@ -42,8 +42,12 @@ try {
 
 if (-not $agentMsg) { Write-AmtHookLog 'capture:agent:skipped:no-agent-message'; Write-EmptyAndExit }
 
-$token = & (Join-Path $PSScriptRoot 'amt-token.ps1')
-if (-not $token) { Write-AmtHookLog 'capture:agent:skipped:no-hook-token'; Write-EmptyAndExit }
+$tokenResult = Get-AmtTokenWithReason
+$token = $tokenResult.Token
+if (-not $token) {
+  $why = if ($tokenResult.Reason) { $tokenResult.Reason } else { 'unknown' }
+  Write-AmtHookLog "capture:agent:skipped:no-hook-token:$why"; Write-EmptyAndExit
+}
 
 try {
   Invoke-RestMethod -Method Post -Uri "$script:AmtHookBase/capture" -Headers @{ Authorization = "HookToken $token" } `

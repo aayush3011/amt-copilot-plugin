@@ -15,4 +15,5 @@ try {
 } catch { }
 
 Remove-Item -Force -Path $script:AmtTokenCache -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force -Path $script:AmtLockDir -ErrorAction SilentlyContinue
 Write-Output '  Signed out of AMT memory (token revoked and local cache cleared).'

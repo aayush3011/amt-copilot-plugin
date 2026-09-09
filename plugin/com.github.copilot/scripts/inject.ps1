@@ -45,8 +45,12 @@ $skillInvocation = [regex]::Match($userPrompt, '(?is)^The user explicitly invoke
 if ($skillInvocation.Success) { $userPrompt = $skillInvocation.Groups['command'].Value }
 if (-not $userPrompt) { Write-AmtHookLog "${phase}:skipped:notification-only"; Write-EmptyAndExit }
 
-$token = & (Join-Path $PSScriptRoot 'amt-token.ps1')
-if (-not $token) { Write-AmtHookLog "${phase}:skipped:no-hook-token"; Write-EmptyAndExit }
+$tokenResult = Get-AmtTokenWithReason
+$token = $tokenResult.Token
+if (-not $token) {
+  $why = if ($tokenResult.Reason) { $tokenResult.Reason } else { 'unknown' }
+  Write-AmtHookLog "${phase}:skipped:no-hook-token:$why"; Write-EmptyAndExit
+}
 $headers = @{ Authorization = "HookToken $token" }
 
 if ($phase -eq 'capture') {

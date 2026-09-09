@@ -61,8 +61,11 @@ user_prompt="$(printf '%s' "$prompt" | jq -Rsr '
 ')"
 [ -n "$user_prompt" ] || { hook_log "${phase}:skipped:notification-only"; finish_empty; }
 
-token="$("$SCRIPT_DIR/amt-token.sh" 2>/dev/null || true)"
-[ -n "$token" ] || { hook_log "${phase}:skipped:no-hook-token"; finish_empty; }
+token_err="$(mktemp)"
+token="$("$SCRIPT_DIR/amt-token.sh" 2>"$token_err" || true)"
+token_reason="$(tr '\n\t' '  ' < "$token_err" | sed 's/^amt-token: //; s/[[:space:]]*$//')"
+rm -f "$token_err"
+[ -n "$token" ] || { hook_log "${phase}:skipped:no-hook-token:${token_reason:-unknown}"; finish_empty; }
 
 if [ "$phase" = "capture" ]; then
   capture_body="$(jq -n --arg t "$thread" --arg c "$user_prompt" '{thread_id:$t, role:"user", content:$c}')"

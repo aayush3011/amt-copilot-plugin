@@ -28,3 +28,45 @@ $script:AmtHome        = Join-Path $script:AmtCopilotHome 'amt'
 $script:AmtTokenCache  = Join-Path $script:AmtHome 'token.json'
 
 $script:AmtTokenSkewSeconds = if ($env:AMT_TOKEN_SKEW_SECONDS) { [int]$env:AMT_TOKEN_SKEW_SECONDS } else { 120 }
+
+$script:AmtLockDir          = "$script:AmtTokenCache.lock"
+$script:AmtLockTimeoutMs    = if ($env:AMT_LOCK_TIMEOUT_DS) { [int]$env:AMT_LOCK_TIMEOUT_DS * 100 } else { 10000 }
+$script:AmtLockStaleSeconds = if ($env:AMT_LOCK_STALE_SECONDS) { [int]$env:AMT_LOCK_STALE_SECONDS } else { 60 }
+
+function Enter-AmtLock {
+  $deadline = (Get-Date).AddMilliseconds($script:AmtLockTimeoutMs)
+  while ((Get-Date) -lt $deadline) {
+    try {
+      New-Item -ItemType Directory -Path $script:AmtLockDir -ErrorAction Stop | Out-Null
+      return $true
+    } catch { }
+    try {
+      $age = ((Get-Date).ToUniversalTime() - (Get-Item $script:AmtLockDir -ErrorAction Stop).LastWriteTimeUtc).TotalSeconds
+      if ($age -ge $script:AmtLockStaleSeconds) {
+        Remove-Item -Recurse -Force $script:AmtLockDir -ErrorAction SilentlyContinue
+        continue
+      }
+    } catch { }
+    Start-Sleep -Milliseconds 100
+  }
+  return $false
+}
+
+function Exit-AmtLock {
+  Remove-Item -Recurse -Force $script:AmtLockDir -ErrorAction SilentlyContinue
+}
+
+# amt-token.ps1 reports why it failed on stderr via [Console]::Error, which bypasses the
+# PowerShell error stream for an in-process call. Capture it so hooks can log the reason
+# instead of a bare "no-hook-token".
+function Get-AmtTokenWithReason {
+  $writer = New-Object System.IO.StringWriter
+  $previous = [Console]::Error
+  [Console]::SetError($writer)
+  try { $tok = & (Join-Path $PSScriptRoot 'amt-token.ps1') }
+  catch { $tok = $null }
+  finally { [Console]::SetError($previous) }
+  $tok = @($tok) | Where-Object { $_ } | Select-Object -Last 1
+  $reason = (($writer.ToString() -replace '^amt-token:\s*', '') -replace '\s+', ' ').Trim()
+  return [pscustomobject]@{ Token = $tok; Reason = $reason }
+}

@@ -85,8 +85,11 @@ fi
 
 [ -z "$agent_msg" ] && { hook_log "capture:agent:skipped:no-agent-message"; finish_empty; }
 
-token="$("$SCRIPT_DIR/amt-token.sh" 2>/dev/null || true)"
-[ -z "$token" ] && { hook_log "capture:agent:skipped:no-hook-token"; finish_empty; }
+token_err="$(mktemp)"
+token="$("$SCRIPT_DIR/amt-token.sh" 2>"$token_err" || true)"
+token_reason="$(tr '\n\t' '  ' < "$token_err" | sed 's/^amt-token: //; s/[[:space:]]*$//')"
+rm -f "$token_err"
+[ -z "$token" ] && { hook_log "capture:agent:skipped:no-hook-token:${token_reason:-unknown}"; finish_empty; }
 
 capture_body="$(jq -n --arg t "$thread" --arg c "$agent_msg" '{thread_id:$t, role:"agent", content:$c}')"
 if capture_status="$(curl -sS --max-time 12 -o /dev/null -w '%{http_code}' \

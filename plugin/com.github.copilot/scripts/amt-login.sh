@@ -35,9 +35,29 @@ if [ -z "$access" ] || [ -z "$refresh" ]; then
   exit 1
 fi
 expires_in="$(printf '%s' "$resp" | jq -r '.expires_in // 1800' 2>/dev/null || echo 1800)"
+case "$expires_in" in (''|*[!0-9]*) expires_in=1800 ;; esac
 expires_at="$(( $(date +%s) + expires_in ))"
 
 mkdir -p "$AMT_HOME"; chmod 700 "$AMT_HOME" 2>/dev/null || true
+
+# Signing in is the recovery path for a wedged cache, so drop whatever was there and take the
+# refresh lock: an in-flight hook refresh must not overwrite the token we are about to write.
+# A lock left by a crashed hook is broken after the stale window rather than blocking sign-in.
+rm -f "$AMT_TOKEN_CACHE"
+waited=0
+while [ "$waited" -lt "$AMT_LOCK_TIMEOUT_DS" ]; do
+  if mkdir "$AMT_LOCK_DIR" 2>/dev/null; then
+    trap 'rm -rf "$AMT_LOCK_DIR" 2>/dev/null || true' EXIT INT TERM
+    break
+  fi
+  if [ "$(( $(date +%s) - $(_amt_mtime "$AMT_LOCK_DIR") ))" -ge "$AMT_LOCK_STALE_SECONDS" ]; then
+    rm -rf "$AMT_LOCK_DIR" 2>/dev/null || true
+  else
+    sleep 0.1
+  fi
+  waited=$(( waited + 1 ))
+done
+
 tmp="$(mktemp "${AMT_TOKEN_CACHE}.XXXXXX")"
 jq -n --arg at "$access" --arg rt "$refresh" --argjson ea "$expires_at" \
   '{access_token:$at, refresh_token:$rt, expires_at:$ea, token_type:"HookToken"}' > "$tmp"

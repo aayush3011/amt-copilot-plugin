@@ -1,11 +1,11 @@
 {
-  "name": "amt-memory-canvas",
-  "description": "See what AMT remembers about you, grouped by Personal / Team / Org scope, and act on it.",
+  "name": "memory-house-canvas",
+  "description": "See what Memory House remembers about you, grouped by Personal / Team / Org scope, and act on it.",
   "version": "0.1.1",
   "type": "module",
   "main": "extension.mjs",
   "keywords": [
-    "amt",
+    "memory-house",
     "agent-memory",
     "canvas",
     "dashboard"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# inject.sh - user-turn capture and pre-model recall for the AMT Copilot plugin.
+# inject.sh - user-turn capture and pre-model recall for the Memory House Copilot plugin.
 #
 # Copilot invokes this script in two phases, selected by AMT_HOOK_PHASE:
 #   capture (userPromptSubmitted): record the sanitized user turn, then return {}.
@@ -15,8 +15,8 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin:/usr/bin:/bin:${PATH:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=amt-config.sh
-. "$SCRIPT_DIR/amt-config.sh"
+# shellcheck source=mh-config.sh
+. "$SCRIPT_DIR/mh-config.sh"
 
 phase="${AMT_HOOK_PHASE:-capture}"
 TOP_K="${AMT_INJECT_TOP_K:-8}"
@@ -62,8 +62,8 @@ user_prompt="$(printf '%s' "$prompt" | jq -Rsr '
 [ -n "$user_prompt" ] || { hook_log "${phase}:skipped:notification-only"; finish_empty; }
 
 token_err="$(mktemp)"
-token="$("$SCRIPT_DIR/amt-token.sh" 2>"$token_err" || true)"
-token_reason="$(tr '\n\t' '  ' < "$token_err" | sed 's/^amt-token: //; s/[[:space:]]*$//')"
+token="$("$SCRIPT_DIR/mh-token.sh" 2>"$token_err" || true)"
+token_reason="$(tr '\n\t' '  ' < "$token_err" | sed 's/^mh-token: //; s/[[:space:]]*$//')"
 rm -f "$token_err"
 [ -n "$token" ] || { hook_log "${phase}:skipped:no-hook-token:${token_reason:-unknown}"; finish_empty; }
 
@@ -118,10 +118,10 @@ model_prompt="$transformed_prompt"
 [ -n "$model_prompt" ] || model_prompt="$prompt"
 modified_prompt="${model_prompt}
 
-<amt-memory-context>
-Relevant memory for this developer (from AMT):
+<memory-house-context>
+Relevant memory for this developer (from Memory House):
 ${lines}
-</amt-memory-context>"
+</memory-house-context>"
 
 hook_log "recall:ok:context-injected"
 jq -n --arg prompt "$modified_prompt" '{modifiedTransformedPrompt: $prompt}'

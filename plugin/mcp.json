@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
-    "amt-memory": {
+    "memory-house": {
       "type": "http",
       "url": "https://reranker-api-h2b5czhkfkcphnf4.westus3-01.azurewebsites.net/inference/memory/mcp/"
     }

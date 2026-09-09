@@ -7,8 +7,8 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin:/usr/bin:/bin:${PATH:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=amt-config.sh
-. "$SCRIPT_DIR/amt-config.sh"
+# shellcheck source=mh-config.sh
+. "$SCRIPT_DIR/mh-config.sh"
 
 hook_log() {
   {
@@ -27,7 +27,7 @@ hook_log "login:auto:invoked"
 
 if ! command -v jq >/dev/null 2>&1; then
   hook_log "login:auto:failed:jq-missing"
-  printf '%s\n' '{"modifiedResult":{"resultType":"success","textResultForLlm":"AMT sign-in could not finish because jq is unavailable. Install jq and run /amt-login again. Never display the enrollment credential."}}'
+  printf '%s\n' '{"modifiedResult":{"resultType":"success","textResultForLlm":"Memory House sign-in could not finish because jq is unavailable. Install jq and run /mh-login again. Never display the enrollment credential."}}'
   exit 0
 fi
 
@@ -47,14 +47,14 @@ code="$(printf '%s' "$result_text" | jq -r '
 
 if [ -z "$code" ]; then
   hook_log "login:auto:failed:credential-missing"
-  safe_result "AMT sign-in could not extract the enrollment credential. Call enroll_hook_capture once more. Never display enrollment credentials."
+  safe_result "Memory House sign-in could not extract the enrollment credential. Call enroll_hook_capture once more. Never display enrollment credentials."
   exit 0
 fi
 
-if AMT_ENROLLMENT_CODE="$code" "$SCRIPT_DIR/amt-login.sh" >/dev/null 2>&1; then
+if AMT_ENROLLMENT_CODE="$code" "$SCRIPT_DIR/mh-login.sh" >/dev/null 2>&1; then
   hook_log "login:auto:ok"
-  safe_result "AMT sign-in completed locally. The enrollment credential was redeemed and must not be displayed. Tell the user: Signed in to AMT memory. Capture and recall are now active on this device."
+  safe_result "Memory House sign-in completed locally. The enrollment credential was redeemed and must not be displayed. Tell the user: Signed in to Memory House. Capture and recall are now active on this device."
 else
   hook_log "login:auto:failed:redeem"
-  safe_result "AMT sign-in was not completed because the enrollment credential was invalid or expired. Call enroll_hook_capture one more time; the automatic login hook will redeem the new credential. Never display enrollment credentials."
+  safe_result "Memory House sign-in was not completed because the enrollment credential was invalid or expired. Call enroll_hook_capture one more time; the automatic login hook will redeem the new credential. Never display enrollment credentials."
 fi

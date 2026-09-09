@@ -2,7 +2,7 @@
 # capture.ps1 - agentStop hook (Windows twin of capture.sh). Reads the last assistant message
 # from the transcript and records it as an `agent` turn. Auth: Authorization: HookToken <access>.
 $ErrorActionPreference = 'SilentlyContinue'
-. (Join-Path $PSScriptRoot 'amt-config.ps1')
+. (Join-Path $PSScriptRoot 'mh-config.ps1')
 
 function Write-AmtHookLog([string]$Message) {
   try {

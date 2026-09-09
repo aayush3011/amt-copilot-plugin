@@ -7,7 +7,7 @@
 # transcript format does not match, this is a safe no-op (the user turn is already captured
 # by inject.sh on userPromptSubmitted, the primary, reliable capture path).
 #
-# Auth is a gateway-issued hook token (Authorization: HookToken <access>) via amt-token.sh.
+# Auth is a gateway-issued hook token (Authorization: HookToken <access>) via mh-token.sh.
 set -euo pipefail
 
 # GUI apps (the Copilot desktop app) may spawn hooks with a minimal PATH. Prepend the common
@@ -15,8 +15,8 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin:/usr/bin:/bin:${PATH:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=amt-config.sh
-. "$SCRIPT_DIR/amt-config.sh"
+# shellcheck source=mh-config.sh
+. "$SCRIPT_DIR/mh-config.sh"
 
 hook_log() {
   {
@@ -86,8 +86,8 @@ fi
 [ -z "$agent_msg" ] && { hook_log "capture:agent:skipped:no-agent-message"; finish_empty; }
 
 token_err="$(mktemp)"
-token="$("$SCRIPT_DIR/amt-token.sh" 2>"$token_err" || true)"
-token_reason="$(tr '\n\t' '  ' < "$token_err" | sed 's/^amt-token: //; s/[[:space:]]*$//')"
+token="$("$SCRIPT_DIR/mh-token.sh" 2>"$token_err" || true)"
+token_reason="$(tr '\n\t' '  ' < "$token_err" | sed 's/^mh-token: //; s/[[:space:]]*$//')"
 rm -f "$token_err"
 [ -z "$token" ] && { hook_log "capture:agent:skipped:no-hook-token:${token_reason:-unknown}"; finish_empty; }
 

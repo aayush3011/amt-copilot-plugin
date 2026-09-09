@@ -1,7 +1,7 @@
 {
-  "name": "amt-memory-marketplace",
+  "name": "memory-house-marketplace",
   "metadata": {
-    "description": "Agent Memory Toolkit plugins for GitHub Copilot.",
+    "description": "Memory House plugins for GitHub Copilot.",
     "version": "1.0.0"
   },
   "owner": {
@@ -10,10 +10,10 @@
   },
   "plugins": [
     {
-      "name": "amt-memory",
+      "name": "memory-house",
       "source": "./plugin",
-      "description": "Persistent, scoped agent memory (personal, team, org) backed by Azure Cosmos DB, delivered through the Inference Platform gateway. Bundles the AMT MCP server, a memory skill, deterministic inject/capture hooks, a Memory canvas, and one-click import of GitHub Copilot memory and sessions.",
-      "version": "0.7.5",
+      "description": "Persistent, scoped agent memory (personal, team, org) backed by Azure Cosmos DB, delivered through the Inference Platform gateway. Bundles the Memory House MCP server, a memory skill, deterministic inject/capture hooks, a Memory canvas, and one-click import of GitHub Copilot memory and sessions.",
+      "version": "0.8.0",
       "author": {
         "name": "Aayush Kataria",
         "url": "https://github.com/aayush3011"

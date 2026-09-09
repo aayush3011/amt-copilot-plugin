@@ -1,8 +1,8 @@
 #!/usr/bin/env pwsh
-# amt-logout.ps1 - sign out of AMT memory: revoke the hook token and clear the local cache.
-# Windows twin of amt-logout.sh.
+# mh-logout.ps1 - sign out of Memory House: revoke the hook token and clear the local cache.
+# Windows twin of mh-logout.sh.
 $ErrorActionPreference = 'SilentlyContinue'
-. (Join-Path $PSScriptRoot 'amt-config.ps1')
+. (Join-Path $PSScriptRoot 'mh-config.ps1')
 
 if (-not (Test-Path $script:AmtTokenCache)) { Write-Output '  Not signed in (no local token).'; exit 0 }
 
@@ -16,4 +16,4 @@ try {
 
 Remove-Item -Force -Path $script:AmtTokenCache -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force -Path $script:AmtLockDir -ErrorAction SilentlyContinue
-Write-Output '  Signed out of AMT memory (token revoked and local cache cleared).'
+Write-Output '  Signed out of Memory House (token revoked and local cache cleared).'

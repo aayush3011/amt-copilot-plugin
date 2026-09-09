@@ -1,5 +1,5 @@
 ---
-name: memory-show
+name: mh-show
 description: Open the live Memory House canvas, with an MCP-backed text fallback.
 ---
 
@@ -11,10 +11,10 @@ Open the live Memory House canvas.
 3. Confirm in one sentence that the Memory House canvas is open.
 
 If `memory-house` is unavailable, do not open the generic `editor` canvas. Instead, call the
-exact MCP tools `amt-memory-whoami`, `amt-memory-get_memories`, and
-`amt-memory-search_memories`. Search for `team and organization knowledge, standards, and
+exact MCP tools `memory-house-whoami`, `memory-house-get_memories`, and
+`memory-house-search_memories`. Search for `team and organization knowledge, standards, and
 decisions`, group returned records by `scope_key` into Personal, Team, and Org, and show a
 concise text fallback. Do not invent memories or return an empty response.
 
-The MCP tools keep the `amt-memory-` prefix because that is the MCP server name; only the
+The MCP tools keep the `memory-house-` prefix because that is the MCP server name; only the
 canvas is named `memory-house`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# amt-logout.sh - sign out of AMT memory: revoke the hook token and clear the local cache.
+# mh-logout.sh - sign out of Memory House: revoke the hook token and clear the local cache.
 #
 # Revocation is server-side at the gateway (the refresh record is deleted), so the token
 # cannot be refreshed again even if the local file were recovered. See
@@ -7,8 +7,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=amt-config.sh
-. "$SCRIPT_DIR/amt-config.sh"
+# shellcheck source=mh-config.sh
+. "$SCRIPT_DIR/mh-config.sh"
 
 if [ ! -f "$AMT_TOKEN_CACHE" ]; then
   echo "  Not signed in (no local token)."
@@ -26,4 +26,4 @@ fi
 
 rm -f "$AMT_TOKEN_CACHE"
 rm -rf "$AMT_LOCK_DIR" 2>/dev/null || true
-echo "  Signed out of AMT memory (token revoked and local cache cleared)."
+echo "  Signed out of Memory House (token revoked and local cache cleared)."

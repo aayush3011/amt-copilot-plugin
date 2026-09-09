@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// amt-import-copilot.mjs - GitHub Copilot CLI source for the "import memory" engine, used by
-// BOTH the canvas (in-process) and the terminal CLI (as `node amt-import.mjs <subcommand>`).
+// mh-import-copilot.mjs - GitHub Copilot CLI source for the "import memory" engine, used by
+// BOTH the canvas (in-process) and the terminal CLI (as `node mh-import.mjs <subcommand>`).
 //
 // It reads GitHub Copilot CLI state from ~/.copilot/session-state (STRICTLY read-only - it
-// never creates, updates, renames, or deletes anything there) and imports it into AMT
+// never creates, updates, renames, or deletes anything there) and imports it into Memory House
 // through the IP gateway, using the same gateway-issued hook token the plugin's hooks use
-// (Authorization: HookToken <access>, minted by amt-token.sh). Two flavors:
+// (Authorization: HookToken <access>, minted by mh-token.sh). Two flavors:
 //
 //   1. Local sessions  -> conversation turns posted to POST /memory (with the ORIGINAL
-//      timestamps). AMT's pipeline then extracts / reconciles / summarizes them like any
+//      timestamps). Memory House's pipeline then extracts / reconciles / summarizes them like any
 //      other turns. No extra pass needed.
 //   2. Copilot memories -> Copilot's already-distilled facts posted to POST /facts
 //      (pre-distilled publish, stamped with provenance), then a single POST /reconcile to
@@ -23,7 +23,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-import { resolveGatewayBase, getToken, postJson, preview } from "./amt-import.mjs";
+import { resolveGatewayBase, getToken, postJson, preview } from "./mh-import.mjs";
 
 // Re-exported so the canvas and CLI can keep importing them from the source module.
 export { resolveGatewayBase, getToken, preview };
@@ -194,7 +194,7 @@ export function listSessions(root = DEFAULT_SESSION_ROOT) {
   });
 }
 
-/** Ingest the selected sessions' turns into AMT via POST /memory, preserving timestamps. */
+/** Ingest the selected sessions' turns into Memory House via POST /memory, preserving timestamps. */
 export async function importSessions(ids, { token, base = resolveGatewayBase(), root = DEFAULT_SESSION_ROOT } = {}) {
   const wanted = new Set(ids);
   const sessions = scanSessions(root).filter((session) => wanted.has(session.session_id));
@@ -312,7 +312,7 @@ export function listMemories(root = DEFAULT_SESSION_ROOT) {
 }
 
 /**
- * Publish Copilot's already-distilled memories into AMT as facts (POST /facts), stamping
+ * Publish Copilot's already-distilled memories into Memory House as facts (POST /facts), stamping
  * provenance and the original timestamp, then run a single reconciliation pass so they are
  * consolidated against existing memories.
  */

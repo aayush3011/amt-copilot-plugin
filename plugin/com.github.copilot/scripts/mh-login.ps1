@@ -1,23 +1,23 @@
 #!/usr/bin/env pwsh
-# amt-login.ps1 <enrollment_code> - complete AMT hook sign-in by redeeming an enrollment code.
-# Windows twin of amt-login.sh. Get a code first by calling the enroll_hook_capture MCP tool.
+# mh-login.ps1 <enrollment_code> - complete Memory House hook sign-in by redeeming an enrollment code.
+# Windows twin of mh-login.sh. Get a code first by calling the enroll_hook_capture MCP tool.
 param([string]$EnrollmentCode)
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'amt-config.ps1')
+. (Join-Path $PSScriptRoot 'mh-config.ps1')
 
 if (-not $EnrollmentCode) { $EnrollmentCode = $env:AMT_ENROLLMENT_CODE }
 if (-not $EnrollmentCode) {
-  [Console]::Error.WriteLine('usage: amt-login.ps1 <enrollment_code>  (get a code from the enroll_hook_capture MCP tool)')
+  [Console]::Error.WriteLine('usage: mh-login.ps1 <enrollment_code>  (get a code from the enroll_hook_capture MCP tool)')
   exit 2
 }
 
 try {
   $resp = Invoke-RestMethod -Method Post -Uri "$script:AmtHookBase/redeem" `
     -ContentType 'application/json' -Body (@{ enrollment_code = $EnrollmentCode } | ConvertTo-Json) -TimeoutSec 20
-} catch { [Console]::Error.WriteLine('amt-login: enrollment failed (invalid or expired code). Get a fresh code and retry.'); exit 1 }
+} catch { [Console]::Error.WriteLine('mh-login: enrollment failed (invalid or expired code). Get a fresh code and retry.'); exit 1 }
 
 if (-not $resp.access_token -or -not $resp.refresh_token) {
-  [Console]::Error.WriteLine('amt-login: enrollment failed (invalid or expired code). Get a fresh code and retry.'); exit 1
+  [Console]::Error.WriteLine('mh-login: enrollment failed (invalid or expired code). Get a fresh code and retry.'); exit 1
 }
 $expiresIn = if ($resp.expires_in) { [int]$resp.expires_in } else { 1800 }
 $expiresAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $expiresIn
@@ -34,4 +34,4 @@ try {
 } finally {
   if ($locked) { Exit-AmtLock }
 }
-Write-Output '  Signed in to AMT memory. Capture and recall are now active for this device.'
+Write-Output '  Signed in to Memory House. Capture and recall are now active for this device.'

@@ -1,5 +1,5 @@
-// Extension: amt-memory-canvas
-// A "Memory" panel for the GitHub Copilot app. Shows what AMT remembers about the
+// Extension: memory-house-canvas
+// A "Memory" panel for the GitHub Copilot app. Shows what Memory House remembers about the
 // signed-in developer, grouped by Personal / Team / Org scope, and lets them act on it.
 //
 // Architecture (mirrors github/awesome-copilot canvas extensions):
@@ -7,14 +7,14 @@
 //   - The extension runs a local node:http server that serves the panel HTML and a small
 //     read-only JSON API the page polls. A per-server capability token guards every
 //     request so a cross-site/rebinding caller cannot reach the socket.
-//   - Reads and imports go straight to the AMT REST API over the IP gateway using the
-//     plugin's gateway-issued hook token (amt-token.sh) - the same keyless identity path as
+//   - Reads and imports go straight to the Memory House REST API over the IP gateway using the
+//     plugin's gateway-issued hook token (mh-token.sh) - the same keyless identity path as
 //     the hooks. No `az` and no Entra client id live in the canvas.
 //   - "Import memory" reads local GitHub Copilot CLI state (read-only) via the shared engine
-//     scripts/amt-import.mjs and publishes it: session turns to POST /memory, Copilot's own
+//     scripts/mh-import.mjs and publishes it: session turns to POST /memory, Copilot's own
 //     memories to POST /facts (+ /reconcile).
-//   - Write actions (forget / promote) do NOT call AMT directly. They use
-//     session.send(...) to ask the host agent to run the amt-memory MCP tools, so they
+//   - Write actions (forget / promote) do NOT call Memory House directly. They use
+//     session.send(...) to ask the host agent to run the memory-house MCP tools, so they
 //     reuse the plugin's existing OAuth sign-in and the server-side authz. (forget /
 //     promote REST endpoints do not exist yet; see Docs/amt-plugin-design-sketch.md.)
 
@@ -26,12 +26,12 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
-import { listSessions, importSessions, importMemories, resolveGatewayBase } from "../../scripts/amt-import-copilot.mjs";
+import { listSessions, importSessions, importMemories, resolveGatewayBase } from "../../scripts/mh-import-copilot.mjs";
 import {
   listClaudeSessions,
   importClaudeSessions,
   importClaudeMemories,
-} from "../../scripts/amt-import-claude.mjs";
+} from "../../scripts/mh-import-claude.mjs";
 
 // The gateway data-plane base is customer-configured in exactly one place (the plugin's
 // mcp.json) and resolved by the shared engine; nothing is hardcoded here. Memoized after the
@@ -40,17 +40,17 @@ let _gatewayBase;
 function gatewayBase() {
   return (_gatewayBase ||= resolveGatewayBase());
 }
-// The plugin's token authority is amt-token.sh: it prints a valid gateway-issued hook access
-// token (see amt-config.sh) and refreshes silently. The canvas reuses it, so it needs no
+// The plugin's token authority is mh-token.sh: it prints a valid gateway-issued hook access
+// token (see mh-config.sh) and refreshes silently. The canvas reuses it, so it needs no
 // Entra client id and no `az` - the same keyless path as the hooks and the import engine.
 const SCRIPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts");
 
 // One local server per open canvas instance.
 const servers = new Map();
 
-// --- AMT access -----------------------------------------------------------------------
+// --- Memory House access -----------------------------------------------------------------------
 
-// A valid AMT hook access token from the plugin's token authority (amt-token.sh, which
+// A valid Memory House hook access token from the plugin's token authority (mh-token.sh, which
 // refreshes silently at the gateway). Non-blocking. This is the same token the hooks and the
 // import engine send; the gateway accepts it on every /inference/memory route.
 function getToken() {
@@ -58,13 +58,13 @@ function getToken() {
   const isWindows = process.platform === "win32";
   const cmd = isWindows ? "powershell" : "bash";
   const args = isWindows
-    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(SCRIPTS_DIR, "amt-token.ps1")]
-    : [join(SCRIPTS_DIR, "amt-token.sh")];
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(SCRIPTS_DIR, "mh-token.ps1")]
+    : [join(SCRIPTS_DIR, "mh-token.sh")];
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout: 30000 }, (err, stdout) => {
-      if (err) return reject(new Error("not signed in to AMT; run /amt-login"));
+      if (err) return reject(new Error("not signed in to Memory House; run /mh-login"));
       const t = String(stdout).trim();
-      t ? resolve(t) : reject(new Error("not signed in to AMT; run /amt-login"));
+      t ? resolve(t) : reject(new Error("not signed in to Memory House; run /mh-login"));
     });
   });
 }
@@ -72,9 +72,9 @@ function getToken() {
 // Redeem an enrollment code for a hook token and cache it, entirely in-process.
 //
 // This exists because the Copilot app's agent has no shell tool: it can call MCP tools and
-// canvas actions, but it cannot run amt-login.sh. Without a local execution path the agent
+// canvas actions, but it cannot run mh-login.sh. Without a local execution path the agent
 // can reach, sign-in silently never completes and every hook logs `skipped:no-hook-token`.
-// The CLI keeps using amt-login.sh; both write the identical cache.
+// The CLI keeps using mh-login.sh; both write the identical cache.
 async function redeemEnrollmentCode(code) {
   const res = await fetch(`${gatewayBase()}/hook/redeem`, {
     method: "POST",
@@ -110,7 +110,7 @@ async function amt(path, { method = "GET", body } = {}) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`AMT ${method} ${path} -> ${res.status}`);
+  if (!res.ok) throw new Error(`Memory House ${method} ${path} -> ${res.status}`);
   const text = await res.text();
   return text ? JSON.parse(text) : {};
 }
@@ -294,7 +294,7 @@ async function startServer(instanceId) {
           res.writeHead(200, { "Content-Type": "application/json" });
           return res.end(JSON.stringify(data));
         } catch (e) {
-          if (String(e?.message || e).includes("not signed in to AMT")) {
+          if (String(e?.message || e).includes("not signed in to Memory House")) {
             res.writeHead(401, { "Content-Type": "application/json" });
             return res.end(JSON.stringify({ error: "not_signed_in" }));
           }
@@ -312,8 +312,8 @@ async function startServer(instanceId) {
         return res.end(JSON.stringify({ sessions, source }));
       }
 
-      // Import: ingest the selected sessions' turns into AMT (POST /memory, original
-      // timestamps). AMT's pipeline extracts / reconciles / summarizes them afterward.
+      // Import: ingest the selected sessions' turns into Memory House (POST /memory, original
+      // timestamps). Memory House's pipeline extracts / reconciles / summarizes them afterward.
       if (url.pathname === "/api/import/sessions" && req.method === "POST") {
         if (!guard(req, res, capabilityToken)) return;
         const body = await readJsonBody(req);
@@ -370,20 +370,20 @@ const session = await joinSession({
       id: "memory-house",
       displayName: "Memory House",
       description:
-        "See what AMT remembers about you - personal, team, and org - and act on it. Reads live from the AMT gateway.",
+        "See what Memory House remembers about you - personal, team, and org - and act on it. Reads live from the Memory House gateway.",
       // Actions are agent-callable. Reads run through the panel's own server; writes are
-      // delegated to the host agent so they go through the amt-memory MCP tools + authz.
+      // delegated to the host agent so they go through the memory-house MCP tools + authz.
       actions: [
         {
           name: "complete_signin",
           description:
-            "Finish AMT sign-in by redeeming an enrollment code from the enroll_hook_capture tool. Call this immediately after enroll_hook_capture; it caches the hook token locally so recall and capture start working. Never show the code to the user.",
+            "Finish Memory House sign-in by redeeming an enrollment code from the enroll_hook_capture tool. Call this immediately after enroll_hook_capture; it caches the hook token locally so recall and capture start working. Never show the code to the user.",
           inputSchema: {
             type: "object",
             properties: {
               enrollment_code: {
                 type: "string",
-                description: "The enrollment_code returned by the amt-memory enroll_hook_capture tool.",
+                description: "The enrollment_code returned by the memory-house enroll_hook_capture tool.",
               },
             },
             required: ["enrollment_code"],
@@ -397,7 +397,7 @@ const session = await joinSession({
               return {
                 ok: true,
                 principal: data.who,
-                message: "Signed in to AMT memory. Capture and recall are now active on this device.",
+                message: "Signed in to Memory House. Capture and recall are now active on this device.",
               };
             } catch (e) {
               return { ok: false, error: e.message };
@@ -416,7 +416,7 @@ const session = await joinSession({
         {
           name: "forget_memory",
           description:
-            "Forget a specific memory. Delegates to the host agent, which locates the record and removes it via the amt-memory tools (supersede/forget).",
+            "Forget a specific memory. Delegates to the host agent, which locates the record and removes it via the memory-house tools (supersede/forget).",
           inputSchema: {
             type: "object",
             properties: { content: { type: "string", description: "The memory text to forget (or a close paraphrase)." } },
@@ -426,7 +426,7 @@ const session = await joinSession({
             const c = String(ctx.input?.content || "").slice(0, 500);
             if (!c) return { error: "content required" };
             await session.send(
-              `Using the amt-memory tools, find the memory that matches: "${c}". Show it to me and, once I confirm, forget it. Do not delete anything without confirmation.`,
+              `Using the memory-house tools, find the memory that matches: "${c}". Show it to me and, once I confirm, forget it. Do not delete anything without confirmation.`,
             );
             return { ok: true, delegated: true };
           },
@@ -726,7 +726,7 @@ function renderPanel(token) {
     try {
       const r = await fetch('/api/memory?' + filterQuery(), { headers: { 'x-amt-canvas-token': TOKEN } });
       if (r.status === 401) {
-        err.innerHTML = 'Not signed in to AMT. Run <code>/amt-login</code> in a chat, then refresh.';
+        err.innerHTML = 'Not signed in to Memory House. Run <code>/mh-login</code> in a chat, then refresh.';
         return;
       }
       if (!r.ok) throw new Error('HTTP ' + r.status);

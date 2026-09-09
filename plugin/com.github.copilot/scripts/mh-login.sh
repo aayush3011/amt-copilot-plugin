@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# amt-login.sh <enrollment_code> - complete AMT hook sign-in by redeeming an enrollment code.
+# mh-login.sh <enrollment_code> - complete Memory House hook sign-in by redeeming an enrollment code.
 #
 # The plugin is not an OAuth client. Sign-in is two steps and this script is the second:
 #   1. (agent) call the enroll_hook_capture MCP tool -> a short-lived, single-use code.
@@ -11,15 +11,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=amt-config.sh
-. "$SCRIPT_DIR/amt-config.sh"
+# shellcheck source=mh-config.sh
+. "$SCRIPT_DIR/mh-config.sh"
 
-command -v jq   >/dev/null 2>&1 || { echo "amt-login: 'jq' is required." >&2; exit 1; }
-command -v curl >/dev/null 2>&1 || { echo "amt-login: 'curl' is required." >&2; exit 1; }
+command -v jq   >/dev/null 2>&1 || { echo "mh-login: 'jq' is required." >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo "mh-login: 'curl' is required." >&2; exit 1; }
 
 code="${1:-${AMT_ENROLLMENT_CODE:-}}"
 if [ -z "$code" ]; then
-  echo "usage: amt-login.sh <enrollment_code>" >&2
+  echo "usage: mh-login.sh <enrollment_code>" >&2
   echo "  (get a code by calling the enroll_hook_capture MCP tool first)" >&2
   exit 2
 fi
@@ -31,7 +31,7 @@ resp="$(curl -sS --max-time 20 -X POST "${AMT_HOOK_BASE}/redeem" \
 access="$(printf '%s' "$resp" | jq -r '.access_token // empty' 2>/dev/null || true)"
 refresh="$(printf '%s' "$resp" | jq -r '.refresh_token // empty' 2>/dev/null || true)"
 if [ -z "$access" ] || [ -z "$refresh" ]; then
-  echo "amt-login: enrollment failed (invalid or expired code). Ask again for a fresh code and retry." >&2
+  echo "mh-login: enrollment failed (invalid or expired code). Ask again for a fresh code and retry." >&2
   exit 1
 fi
 expires_in="$(printf '%s' "$resp" | jq -r '.expires_in // 1800' 2>/dev/null || echo 1800)"
@@ -64,4 +64,4 @@ jq -n --arg at "$access" --arg rt "$refresh" --argjson ea "$expires_at" \
 chmod 600 "$tmp" 2>/dev/null || true
 mv -f "$tmp" "$AMT_TOKEN_CACHE"
 
-echo "  Signed in to AMT memory. Capture and recall are now active for this device."
+echo "  Signed in to Memory House. Capture and recall are now active for this device."

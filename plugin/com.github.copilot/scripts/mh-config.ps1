@@ -1,26 +1,26 @@
-# amt-config.ps1 - shared config for the AMT plugin hook helpers (dot-sourced).
+# mh-config.ps1 - shared config for the Memory House plugin hook helpers (dot-sourced).
 #
-# Windows twin of amt-config.sh. The plugin authenticates to AMT through the gateway's
+# Windows twin of mh-config.sh. The plugin authenticates to Memory House through the gateway's
 # hook-token flow: no Entra client id, no OAuth here. Sign-in is a one-time enrollment (the
-# agent calls the enroll_hook_capture MCP tool for a code; amt-login.ps1 redeems it). One
-# source of truth for amt-token/amt-login/amt-logout/inject/capture.
+# agent calls the enroll_hook_capture MCP tool for a code; mh-login.ps1 redeems it). One
+# source of truth for amt-token/mh-login/mh-logout/inject/capture.
 # See Docs/amt-hook-token-contract.md.
 
 # Single source of truth for the gateway is the plugin's mcp.json - the one URL the customer
 # configures. Derive the data-plane base from it (strip the trailing /mcp[/]); AMT_GATEWAY_BASE
-# overrides for tests / local dev. Windows twin of amt-config.sh.
+# overrides for tests / local dev. Windows twin of mh-config.sh.
 function Get-AmtGatewayBaseFromMcp {
   $mcp = Join-Path $PSScriptRoot '..\..\mcp.json'
   if (-not (Test-Path $mcp)) { return $null }
   try {
-    $url = (Get-Content -Raw -Path $mcp | ConvertFrom-Json).mcpServers.'amt-memory'.url
+    $url = (Get-Content -Raw -Path $mcp | ConvertFrom-Json).mcpServers.'memory-house'.url
     if ($url) { return ($url -replace '/mcp/?$', '' -replace '/$', '') }
   } catch { }
   return $null
 }
 
 $script:AmtGatewayBase = if ($env:AMT_GATEWAY_BASE) { $env:AMT_GATEWAY_BASE.TrimEnd('/') } else { Get-AmtGatewayBaseFromMcp }
-if (-not $script:AmtGatewayBase) { [Console]::Error.WriteLine('amt-config: gateway not configured (no amt-memory url in mcp.json); set AMT_GATEWAY_BASE') }
+if (-not $script:AmtGatewayBase) { [Console]::Error.WriteLine('mh-config: gateway not configured (no memory-house url in mcp.json); set AMT_GATEWAY_BASE') }
 $script:AmtHookBase    = if ($env:AMT_HOOK_BASE)    { $env:AMT_HOOK_BASE }    else { "$script:AmtGatewayBase/hook" }
 
 $script:AmtCopilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }
@@ -56,17 +56,17 @@ function Exit-AmtLock {
   Remove-Item -Recurse -Force $script:AmtLockDir -ErrorAction SilentlyContinue
 }
 
-# amt-token.ps1 reports why it failed on stderr via [Console]::Error, which bypasses the
+# mh-token.ps1 reports why it failed on stderr via [Console]::Error, which bypasses the
 # PowerShell error stream for an in-process call. Capture it so hooks can log the reason
 # instead of a bare "no-hook-token".
 function Get-AmtTokenWithReason {
   $writer = New-Object System.IO.StringWriter
   $previous = [Console]::Error
   [Console]::SetError($writer)
-  try { $tok = & (Join-Path $PSScriptRoot 'amt-token.ps1') }
+  try { $tok = & (Join-Path $PSScriptRoot 'mh-token.ps1') }
   catch { $tok = $null }
   finally { [Console]::SetError($previous) }
   $tok = @($tok) | Where-Object { $_ } | Select-Object -Last 1
-  $reason = (($writer.ToString() -replace '^amt-token:\s*', '') -replace '\s+', ' ').Trim()
+  $reason = (($writer.ToString() -replace '^mh-token:\s*', '') -replace '\s+', ' ').Trim()
   return [pscustomobject]@{ Token = $tok; Reason = $reason }
 }

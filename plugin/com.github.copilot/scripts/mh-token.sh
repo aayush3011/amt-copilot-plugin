@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# amt-token.sh - print a valid AMT hook access token on stdout, or exit non-zero.
+# mh-token.sh - print a valid Memory House hook access token on stdout, or exit non-zero.
 #
 # Non-interactive (safe to call from hooks). Resolution order:
 #   1. AMT_ACCESS_TOKEN env override  -> printed verbatim (notebooks / CI escape hatch).
 #   2. cached access token, still valid (with skew) -> printed.
 #   3. cached refresh token -> silent refresh at the gateway, cache updated, token printed.
-#   4. otherwise -> exit 1 (caller no-ops; developer must run /amt-login).
+#   4. otherwise -> exit 1 (caller no-ops; developer must run /mh-login).
 #
 # Refresh tokens are single-use and rotate: the gateway consumes the presented token and issues
 # a new one. Three hooks (inject capture, inject recall, capture) can run concurrently, so the
@@ -17,8 +17,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=amt-config.sh
-. "$SCRIPT_DIR/amt-config.sh"
+# shellcheck source=mh-config.sh
+. "$SCRIPT_DIR/mh-config.sh"
 
 # 1) Explicit override.
 if [ -n "${AMT_ACCESS_TOKEN:-}" ]; then
@@ -26,9 +26,9 @@ if [ -n "${AMT_ACCESS_TOKEN:-}" ]; then
   exit 0
 fi
 
-command -v jq   >/dev/null 2>&1 || { echo "amt-token: jq not found" >&2; exit 1; }
-command -v curl >/dev/null 2>&1 || { echo "amt-token: curl not found" >&2; exit 1; }
-[ -f "$AMT_TOKEN_CACHE" ] || { echo "amt-token: not signed in (no cache); run /amt-login" >&2; exit 1; }
+command -v jq   >/dev/null 2>&1 || { echo "mh-token: jq not found" >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo "mh-token: curl not found" >&2; exit 1; }
+[ -f "$AMT_TOKEN_CACHE" ] || { echo "mh-token: not signed in (no cache); run /mh-login" >&2; exit 1; }
 
 _amt_read_cache() {
   access=""; expires_at=0; refresh=""
@@ -52,7 +52,7 @@ if _amt_access_is_fresh; then
 fi
 
 # 3) Silent refresh at the gateway, serialised across concurrent hooks.
-[ -n "$refresh" ] || { echo "amt-token: access token expired and no refresh token; run /amt-login" >&2; exit 1; }
+[ -n "$refresh" ] || { echo "mh-token: access token expired and no refresh token; run /mh-login" >&2; exit 1; }
 
 _amt_locked=0
 _amt_unlock() {
@@ -85,7 +85,7 @@ if ! _amt_lock; then
     printf '%s' "$access"
     exit 0
   fi
-  echo "amt-token: timed out waiting for a concurrent refresh; will retry" >&2
+  echo "mh-token: timed out waiting for a concurrent refresh; will retry" >&2
   exit 1
 fi
 
@@ -96,7 +96,7 @@ if _amt_access_is_fresh; then
   printf '%s' "$access"
   exit 0
 fi
-[ -n "$refresh" ] || { echo "amt-token: not signed in (cache cleared); run /amt-login" >&2; exit 1; }
+[ -n "$refresh" ] || { echo "mh-token: not signed in (cache cleared); run /mh-login" >&2; exit 1; }
 
 now="$(date +%s)"
 resp="$(curl -sS --max-time 20 -w $'\n%{http_code}' -X POST "${AMT_HOOK_BASE}/refresh" \
@@ -112,18 +112,18 @@ case "$status" in
   # make this token work again, so drop it rather than wedge every future hook.
   401)
     rm -f "$AMT_TOKEN_CACHE"
-    echo "amt-token: refresh rejected (token revoked or expired); signed out, run /amt-login" >&2
+    echo "mh-token: refresh rejected (token revoked or expired); signed out, run /mh-login" >&2
     exit 1 ;;
   # 400, 404 (hook surface disabled), 5xx and transport failures are not the token's fault -
   # keep the cache so a later attempt can still succeed. curl reports 000 when it never got
   # a response at all.
-  ''|000) echo "amt-token: refresh unreachable (network); keeping cache, will retry" >&2; exit 1 ;;
-  *)      echo "amt-token: refresh failed (HTTP ${status}); keeping cache, will retry" >&2; exit 1 ;;
+  ''|000) echo "mh-token: refresh unreachable (network); keeping cache, will retry" >&2; exit 1 ;;
+  *)      echo "mh-token: refresh failed (HTTP ${status}); keeping cache, will retry" >&2; exit 1 ;;
 esac
 
 new_access="$(printf '%s' "$body" | jq -r '.access_token // empty' 2>/dev/null || true)"
 if [ -z "$new_access" ]; then
-  echo "amt-token: refresh returned no access token; run /amt-login" >&2
+  echo "mh-token: refresh returned no access token; run /mh-login" >&2
   exit 1
 fi
 new_refresh="$(printf '%s' "$body" | jq -r '.refresh_token // empty' 2>/dev/null || true)"

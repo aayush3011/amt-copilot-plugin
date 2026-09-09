@@ -1,12 +1,12 @@
-# AMT Memory - Agent Plugin (POC)
+# Memory House - Agent Plugin (POC)
 
-Packages the deployed AMT memory service as an Agent Plugin 1.0 for the GitHub Copilot app
+Packages the deployed Memory House service as an Agent Plugin 1.0 for the GitHub Copilot app
 (also VS Code and the CLI). It bundles:
 
-- **MCP server** (`mcp.json`) - the `amt-memory` server with its 12 tools, via the IP
+- **MCP server** (`mcp.json`) - the `memory-house` server with its 12 tools, via the IP
   gateway (OAuth sign-in handled by the client, no token in the file).
-- **Skills** (`skills/use-memory/`, `skills/amt-login/`) - teach the agent to use memory and
-  provide the `/amt-login` workflow.
+- **Skills** (`skills/use-memory/`, `skills/mh-login/`) - teach the agent to use memory and
+  provide the `/mh-login` workflow.
 - **Hooks** (`hooks/hooks.json`) - deterministic recall and capture that MCP alone
   cannot do:
   - `userPromptSubmitted` -> `inject.sh` captures the sanitized user turn.
@@ -14,10 +14,10 @@ Packages the deployed AMT memory service as an Agent Plugin 1.0 for the GitHub C
     model-facing prompt.
   - `postToolUse` on `enroll_hook_capture` -> redeems the credential locally and replaces
     the tool result so the credential cannot appear in the agent response.
-  - `agentStop` -> `capture.sh` appends the turn to AMT.
-- **Commands** (`com.github.copilot/commands/`) - `/memory-show`, `/forget`.
+  - `agentStop` -> `capture.sh` appends the turn to Memory House.
+- **Commands** (`com.github.copilot/commands/`) - `/mh-show`, `/forget`.
 - **Canvas** (`com.github.copilot/extensions/memory-canvas/`) - a "Memory" panel that
-  shows what AMT remembers about you, grouped by Personal / Team / Org, with refresh /
+  shows what Memory House remembers about you, grouped by Personal / Team / Org, with refresh /
   forget / promote actions. See its own README.
 
 The backend (gateway + managed service + core + durable pipeline + Cosmos) is unchanged;
@@ -30,25 +30,25 @@ plugin/
 ├── plugin.json
 ├── mcp.json
 ├── hooks/hooks.json
-├── skills/{use-memory,amt-login}/SKILL.md
+├── skills/{use-memory,mh-login}/SKILL.md
 └── com.github.copilot/
     ├── scripts/{inject,capture,complete-login,amt-token}.sh
-    ├── commands/{memory-show,forget}.md
+    ├── commands/{mh-show,forget}.md
     └── extensions/memory-canvas/{package.json,extension.mjs,README.md}
 ```
 
 ## Prerequisites
 
 - `jq` and `curl` on PATH (used by the macOS/Linux hook scripts).
-- Run `/amt-login` once after connecting the MCP server so the hooks have a gateway-issued
+- Run `/mh-login` once after connecting the MCP server so the hooks have a gateway-issued
   access/refresh token.
 - The scripts are executable: `chmod +x com.github.copilot/scripts/*.sh`.
 
 ## What is demo-grade vs. real
 
-- **Auth (`amt-token.sh`)**: reads and silently refreshes the hook token enrolled by
-  `/amt-login`; it does not depend on an interactive Azure CLI session.
-- **Login completion**: `/amt-login` only calls `enroll_hook_capture`; `complete-login.sh`
+- **Auth (`mh-token.sh`)**: reads and silently refreshes the hook token enrolled by
+  `/mh-login`; it does not depend on an interactive Azure CLI session.
+- **Login completion**: `/mh-login` only calls `enroll_hook_capture`; `complete-login.sh`
   performs redemption deterministically in `postToolUse`. It does not depend on the model
   remembering a second step or on opening the canvas first.
 - **Hook lifecycle**: `userPromptSubmitted` performs capture as a side effect and returns `{}`;
@@ -58,11 +58,11 @@ plugin/
 - **Diagnostics**: hook invocations and non-sensitive outcomes are appended to
   `~/.copilot/amt/hook.log`; prompts, memories, and tokens are never logged there.
 - **Windows**: PowerShell hook entries and `.ps1` twins are included.
-- **`/forget`**: no delete endpoint exists yet (AMT supersedes, not deletes).
+- **`/forget`**: no delete endpoint exists yet (Memory House supersedes, not deletes).
 
 ## Quick local check (no Copilot needed)
 
-Verify the scripts talk to AMT with your identity:
+Verify the scripts talk to Memory House with your identity:
 
 ```bash
 # user capture phase

@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "amt-memory",
-  "description": "Persistent, scoped agent memory (personal, team, org) backed by Azure Cosmos DB, delivered through the Inference Platform gateway.",
-  "version": "0.7.5",
+  "name": "memory-house",
+  "description": "Memory House: persistent, scoped agent memory (personal, team, org) backed by Azure Cosmos DB, delivered through the Inference Platform gateway.",
+  "version": "0.8.0",
   "author": {
     "name": "Aayush Kataria",
     "url": "https://github.com/aayush3011"
@@ -10,7 +10,7 @@
   "repository": "https://github.com/aayush3011/amt-copilot-plugin",
   "license": "MIT",
   "keywords": [
-    "amt",
+    "memory-house",
     "agent-memory",
     "cosmos-db",
     "mcp",
@@ -18,12 +18,12 @@
     "memory"
   ],
   "skills": [
-    "skills/amt-import/",
+    "skills/mh-import/",
     "skills/import-claude-memory/",
     "skills/import-copilot-memory/",
-    "skills/amt-login/",
-    "skills/amt-logout/",
-    "skills/memory-show/",
+    "skills/mh-login/",
+    "skills/mh-logout/",
+    "skills/mh-show/",
     "skills/use-memory/"
   ],
   "hooks": "hooks/hooks.json",

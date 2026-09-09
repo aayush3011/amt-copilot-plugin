@@ -1,8 +1,8 @@
-# Installing the AMT plugin into the GitHub Copilot app (Mac)
+# Installing the Memory House plugin into the GitHub Copilot app (Mac)
 
 The Copilot app installs plugins from a **marketplace** (a GitHub repo), not from a local
 folder. This repo is now set up to be that marketplace: `.github/plugin/marketplace.json`
-lists the `amt-memory` plugin, sourced from `./plugin`.
+lists the `memory-house` plugin, sourced from `./plugin`.
 
 ## One-time: publish the marketplace
 
@@ -11,7 +11,7 @@ branch the app can fetch.
 
 ```bash
 git add .github/plugin/marketplace.json plugin/
-git commit -m "Add amt-memory plugin + marketplace manifest"
+git commit -m "Add memory-house plugin + marketplace manifest"
 git push
 ```
 
@@ -26,20 +26,20 @@ testing or merge to the default branch.
 3. Click the **gear icon** next to the marketplace dropdown -> **Add custom marketplace**.
 4. Enter the repo: `aayush3011/AgentMemoryToolkit-private`
    (or the full URL `https://github.com/aayush3011/AgentMemoryToolkit-private`).
-5. The marketplace loads and `amt-memory` appears in the Plugins list.
+5. The marketplace loads and `memory-house` appears in the Plugins list.
 
 ## Install and use
 
-1. Find **amt-memory** in the Plugins list -> **Install**.
+1. Find **memory-house** in the Plugins list -> **Install**.
 2. The app loads its pieces:
-   - **MCP server** (`amt-memory`, 12 tools) -> sign in with Microsoft when prompted
+   - **MCP server** (`memory-house`, 12 tools) -> sign in with Microsoft when prompted
      (the gateway's OAuth discovery drives this).
-   - **Skills** (`use-memory`, `amt-login`) -> appear under Customize -> Skills.
+   - **Skills** (`use-memory`, `mh-login`) -> appear under Customize -> Skills.
    - **Hooks** (user capture / recall / agent capture) -> run locally; need `jq` and `curl`
      on PATH. Copilot discovers them from the plugin-root `hooks/hooks.json`.
-   - **Canvas** (`AMT Memory`) -> appears under Customize -> Canvas; open it in a session.
-3. Verify: in a chat, "call the amt-memory whoami tool" -> expect your `user:<oid>` and
-   tenant. Then open the **AMT Memory** canvas to see facts grouped by Personal / Team / Org.
+   - **Canvas** (`Memory House`) -> appears under Customize -> Canvas; open it in a session.
+3. Verify: in a chat, "call the memory-house whoami tool" -> expect your `user:<oid>` and
+   tenant. Then open the **Memory House** canvas to see facts grouped by Personal / Team / Org.
 
 ## Things to confirm on first install (spec is new/evolving)
 
@@ -49,7 +49,7 @@ testing or merge to the default branch.
 - **Copilot registration**: skills, hooks, commands, and the MCP server use their top-level
   component paths. The canvas remains under `extensions.com.github.copilot.extensions`,
   which is the registration shape used by the Copilot app's canvas loader.
-- **Hook auth**: run `/amt-login` once after the MCP server is connected. A `postToolUse`
+- **Hook auth**: run `/mh-login` once after the MCP server is connected. A `postToolUse`
   hook automatically redeems the MCP enrollment credential and caches the gateway-issued
   access/refresh token; the agent never needs to print the credential or perform step 2.
 - **Hook diagnostics**: after sending a test prompt, inspect `~/.copilot/amt/hook.log`.

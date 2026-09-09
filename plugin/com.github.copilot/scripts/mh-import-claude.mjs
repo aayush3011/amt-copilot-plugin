@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// amt-import-claude.mjs - Claude Code source for the shared "import memory" engine.
+// mh-import-claude.mjs - Claude Code source for the shared "import memory" engine.
 //
-// Sibling of amt-import.mjs, which reads GitHub Copilot CLI state. This module reads Claude
+// Sibling of mh-import.mjs, which reads GitHub Copilot CLI state. This module reads Claude
 // Code state from ~/.claude/projects (STRICTLY read-only) and exposes the same two flavors,
 // so the canvas and CLI treat every source identically:
 //
 //   1. Local sessions -> conversation turns posted to POST /memory with the ORIGINAL
-//      timestamps, for AMT's own pipeline to extract, reconcile, and summarize.
+//      timestamps, for Memory House's own pipeline to extract, reconcile, and summarize.
 //   2. Claude memories -> Claude's already-distilled memory files posted to POST /facts,
 //      then a single POST /reconcile to consolidate them against existing memories.
 //
@@ -21,13 +21,13 @@
 //   * Memories live at projects/<project-slug>/memory/*.md with optional YAML front matter,
 //     ranked by the order MEMORY.md links to them.
 //
-// Dependency-free: Node built-ins plus the transport helpers from amt-import.mjs.
+// Dependency-free: Node built-ins plus the transport helpers from mh-import.mjs.
 
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, relative, posix } from "node:path";
 import { homedir } from "node:os";
 
-import { resolveGatewayBase, getToken, postJson, preview } from "./amt-import.mjs";
+import { resolveGatewayBase, getToken, postJson, preview } from "./mh-import.mjs";
 
 // Where Claude Code writes per-project session state. Override for tests or a relocated home.
 export const DEFAULT_CLAUDE_ROOT =
@@ -306,7 +306,7 @@ export function listClaudeMemories(root = DEFAULT_CLAUDE_ROOT) {
 }
 
 /**
- * Publish Claude's already-distilled memories into AMT as facts (POST /facts), stamped with
+ * Publish Claude's already-distilled memories into Memory House as facts (POST /facts), stamped with
  * provenance and the original timestamp, then run one reconciliation pass so they consolidate
  * against existing memories. Same contract as the Copilot memory import.
  */

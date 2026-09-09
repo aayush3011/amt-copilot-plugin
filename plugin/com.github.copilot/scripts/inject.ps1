@@ -2,7 +2,7 @@
 # inject.ps1 - Windows twin of inject.sh. AMT_HOOK_PHASE selects user-turn capture from
 # userPromptSubmitted or model-facing recall from userPromptTransformed. Both phases fail open.
 $ErrorActionPreference = 'SilentlyContinue'
-. (Join-Path $PSScriptRoot 'amt-config.ps1')
+. (Join-Path $PSScriptRoot 'mh-config.ps1')
 
 $phase = if ($env:AMT_HOOK_PHASE) { $env:AMT_HOOK_PHASE } else { 'capture' }
 $topK = if ($env:AMT_INJECT_TOP_K) { [int]$env:AMT_INJECT_TOP_K } else { 8 }
@@ -95,6 +95,6 @@ if (-not $lines) { Write-AmtHookLog 'recall:ok:no-results'; Write-EmptyAndExit }
 
 $modelPrompt = [string]$transformedPrompt
 if (-not $modelPrompt) { $modelPrompt = [string]$prompt }
-$modifiedPrompt = "$modelPrompt`n`n<amt-memory-context>`nRelevant memory for this developer (from AMT):`n$lines`n</amt-memory-context>"
+$modifiedPrompt = "$modelPrompt`n`n<memory-house-context>`nRelevant memory for this developer (from Memory House):`n$lines`n</memory-house-context>"
 Write-AmtHookLog 'recall:ok:context-injected'
 @{ modifiedTransformedPrompt = $modifiedPrompt } | ConvertTo-Json -Compress

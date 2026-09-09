@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// amt-import.mjs - the shared "import memory" engine and CLI dispatcher.
+// mh-import.mjs - the shared "import memory" engine and CLI dispatcher.
 //
 // This file owns everything that is the same for every source: gateway resolution, auth,
 // transport, preview formatting, and the terminal CLI. Each agent's own reader lives beside
 // it and imports these helpers:
 //
-//   amt-import-copilot.mjs   GitHub Copilot CLI  (~/.copilot/session-state)
-//   amt-import-claude.mjs    Claude Code         (~/.claude/projects)
+//   mh-import-copilot.mjs   GitHub Copilot CLI  (~/.copilot/session-state)
+//   mh-import-claude.mjs    Claude Code         (~/.claude/projects)
 //
 // Both sources offer the same two flavors:
 //
 //   1. Local sessions -> conversation turns posted to POST /memory with the ORIGINAL
-//      timestamps, for AMT's pipeline to extract, reconcile, and summarize.
+//      timestamps, for Memory House's pipeline to extract, reconcile, and summarize.
 //   2. Saved memories -> the agent's already-distilled facts posted to POST /facts, then a
 //      single POST /reconcile to consolidate them against existing memories.
 //
@@ -22,10 +22,10 @@
 // file. They import these helpers from here, so a static import would make the two files
 // circular; deferring it to call time keeps module evaluation acyclic.
 //
-//   node amt-import.mjs list-sessions [--source claude]
-//   node amt-import.mjs import-sessions --all [--source claude]
-//   node amt-import.mjs list-memories [--source claude]
-//   node amt-import.mjs import-memories [--source claude]
+//   node mh-import.mjs list-sessions [--source claude]
+//   node mh-import.mjs import-sessions --all [--source claude]
+//   node mh-import.mjs list-memories [--source claude]
+//   node mh-import.mjs import-memories [--source claude]
 //
 // Dependency-free: Node built-ins plus global fetch.
 
@@ -42,19 +42,19 @@ const REQUEST_TIMEOUT_MS = 90_000;
 
 /**
  * Resolve the gateway data-plane base (…/inference/memory). Order: AMT_GATEWAY_BASE override,
- * then the plugin's mcp.json (amt-memory server url with the trailing /mcp[/] stripped). This
+ * then the plugin's mcp.json (memory-house server url with the trailing /mcp[/] stripped). This
  * keeps the gateway customer-configurable in exactly one place and never hardcoded here.
  */
 export function resolveGatewayBase() {
   if (process.env.AMT_GATEWAY_BASE) return process.env.AMT_GATEWAY_BASE.replace(/\/+$/, "");
   try {
     const mcp = JSON.parse(readFileSync(join(SCRIPT_DIR, "..", "..", "mcp.json"), "utf8"));
-    const url = mcp && mcp.mcpServers && mcp.mcpServers["amt-memory"] && mcp.mcpServers["amt-memory"].url;
+    const url = mcp && mcp.mcpServers && mcp.mcpServers["memory-house"] && mcp.mcpServers["memory-house"].url;
     if (url) return String(url).replace(/\/mcp\/?$/i, "").replace(/\/+$/, "");
   } catch {
     /* fall through to the actionable error */
   }
-  throw new Error("AMT gateway not configured: set AMT_GATEWAY_BASE or the amt-memory url in mcp.json.");
+  throw new Error("Memory House gateway not configured: set AMT_GATEWAY_BASE or the memory-house url in mcp.json.");
 }
 
 // Flatten a turn into a short, single-line preview for the picker. Strips fenced code blocks,
@@ -73,7 +73,7 @@ export function preview(text, max = 130) {
 }
 
 
-/** Return a valid AMT hook access token, reusing the plugin's token authority (amt-token.sh). */
+/** Return a valid Memory House hook access token, reusing the plugin's token authority (mh-token.sh). */
 export function getToken() {
   if (process.env.AMT_ACCESS_TOKEN) return process.env.AMT_ACCESS_TOKEN.trim();
   const isWindows = platform() === "win32";
@@ -81,16 +81,16 @@ export function getToken() {
     const out = isWindows
       ? execFileSync(
           "powershell",
-          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(SCRIPT_DIR, "amt-token.ps1")],
+          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", join(SCRIPT_DIR, "mh-token.ps1")],
           { encoding: "utf8", timeout: 30_000 },
         )
-      : execFileSync("bash", [join(SCRIPT_DIR, "amt-token.sh")], { encoding: "utf8", timeout: 30_000 });
+      : execFileSync("bash", [join(SCRIPT_DIR, "mh-token.sh")], { encoding: "utf8", timeout: 30_000 });
     const token = (out || "").trim();
     if (token) return token;
   } catch {
     /* fall through to the actionable error */
   }
-  throw new Error("Not signed in to AMT. Run /amt-login first, then retry the import.");
+  throw new Error("Not signed in to Memory House. Run /mh-login first, then retry the import.");
 }
 
 export async function postJson(url, body, token) {
@@ -120,8 +120,8 @@ export async function postJson(url, body, token) {
 // Source modules are described by name only; runCli imports the chosen one at call time so
 // this file and the source files are not circular.
 const SOURCES = {
-  copilot: { label: "GitHub Copilot", module: "./amt-import-copilot.mjs", prefix: "" },
-  claude: { label: "Claude Code", module: "./amt-import-claude.mjs", prefix: "Claude" },
+  copilot: { label: "GitHub Copilot", module: "./mh-import-copilot.mjs", prefix: "" },
+  claude: { label: "Claude Code", module: "./mh-import-claude.mjs", prefix: "Claude" },
 };
 const DEFAULT_SOURCE = "copilot";
 
@@ -185,7 +185,7 @@ async function runCli(argv) {
     }
     const result = await source.importSessions(ids, { root });
     console.log(
-      `Imported ${result.messages} messages from ${result.sessions} session(s). AMT will extract and reconcile them.`,
+      `Imported ${result.messages} messages from ${result.sessions} session(s). Memory House will extract and reconcile them.`,
     );
     return 0;
   }
@@ -213,7 +213,7 @@ async function runCli(argv) {
   }
 
   console.error(
-    "Usage: amt-import.mjs <list-sessions|import-sessions|list-memories|import-memories> " +
+    "Usage: mh-import.mjs <list-sessions|import-sessions|list-memories|import-memories> " +
       "[--source copilot|claude] [--all] [--json] [--root <dir>] [ids...]",
   );
   return 1;

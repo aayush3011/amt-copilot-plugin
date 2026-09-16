@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import { fixtureDeployment } from './helpers/deployment.mjs';
 import { connectMcp, isolatedEnvironment, rootSnapshot } from './helpers/runtime.mjs';
 import { mockGateway } from './helpers/gateway.mjs';
 import { connectCodexAppServer } from './helpers/codex.mjs';
+import { PLUGIN_ROOT, MARKETPLACE_FILES, PACKAGE_FILES, verifyPayload } from '../scripts/package-files.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const run = promisify(execFile);
@@ -30,19 +31,19 @@ const HOSTS = {
 
 async function discover(root, host) {
   const spec = HOSTS[host];
-  const catalog = await json(join(root, spec.catalog));
+  const catalog = await json(join(dirname(root), spec.catalog));
   assert.equal(catalog.name, 'memory-house-marketplace');
   assert.equal(catalog.plugins.length, 1);
   const entry = catalog.plugins[0];
   assert.equal(entry.name, 'memory-house');
-  assert.equal(entry.version, '0.12.3');
+  assert.equal(entry.version, '0.12.4');
   const source = entry.source.path ?? entry.source;
-  assert.equal(source, './');
-  const pluginRoot = resolve(root, source);
+  assert.equal(source, './plugin');
+  const pluginRoot = resolve(dirname(root), source);
   assert.equal(pluginRoot, resolve(root));
   const manifest = await json(join(pluginRoot, spec.manifest));
   assert.equal(manifest.name, 'memory-house');
-  assert.equal(manifest.version, '0.12.3');
+  assert.equal(manifest.version, '0.12.4');
   let hookPath;
   let mcpPath;
   if (host === 'codex' || host === 'copilot') {
@@ -51,7 +52,7 @@ async function discover(root, host) {
     assert.equal(manifest.skills, './skills/');
     hookPath = manifest.hooks;
     mcpPath = manifest.mcpServers;
-    assert.equal(hookPath, host === 'codex' ? './.codex/plugin-hooks.json' : './com.github.copilot/hooks/hooks.json');
+    assert.equal(hookPath, `./${spec.directory}/plugin-hooks.json`);
     assert.equal(mcpPath, './mcp.json');
   } else {
     hookPath = manifest.hooks;
@@ -118,15 +119,35 @@ async function hook(host, event, payload, env, root, shell = process.platform ==
   return { ...response, parsed };
 }
 
-test('every catalog selects this same root and precisely its own native components', async t => {
+test('every root catalog selects the same curated payload and precisely its native components', async t => {
   const root = await rootSnapshot(t);
   for (const host of Object.keys(HOSTS)) await discover(root, host);
-  for (const path of ['node_modules', 'src', 'dist', 'plugin', '.maintainer', 'package-lock.json', '.mcp.json', 'hooks', '.github/hooks', '.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json']) {
+  for (const path of ['node_modules', 'src', 'dist', 'plugin', 'test', 'docs', 'scripts', '.git', '.maintainer',
+    'package.json', 'package-lock.json', 'GETTING_STARTED_MH_COPILOT_PLUGIN.md', '.mcp.json', 'hooks',
+    '.github/hooks', '.claude/settings.json', '.codex/hooks.json', '.cursor/hooks.json', ...MARKETPLACE_FILES]) {
     await assert.rejects(access(join(root, path)), { code: 'ENOENT' });
   }
   assert.equal((await json(join(ROOT, 'package.json'))).dependencies, undefined);
   assert.equal((await json(join(ROOT, 'package.json'))).devDependencies, undefined);
   assert.equal((await json(join(ROOT, 'package.json'))).workspaces, undefined);
+});
+
+test('the published payload contains exactly runtime content and no empty or linked entries', async () => {
+  const manifest = await json(join(PLUGIN_ROOT, 'runtime/manifest.json'));
+  const actual = await verifyPayload([...Object.keys(manifest.outputs), 'manifest.json']);
+  assert.equal(actual.length, PACKAGE_FILES.length + Object.keys(manifest.outputs).length + 1);
+  assert.equal(await readFile(join(PLUGIN_ROOT, 'LICENSE'), 'utf8'), await readFile(join(ROOT, 'LICENSE'), 'utf8'));
+});
+
+test('payload checks reject extra maintainer files and empty directories', async t => {
+  const extra = await rootSnapshot(t);
+  const manifest = await json(join(extra, 'runtime/manifest.json'));
+  const runtimeFiles = [...Object.keys(manifest.outputs), 'manifest.json'];
+  await writeFile(join(extra, 'package.json'), '{"private":true}');
+  await assert.rejects(verifyPayload(runtimeFiles, extra), /Unexpected: package\.json/);
+  const empty = await rootSnapshot(t);
+  await mkdir(join(empty, 'empty'));
+  await assert.rejects(verifyPayload(runtimeFiles, empty), /Empty plugin payload directory: empty/);
 });
 
 test('packaged mh commands match their directories and real MCP tools', async t => {
@@ -148,17 +169,17 @@ test('included runtime is reproducible, license-complete and in the Git-publisha
   await buildRuntime({ check: true });
   const env = await isolatedEnvironment(t);
   const other = await buildRuntime({ outputRoot: join(env.HOME, 'rebuilt-runtime') });
-  const manifest = await json(join(ROOT, 'runtime/manifest.json'));
+  const manifest = await json(join(PLUGIN_ROOT, 'runtime/manifest.json'));
   for (const [name, digest] of Object.entries(manifest.outputs)) {
-    assert.equal(hash(await readFile(join(ROOT, 'runtime', name))), digest);
+    assert.equal(hash(await readFile(join(PLUGIN_ROOT, 'runtime', name))), digest);
     assert.equal(other.files[name], digest);
   }
-  const notices = await readFile(join(ROOT, 'runtime/THIRD_PARTY_NOTICES.txt'), 'utf8');
+  const notices = await readFile(join(PLUGIN_ROOT, 'runtime/THIRD_PARTY_NOTICES.txt'), 'utf8');
   for (const dependency of manifest.dependencies) assert.ok(notices.includes(`${dependency.name}@${dependency.version}`));
   assert.ok(manifest.dependencies.some(value => value.name === '@modelcontextprotocol/sdk'));
   assert.ok(manifest.dependencies.some(value => value.name === '@azure/msal-node'));
   assert.equal(Object.keys(manifest.sources).some(path => path.startsWith('/')), false);
-  const ignored = spawnSync('git', ['check-ignore', 'runtime/server.mjs', 'runtime/manifest.json'], { cwd: ROOT, encoding: 'utf8' });
+  const ignored = spawnSync('git', ['check-ignore', 'plugin/runtime/server.mjs', 'plugin/runtime/manifest.json'], { cwd: ROOT, encoding: 'utf8' });
   assert.equal(ignored.status, 1);
   assert.equal(ignored.stdout, '');
 });
@@ -309,6 +330,7 @@ test('publisher defaults cannot be overridden through model tools or environment
 });
 
 test('rebuilds refuse locally edited or unrecognized generated files', async t => {
+  await assert.rejects(buildRuntime({ outputRoot: PLUGIN_ROOT }), /dedicated runtime output directory/);
   const env = await isolatedEnvironment(t);
   const path = join(env.HOME, 'owned-runtime');
   await buildRuntime({ outputRoot: path });
@@ -333,11 +355,11 @@ test('available Claude CLI validates and installs the same root catalog in an is
   if (available.error?.code === 'ENOENT') { t.skip('Claude CLI is not installed on this test host.'); return; }
   assert.equal(available.status, 0, 'Claude plugin validator must be available without sign-in.');
   const root = await rootSnapshot(t);
-  for (const file of ['.claude-plugin/plugin.json', '.claude-plugin/marketplace.json']) {
-    const validated = await run('claude', ['plugin', 'validate', join(root, file), '--strict'], { env, cwd: env.HOME, timeout: 30_000 });
+  for (const file of [join(root, '.claude-plugin/plugin.json'), join(dirname(root), '.claude-plugin/marketplace.json')]) {
+    const validated = await run('claude', ['plugin', 'validate', file, '--strict'], { env, cwd: env.HOME, timeout: 30_000 });
     assert.match(validated.stdout, /Validation passed/);
   }
-  await run('claude', ['plugin', 'marketplace', 'add', root], { env, cwd: env.HOME, timeout: 30_000 });
+  await run('claude', ['plugin', 'marketplace', 'add', dirname(root)], { env, cwd: env.HOME, timeout: 30_000 });
   await run('claude', ['plugin', 'install', 'memory-house@memory-house-marketplace', '--scope', 'user'], {
     env, cwd: env.HOME, timeout: 30_000,
   });
@@ -362,13 +384,13 @@ test('available Copilot CLI registers the native catalog and installs exactly on
   if (available.error?.code === 'ENOENT') { t.skip('Copilot CLI is not installed on this test host.'); return; }
   assert.equal(available.status, 0);
   const root = await rootSnapshot(t);
-  await run('copilot', ['plugin', 'marketplace', 'add', root], { env, cwd: env.HOME, timeout: 30_000 });
+  await run('copilot', ['plugin', 'marketplace', 'add', dirname(root)], { env, cwd: env.HOME, timeout: 30_000 });
   await run('copilot', ['plugin', 'install', 'memory-house@memory-house-marketplace'], { env, cwd: env.HOME, timeout: 30_000 });
   const listed = await run('copilot', ['plugin', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   assert.match(listed.stdout, /memory-house/);
-  assert.match(listed.stdout, /0\.12\.3/);
+  assert.match(listed.stdout, /0\.12\.4/);
   assert.match(listed.stdout, /memory-house-marketplace/);
-  assert.equal((listed.stdout.match(/0\.12\.3/g) ?? []).length, 1, listed.stdout);
+  assert.equal((listed.stdout.match(/0\.12\.4/g) ?? []).length, 1, listed.stdout);
   const skills = await run('copilot', ['skill', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   for (const name of ['mh-login', 'mh-logout', 'mh-status', 'mh-memory']) assert.match(skills.stdout, new RegExp(`\\b${name}\\b`));
 });
@@ -380,7 +402,7 @@ test('available Codex discovers all three native plugin hooks beside the legacy 
   if (available.error?.code === 'ENOENT') { t.skip('Codex CLI is not installed on this test host.'); return; }
   assert.equal(available.status, 0);
   const root = await rootSnapshot(t);
-  await run('codex', ['plugin', 'marketplace', 'add', root, '--json'], { env, cwd: env.HOME, timeout: 30_000 });
+  await run('codex', ['plugin', 'marketplace', 'add', dirname(root), '--json'], { env, cwd: env.HOME, timeout: 30_000 });
   const installed = await run('codex', ['plugin', 'add', 'memory-house@memory-house-marketplace', '--json'], {
     env, cwd: env.HOME, timeout: 30_000,
   });

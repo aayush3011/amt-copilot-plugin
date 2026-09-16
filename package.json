@@ -1,6 +1,6 @@
 {
   "name": "memory-house",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "private": true,
   "type": "module",
   "description": "One native Memory House plugin for Claude Code, Codex, Cursor and Copilot.",

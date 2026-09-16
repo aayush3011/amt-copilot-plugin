@@ -4,7 +4,7 @@ import { builtinModules } from 'node:module';
 import { chmod, link, lstat, mkdir, open, readFile, readdir, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PACKAGE_FILES } from './package-files.mjs';
+import { PACKAGE_FILES, PLUGIN_ROOT, verifyPayload } from './package-files.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -41,7 +41,7 @@ async function dependencyNotices(inputs) {
 }
 
 async function generatedRuntime() {
-  const target = join(ROOT, 'runtime');
+  const target = join(PLUGIN_ROOT, 'runtime');
   const bundled = await build({
     absWorkingDir: ROOT, entryPoints: { server: 'src/server.mjs', hook: 'src/hook.mjs', auth: 'src/auth.mjs' },
     bundle: true, splitting: true, format: 'esm', platform: 'node', target: 'node20',
@@ -68,7 +68,7 @@ async function generatedRuntime() {
   const sources = {};
   for (const path of sourcePaths) sources[path.replaceAll('\\', '/')] = hash(await readFile(join(ROOT, path)));
   const packaged = {};
-  for (const path of PACKAGE_FILES) packaged[path] = hash(await readFile(join(ROOT, path)));
+  for (const path of PACKAGE_FILES) packaged[path] = hash(await readFile(join(PLUGIN_ROOT, path)));
   const outputs = Object.fromEntries([...files].sort(([a], [b]) => sort(a, b)).map(([name, contents]) => [name, hash(contents)]));
   files.set('manifest.json', json({
     producer: 'memory-house-root', version: 1, esbuildVersion,
@@ -77,9 +77,9 @@ async function generatedRuntime() {
   return files;
 }
 
-export async function buildRuntime({ outputRoot = join(ROOT, 'runtime'), check = false } = {}) {
+export async function buildRuntime({ outputRoot = join(PLUGIN_ROOT, 'runtime'), check = false } = {}) {
   outputRoot = resolve(outputRoot);
-  if (outputRoot === ROOT || dirname(outputRoot) === outputRoot) throw new Error('Use a dedicated runtime output directory.');
+  if (outputRoot === resolve(ROOT) || outputRoot === resolve(PLUGIN_ROOT) || dirname(outputRoot) === outputRoot) throw new Error('Use a dedicated runtime output directory.');
   const next = await generatedRuntime();
   const stat = await existing(outputRoot);
   if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) throw new Error('Runtime must be a regular owned build directory.');
@@ -149,6 +149,7 @@ export async function buildRuntime({ outputRoot = join(ROOT, 'runtime'), check =
     }
     for (const name of Object.keys(prior)) if (!next.has(name)) await unlink(join(outputRoot, name));
   }
+  if (outputRoot === join(PLUGIN_ROOT, 'runtime')) await verifyPayload([...next.keys()]);
   return { outputRoot, files: Object.fromEntries([...next].map(([name, value]) => [name, hash(value)])) };
 }
 

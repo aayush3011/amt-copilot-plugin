@@ -5,7 +5,7 @@ and GitHub Copilot.**
 
 Add this repository as a marketplace, install **Memory House**, and sign in with
 Microsoft. The application selects its native adapter from the same installed
-repository. Search and remembering tools, native hook definitions, and
+plugin. Search and remembering tools, native hook definitions, and
 their dependencies are included. No clone, build, ZIP selection, global CLI,
 or per-project hook installation is required for users.
 
@@ -38,7 +38,7 @@ A possible `mh-enable-capture` workflow is a recommendation, **not a shipped
 command**. Plugin installation does not silently write those hook files.
 See [the evidence and scope details](docs/maintaining.md#live-cli-limitations).
 
-> Repository installation uses the published GitHub ref. This root package and
+> Repository installation uses the published GitHub ref. The `plugin/` payload and
 > its bundled runtime must be published before the link delivers this version;
 > changing an uncommitted local checkout does not update an installed plugin.
 > Current development is published on `feature/unifiedMemoryHousePlugin`, not
@@ -153,6 +153,11 @@ allows sending conversation text to your Memory House deployment.
 - **Codex hooks need review:** run `/hooks`, review Memory House's session-start,
   user-prompt and stop hooks, and trust those definitions. Do not bypass hook
   trust or install duplicate user/project hooks.
+- **Disable Codex capture:** use `/hooks` to turn off Memory House's three hooks
+  while keeping its MCP tools. To remove the integration instead, run
+  `codex plugin remove memory-house@memory-house-marketplace`, then optionally
+  `codex plugin marketplace remove memory-house-marketplace`. This does not
+  erase previously captured memories or sign the other apps out.
 - **Sign-in required/expired:** use `memory_login`; `memory_status` is local-only
   and never returns credentials.
 - **Sign-in port occupied:** this deployment registers
@@ -175,8 +180,12 @@ allows sending conversation text to your Memory House deployment.
   another. Cancelling the MCP request or closing its connection aborts sign-in
   and closes the callback listener; retry if the host's tool timeout expires.
 
-The single source package is at this repository root: `.claude/`, `.codex/`,
-`.cursor/`, and `.github/` select host behavior, while `src/` and the included
-`runtime/` provide shared MCP, authentication and memory logic. See
+The single installable payload is **`plugin/`**. All four marketplace catalogs
+stay at the repository root and select `./plugin`; the GitHub URL and install
+commands do not change. Inside the payload, `.claude/`, `.codex/`, `.cursor/`,
+and `.github/` select host behavior, while `runtime/` contains the shared bundled
+implementation. Installed plugin roots contain no repository `.git`, tests,
+maintainer dependencies, source, build scripts, or developer documentation.
+See
 [maintainer documentation](docs/maintaining.md) for loader contracts, dependency
 licenses, publisher defaults, rebuilding, verification and publication.

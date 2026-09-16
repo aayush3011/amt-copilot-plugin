@@ -1,6 +1,6 @@
 {
   "name": "memory-house",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "Search and remember with Memory House, Microsoft sign-in, and native Cursor hooks.",
   "author": { "name": "Aayush Kataria" },
   "repository": "https://github.com/aayush3011/amt-copilot-plugin",

@@ -12,7 +12,7 @@ async function* modules(directory) {
 }
 
 let failed = false;
-for (const directory of ["src", "scripts", "test", ".claude", ".codex", ".cursor", ".github", ".maintainer", "runtime"]) {
+for (const directory of ["src", "scripts", "test", ".github", ".maintainer", "plugin"]) {
   for await (const path of modules(directory)) {
     const result = spawnSync(process.execPath, ["--check", path], { stdio: "inherit" });
     if (result.error) {

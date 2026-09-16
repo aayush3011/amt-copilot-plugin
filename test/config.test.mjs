@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import { access, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import { loadConfig, requirePublisherConfig } from '../src/config.mjs';
+import { loadConfig as loadPublisherConfig, requirePublisherConfig } from '../src/config.mjs';
+import { PLUGIN_ROOT } from '../scripts/package-files.mjs';
 import { fixtureDeployment } from './helpers/deployment.mjs';
 import { isolatedEnvironment } from './helpers/runtime.mjs';
 
-test('root publisher defaults contain the verified public registration and exact callback', async t => {
+const loadConfig = options => loadPublisherConfig({ pluginRoot: PLUGIN_ROOT, ...options });
+
+test('packaged publisher defaults contain the verified public registration and exact callback', async t => {
   const env = await isolatedEnvironment(t);
   const config = loadConfig({ env });
   assert.equal(config.tenantId, '72f988bf-86f1-41af-91ab-2d7cd011db47');

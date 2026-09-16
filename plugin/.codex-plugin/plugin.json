@@ -1,6 +1,6 @@
 {
   "name": "memory-house",
-  "version": "0.12.3",
+  "version": "0.12.4",
   "description": "Shared Memory House search, remembering, Microsoft sign-in, and native Codex capture hooks.",
   "author": { "name": "Aayush Kataria", "url": "https://github.com/aayush3011" },
   "repository": "https://github.com/aayush3011/amt-copilot-plugin",

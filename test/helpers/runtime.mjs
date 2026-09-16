@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { PACKAGE_FILES } from '../../scripts/package-files.mjs';
+import { PACKAGE_FILES, PLUGIN_ROOT, MARKETPLACE_FILES } from '../../scripts/package-files.mjs';
 import { fixtureDeployment } from './deployment.mjs';
 
 export async function isolatedEnvironment(t) {
@@ -25,12 +25,18 @@ export async function isolatedEnvironment(t) {
 export async function rootSnapshot(t, { deployment, name = 'installed plugin' } = {}) {
   const temp = await mkdtemp(join(tmpdir(), 'memory-house-snapshot-'));
   t.after(() => rm(temp, { recursive: true, force: true }));
-  const root = join(temp, name);
+  const marketplace = join(temp, name);
+  const root = join(marketplace, 'plugin');
   const source = fileURLToPath(new URL('../..', import.meta.url));
-  const manifest = JSON.parse(await readFile(join(source, 'runtime/manifest.json'), 'utf8'));
+  const manifest = JSON.parse(await readFile(join(PLUGIN_ROOT, 'runtime/manifest.json'), 'utf8'));
   const files = [...PACKAGE_FILES, ...Object.keys(manifest.outputs).map(name => `runtime/${name}`), 'runtime/manifest.json'];
   for (const name of files) {
     const target = join(root, name);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, await readFile(join(PLUGIN_ROOT, name)));
+  }
+  for (const name of MARKETPLACE_FILES) {
+    const target = join(marketplace, name);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, await readFile(join(source, name)));
   }

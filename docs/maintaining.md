@@ -1,8 +1,25 @@
-# Maintaining the root Memory House plugin
+# Maintaining the Memory House plugin
 
-This repository root is both the marketplace and its single installable plugin.
-All four catalogs select `./`; no generated sub-marketplace or per-host package
-is part of the product.
+This repository publishes one marketplace and one curated installable payload.
+All four catalogs stay at the repository root and select `./plugin`; no
+per-host package or ZIP selection is part of the product.
+
+```text
+.claude-plugin/marketplace.json
+.agents/plugins/marketplace.json
+.cursor-plugin/marketplace.json
+.github/plugin/marketplace.json
+plugin/
+  plugin.json, mcp.json, deployment.json, LICENSE
+  .claude-plugin/, .codex-plugin/, .cursor-plugin/
+  .claude/, .codex/, .cursor/, .github/
+  skills/
+  runtime/
+src/, test/, scripts/, .maintainer/, docs/  (publisher-only)
+```
+
+Manifest/component paths below are relative to the installed payload root
+(`plugin/` in the repository). Catalog paths are relative to the repository.
 
 ## Native resolution
 
@@ -11,10 +28,10 @@ is part of the product.
 | Claude Code | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` explicitly selects `.claude/plugin-hooks.json` and `.claude/mcp.json`. There is no default `.mcp.json` or `hooks/hooks.json` to merge. |
 | Codex | `.agents/plugins/marketplace.json` | Native legacy `.codex-plugin/plugin.json` directly selects `skills/`, `mcp.json` and `.codex/plugin-hooks.json`. No root manifest opts into Agent Plugins 1.0. |
 | Cursor | `.cursor-plugin/marketplace.json` | Its native catalog resolves `.cursor-plugin/plugin.json`, whose explicit hooks/MCP paths select `.cursor/plugin-hooks.json` and `.cursor/mcp.json`. Native marketplace resolution, not the root portable-only format, supplies Cursor hooks. |
-| Copilot | `.github/plugin/marketplace.json` | Legacy root `plugin.json` explicitly selects `skills/`, `mcp.json` and the unchanged `com.github.copilot/hooks/hooks.json` loader invoking `.github/entry.mjs`. |
+| Copilot | `.github/plugin/marketplace.json` | Legacy `plugin.json` explicitly selects `skills/`, `mcp.json` and `.github/plugin-hooks.json`, invoking `.github/entry.mjs`. |
 
 Each installed host has one named MCP connection, `memory-house`, and one hook
-set. The catalogs share a name and root source, so a host's compatibility
+set. The catalogs share a name and payload source, so a host's compatibility
 catalog fallback does not point to a different product. The root manifest is
 deliberately legacy, with direct `hooks`, `skills`, and `mcpServers` fields.
 Do not add the canonical Agent Plugins 1.0 `$schema`: that opts into a different
@@ -37,7 +54,7 @@ the explicit `mcpServers` field replaces root `mcp.json` discovery. Do not use a
 portable-only Cursor import path: that format supports only MCP/skills and does
 not expand `${PLUGIN_ROOT}`. Its native MCP file uses `${CURSOR_PLUGIN_ROOT}`.
 
-The `.claude/`, `.codex/`, and `.cursor/` config files are named
+The `.claude/`, `.codex/`, `.cursor/`, and `.github/` config files are named
 `plugin-hooks.json` deliberately: they are selected by the plugin manifest,
 not automatically enabled as workspace hooks just by checking out this repo.
 The four `entry.mjs` files import the same `runtime/hook.mjs`; there is no
@@ -59,8 +76,9 @@ Official contracts:
 ## Live CLI limitations
 
 The 2026-09-16 live checks initially used plugin 0.12.1 and the vendor builds
-below. Version 0.12.3 corrects the Codex manifest format and the earlier
+below. Version 0.12.3 corrected the Codex manifest format and the earlier
 0.12.2 conclusion that all third-party plugin hooks were vendor-blocked.
+Version 0.12.4 moves the same native components into one curated payload.
 Hook discovery, native trust and real capture are distinct checks.
 
 **Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
@@ -69,6 +87,8 @@ HTTP 201 user capture and one HTTP 201 agent capture with the same thread hash.
 A later turn in that session received injected recall. Passive observation
 recorded only operation/status, role, content byte count and hashed thread ID,
 not request text, returned memories, tokens or authorization headers.
+The complete login/search/add/status/logout/restore flow and two-turn capture
+were rerun successfully against the pushed 0.12.3 legacy-manifest release.
 
 **Codex CLI rust-v0.154.0:** the MCP operations passed, including narrow native
 tool approvals for writes/sign-in. The original Agent Plugins 1.0 manifest
@@ -91,6 +111,18 @@ one HTTP 201 user capture and one HTTP 201 final-agent capture with the same
 thread hash. Captured text hashes matched the actual prompts/final answers;
 the native hook notifications and transcript confirmed recall injection on the
 later turn. These verification turns entered the user's real Memory House.
+
+One initial run, immediately after marketplace-source and native-trust changes,
+captured only the first user prompt and injected startup/first-prompt recall;
+the two Stop callbacks and the following prompt ran without observed capture
+requests. Two subsequent complete sessions passed without any adapter change.
+That anomaly is recorded, not dismissed or assigned an unproven cause. A
+fresh-session reload after trust/configuration changes is prudent, but stale
+host state was not established as the cause. The adapter emits safe stderr
+diagnostics for skips and transport/authentication failures, then fails open.
+Whether those diagnostics are visible in ordinary chat depends on the host;
+there is no persistent capture-health indicator. Better user-visible
+observability is a follow-up, not an excuse to add replay or deduplication.
 
 **Cursor CLI 2026.09.10-fd3934a:** after replacing a stale pinned marketplace
 registration and installing Git revision `3712a60`, the MCP operations passed.
@@ -115,8 +147,8 @@ settings were removed, preserving the preexisting user installation.
 The product conclusion is explicit: plugin MCP tools are deliverable where the
 host can run them; automatic plugin-delivered capture is verified on Copilot
 and on Codex with its corrected legacy manifest and normal hook trust.
-Cursor needs a separately
-user-approved user/project-hook configuration for automatic capture. A future
+Cursor needs a separately user-approved user/project-hook configuration for
+automatic capture. A future
 `mh-enable-capture`/matching-disable workflow could provide that opt-in after
 consent; it is **not implemented**, and no such files were silently installed
 in a real profile during this work. Do not substitute model-selected
@@ -124,7 +156,7 @@ in a real profile during this work. Do not substitute model-selected
 
 ## Publisher configuration
 
-`deployment.json` contains only public deployment settings. The shipped values
+`plugin/deployment.json` contains only public deployment settings. The shipped values
 were verified on 2026-09-16:
 
 | Setting | Verified value |
@@ -174,7 +206,7 @@ Gateway refresh/capture/search/revoke APIs and AMT remain unchanged.
 
 ## Skill commands
 
-The root skills are `mh-login`, `mh-logout`, `mh-status`, and `mh-memory`;
+The payload skills are `mh-login`, `mh-logout`, `mh-status`, and `mh-memory`;
 each directory and frontmatter name matches. Login and logout set
 `disable-model-invocation: true` and Codex's `allow_implicit_invocation: false`
 metadata. Skills do not pre-approve the MCP tools.
@@ -208,17 +240,18 @@ npm test
 npm run check:publisher
 ```
 
-`runtime/` is intentionally **not gitignored**. Publish its generated JavaScript,
-`THIRD_PARTY_NOTICES.txt`, and `manifest.json` together with the root plugin.
+`plugin/runtime/` is intentionally **not gitignored**. Publish its generated
+JavaScript, `THIRD_PARTY_NOTICES.txt`, and `manifest.json` together with the
+native payload and the four root catalogs.
 The runtime contains bundled MSAL and the official MCP SDK, so a fresh cached
 installation needs no `node_modules`, unpublished npm package, lifecycle script,
 network dependency installer, or files outside the installed root. A local
 Node.js 20+ executable is still required by the host.
 
-Dependencies and the npm lockfile live only in `.maintainer/`, because Claude
-automatically runs `npm ci` for a package with a root `package.json` and root
-lockfile, even when dependencies are only for development. The installed root
-therefore has no dependency list or lockfile. The maintainer-only module loader
+Dependencies and the npm lockfile live only in the repository's `.maintainer/`,
+outside the payload. The installed plugin contains no `package.json`,
+dependency tree or lockfile. This also avoids Claude's automatic `npm ci`
+for plugins with a package manifest and root lockfile. The maintainer-only module loader
 lets tests/builds resolve that separate dependency directory; no native entry
 uses it. Maintainer tooling needs Node.js 20.6+, while the bundled plugin needs
 Node.js 20+. The build
@@ -227,27 +260,26 @@ preserves dependency license texts, records source/package/lock hashes, and
 refuses to overwrite unknown or modified runtime files. There are no binary
 Node runtimes or platform-specific native npm modules in the package.
 
-Tests reconstruct fresh repository-shaped install snapshots from the root
-minimum-runtime inventory and the included runtime. They exercise actual SDK
+Tests reconstruct fresh repository-shaped snapshots with four root catalogs
+and the exact payload inventory under `plugin/`. They exercise actual SDK
 initialize/list/call flows, search/insertion, synthetic MSAL PKCE + authenticated
 enrollment, shared credentials/recall, hook discovery/isolation, and command
-execution without source `node_modules`. The available Claude CLI strictly validates and installs the root plugin/catalog
+execution without source `node_modules`. The available Claude CLI strictly validates and installs the payload and root catalog
 in an isolated fake profile. The available Copilot CLI also registers the native
-catalog and installs its root plugin in an isolated profile. The available
+catalog and installs its payload in an isolated profile. The available
 Codex CLI installs the same snapshot and asserts that all three hooks are
 discovered as plugin-scoped and untrusted beside the legacy Copilot root.
 These tests do not sign in, grant hook trust or start a model session. Native
 discovery and protocol fixtures are not substitutes for live capture testing.
 
-`scripts/package-files.mjs` is a **minimum-runtime test/provenance inventory,
-not a Git distribution filter**. With marketplace `source: "./"`, real native
-Git installers clone/copy the entire repository. That deliberately includes
-`src/`, tests, docs, scripts and `.maintainer/`; some hosts also retain `.git`.
-The publisher must review the whole tracked tree before pushing. No credential
-caches or installed `node_modules` are part of the published tree. The nested
-maintainer lockfile does not trigger Claude's root-only dependency-install
-rule. This keeps the user's requested one-repository/root product while proving
-that the runtime also works without any developer files or dependencies.
+`scripts/package-files.mjs` defines the **enforced payload inventory**.
+Build and bundle checks reject extra files, empty directories, and links inside
+`plugin/`. With marketplace `source: "./plugin"`, native installers select only
+that subdirectory. The installed plugin root contains no `.git`, `src/`,
+`test/`, `docs/`, `scripts/`, `.maintainer/`, developer getting-started file, or
+marketplace catalogs. A host may separately retain its Git marketplace clone;
+that is not the installed payload. The publisher must still review the whole
+tracked repository before pushing and must never publish credentials.
 
 Copilot's event log can still be flushing when its stop hook fires. The adapter
 waits up to one second for the final transcript text, then makes at most one

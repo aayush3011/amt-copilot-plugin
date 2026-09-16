@@ -111,7 +111,9 @@ each directory and frontmatter name matches. Login and logout set
 metadata. Skills do not pre-approve the MCP tools.
 
 Claude Code invokes plugin skills as `/memory-house:mh-login` (and the same
-prefix for the other three names). Copilot app/CLI invokes `/mh-login`, Cursor
+prefix for the other three names). The verified Copilot CLI registers the same
+`/memory-house:mh-login` command name; the app's picker is authoritative for its
+version. Cursor
 selects `mh-login` from its `/` picker, and Codex CLI/IDE mentions `$mh-login`
 or selects it through `/skills`. The same substitutions apply to logout,
 status and memory. ChatGPT desktop's skill picker uses `@`; exact Codex desktop
@@ -165,6 +167,11 @@ in an isolated fake profile. The available Copilot CLI also registers the native
 catalog and installs its root plugin in an isolated profile. Neither test signs
 in or starts a model session. Cursor/Codex contract fixtures are not a substitute
 for live desktop testing.
+
+Copilot's event log can still be flushing when its stop hook fires. The adapter
+waits up to one second for the final transcript text, then makes at most one
+capture request. This is bounded local transcript reading, not a capture queue,
+idempotency mechanism, or network replay.
 
 No tests should read a real app profile, sign in to a production tenant, send
 real conversations, or install a plugin into an active user profile. Loopback

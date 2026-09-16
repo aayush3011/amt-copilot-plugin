@@ -49,7 +49,7 @@ registration settings; no password, token, or enrollment code goes through chat.
 | Host | Sign in | Sign out | Status | Search / remember |
 | --- | --- | --- | --- | --- |
 | **Claude Code** | `/memory-house:mh-login` | `/memory-house:mh-logout` | `/memory-house:mh-status` | `/memory-house:mh-memory` |
-| **Copilot app / CLI** | `/mh-login` | `/mh-logout` | `/mh-status` | `/mh-memory` |
+| **Copilot app / CLI** | `/memory-house:mh-login` | `/memory-house:mh-logout` | `/memory-house:mh-status` | `/memory-house:mh-memory` |
 | **Codex CLI / IDE** | `$mh-login` | `$mh-logout` | `$mh-status` | `$mh-memory` |
 | **Cursor Agent chat** | `/mh-login` | `/mh-logout` | `/mh-status` | `/mh-memory` |
 
@@ -57,7 +57,8 @@ Codex also provides `/skills` to select a skill. Desktop surfaces can differ:
 ChatGPT's desktop skill picker uses `@`; select the installed `mh-login`,
 `mh-logout`, `mh-status`, or `mh-memory` skill by name. A bare `/mh-login` is not
 promised for every Codex desktop version. In Cursor, type `/` and select the
-named skill. Claude Code intentionally namespaces plugin skills.
+named skill. Claude Code and the verified Copilot CLI namespace plugin skills;
+use the names shown in their skill picker rather than assuming a bare alias.
 
 Then ask:
 

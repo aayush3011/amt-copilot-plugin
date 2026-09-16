@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, opendir, unlink } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 export const HOOK_LIMITS = Object.freeze({
   captureBytes: 32 * 1024,
@@ -348,26 +349,35 @@ async function assistantText(normalized, payload, client, log) {
     log('capture:skipped:invalid-transcript');
     return '';
   }
-  let handle;
-  try {
-    const opened = await safeOpenFile(path, constants.O_RDONLY);
-    handle = opened.handle;
-    const offset = Math.max(0, opened.stat.size - HOOK_LIMITS.transcriptBytes);
-    const buffer = Buffer.alloc(Math.min(opened.stat.size, HOOK_LIMITS.transcriptBytes));
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
-    let text = buffer.subarray(0, bytesRead).toString('utf8');
-    if (offset > 0) {
-      const newline = text.indexOf('\n');
-      text = newline < 0 ? '' : text.slice(newline + 1);
-      log('capture:transcript-tail-only');
+  // Copilot can fire Stop before its event writer flushes the final answer.
+  // Wait only for that bounded local flush; the capture request still happens once.
+  const attempts = normalized.harness === 'copilot' ? 11 : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    let handle;
+    try {
+      const opened = await safeOpenFile(path, constants.O_RDONLY);
+      handle = opened.handle;
+      const offset = Math.max(0, opened.stat.size - HOOK_LIMITS.transcriptBytes);
+      const buffer = Buffer.alloc(Math.min(opened.stat.size, HOOK_LIMITS.transcriptBytes));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+      let text = buffer.subarray(0, bytesRead).toString('utf8');
+      if (offset > 0) {
+        const newline = text.indexOf('\n');
+        text = newline < 0 ? '' : text.slice(newline + 1);
+        log('capture:transcript-tail-only');
+      }
+      const answer = extractAssistantText(text, normalized);
+      if (answer || attempt === attempts - 1) return answer;
+    } catch {
+      log('capture:skipped:transcript-unavailable');
+      return '';
+    } finally {
+      if (handle) await handle.close().catch(() => {});
     }
-    return extractAssistantText(text, normalized);
-  } catch {
-    log('capture:skipped:transcript-unavailable');
-    return '';
-  } finally {
-    if (handle) await handle.close().catch(() => {});
+    if (attempt === 0) log('capture:awaiting-transcript-flush');
+    await delay(100);
   }
+  return '';
 }
 
 function contextOutput(harness, event, context) {

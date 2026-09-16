@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, lstat, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   HOOK_LIMITS, extractAssistantText, normalizeEvent, normalizeHook, redactSecrets,
   runHook, sanitizeMessage, stripMemoryContext, truncateUtf8,
@@ -698,6 +699,19 @@ test('transcript tail reads are bounded and do not accidentally recapture an old
   await writeFile(path, JSON.stringify({ role: 'assistant', content: 'x'.repeat(HOOK_LIMITS.transcriptBytes + 100) }));
   await s.call({ harness: 'copilot', event: 'assistant-stop', payload: { sessionId: 'a', transcriptPath: path } });
   assert.equal(s.captures.length, 1);
+});
+
+test('Copilot waits for its final transcript flush before one automatic capture request', async t => {
+  const s = await setup(t);
+  const path = join(s.dir, 'flushing.jsonl');
+  const user = JSON.stringify({ type: 'user.message', data: { content: 'An ordinary user turn.' } });
+  const agent = JSON.stringify({ type: 'assistant.message', data: { content: 'The final agent turn.' } });
+  await writeFile(path, `${user}\n`);
+  const flush = delay(60).then(() => writeFile(path, `${user}\n${agent}\n`));
+  await s.call({ harness: 'copilot', event: 'assistant-stop', payload: { sessionId: 'flush', transcriptPath: path } });
+  await flush;
+  assert.deepEqual(s.captures, [{ thread_id: 'mh:copilot:flush', role: 'agent', content: 'The final agent turn.' }]);
+  assert.ok(s.logs.some(line => line.includes('awaiting-transcript-flush')));
 });
 
 test('missing, directory, symlinked, and credential-cache transcript paths are safe no-ops', async t => {

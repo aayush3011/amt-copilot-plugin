@@ -35,14 +35,14 @@ async function discover(root, host) {
   assert.equal(catalog.plugins.length, 1);
   const entry = catalog.plugins[0];
   assert.equal(entry.name, 'memory-house');
-  assert.equal(entry.version, '0.12.0');
+  assert.equal(entry.version, '0.12.1');
   const source = entry.source.path ?? entry.source;
   assert.equal(source, './');
   const pluginRoot = resolve(root, source);
   assert.equal(pluginRoot, resolve(root));
   const manifest = await json(join(pluginRoot, spec.manifest));
   assert.equal(manifest.name, 'memory-house');
-  assert.equal(manifest.version, '0.12.0');
+  assert.equal(manifest.version, '0.12.1');
   let hookPath;
   let mcpPath;
   if (host === 'codex' || host === 'copilot') {
@@ -362,9 +362,9 @@ test('available Copilot CLI registers the native catalog and installs exactly on
   await run('copilot', ['plugin', 'install', 'memory-house@memory-house-marketplace'], { env, cwd: env.HOME, timeout: 30_000 });
   const listed = await run('copilot', ['plugin', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   assert.match(listed.stdout, /memory-house/);
-  assert.match(listed.stdout, /0\.12\.0/);
+  assert.match(listed.stdout, /0\.12\.1/);
   assert.match(listed.stdout, /memory-house-marketplace/);
-  assert.equal((listed.stdout.match(/0\.12\.0/g) ?? []).length, 1, listed.stdout);
+  assert.equal((listed.stdout.match(/0\.12\.1/g) ?? []).length, 1, listed.stdout);
   const skills = await run('copilot', ['skill', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   for (const name of ['mh-login', 'mh-logout', 'mh-status', 'mh-memory']) assert.match(skills.stdout, new RegExp(`\\b${name}\\b`));
 });

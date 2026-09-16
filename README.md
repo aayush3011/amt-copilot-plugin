@@ -5,15 +5,44 @@ and GitHub Copilot.**
 
 Add this repository as a marketplace, install **Memory House**, and sign in with
 Microsoft. The application selects its native adapter from the same installed
-repository. Search and remembering tools, automatic conversation hooks, and
+repository. Search and remembering tools, native hook definitions, and
 their dependencies are included. No clone, build, ZIP selection, global CLI,
 or per-project hook installation is required for users.
 
 **Repository:** <https://github.com/aayush3011/amt-copilot-plugin>
 
+**Automatic capture is not currently plugin-deliverable on every CLI.**
+The live verification below is more authoritative than the presence of hook
+files in the package. A successful `memory_status` proves sign-in, not that
+the host executes capture hooks.
+
+## Verified CLI support
+
+Observed on 2026-09-16:
+
+| Host version | Plugin MCP tools | Automatic per-turn capture from the plugin |
+| --- | --- | --- |
+| **Copilot CLI 1.0.81-4** | Real login, search, explicit add, status, logout and sign-in restoration passed | **Passed:** ordinary user and final agent turns accepted by the gateway; recall injected on a later turn without explicit memory calls |
+| **Codex CLI 0.154.0** | Real login, search, explicit add, status, logout and restoration passed | **Blocked by vendor admission policy:** third-party plugin command hooks are not admitted; user/project hooks are a separate opt-in |
+| **Cursor CLI 2026.09.10-fd3934a** | Real login, search, explicit add, status, logout and restoration passed | **Blocked by CLI dispatch:** prompt/final-response events check user/project hooks, not plugin hooks. Startup recall works; post-tool hooks run, but without prompt capture they have no latest-prompt query |
+| **Claude Code 2.1.273** | Installation and authenticated account/current plugin loading verified; model-executed operations blocked by **HTTP 400: “Credit balance is too low”** | **Unproven in this account**, not claimed to work or fail |
+
+The model is never the routine capture gatekeeper. Where host hooks run, they
+send every conversational user turn and final agent turn; the AMT backend
+decides what to extract, consolidate, or discard. **Do not replace missing hook
+support with model-selected `add_memory` calls.**
+
+For Codex and Cursor, the appropriate follow-up is an **explicit,
+user-consented user/project-hook opt-in**, with a matching disable operation.
+A possible `mh-enable-capture` workflow is a recommendation, **not a shipped
+command**. Plugin installation does not silently write those hook files.
+See [the evidence and scope details](docs/maintaining.md#live-cli-limitations).
+
 > Repository installation uses the published GitHub ref. This root package and
 > its bundled runtime must be published before the link delivers this version;
 > changing an uncommitted local checkout does not update an installed plugin.
+> Current development is published on `feature/unifiedMemoryHousePlugin`, not
+> merged into `main`. Select that ref explicitly to get this version.
 
 ## Install in your application
 
@@ -27,6 +56,20 @@ and conversation capture.
 | **Codex desktop** | Add `aayush3011/amt-copilot-plugin` as a marketplace through the host's repository-marketplace flow (`codex plugin marketplace add aayush3011/amt-copilot-plugin` where exposed). Select **Memory House** in Plugins Directory and install it. Review and trust the bundled hooks with `/hooks`. |
 | **GitHub Copilot app / CLI** | Add `aayush3011/amt-copilot-plugin` in **Customize -> Plugins -> Add custom marketplace**, then install **Memory House**. The native command equivalent is `/plugin marketplace add aayush3011/amt-copilot-plugin`, then `/plugin install memory-house@memory-house-marketplace`. |
 | **Cursor desktop** | On supported **Teams/Enterprise** plans, an administrator imports this repository through **Dashboard -> Plugins -> Team Marketplaces -> Add Marketplace -> Import from Repo**. Developers install **Memory House** in **Customize**. |
+
+The tested branch selectors are:
+
+```text
+claude plugin marketplace add aayush3011/amt-copilot-plugin@feature/unifiedMemoryHousePlugin
+codex plugin marketplace add aayush3011/amt-copilot-plugin --ref feature/unifiedMemoryHousePlugin
+copilot plugin marketplace add aayush3011/amt-copilot-plugin#feature/unifiedMemoryHousePlugin
+cursor-agent plugin marketplace add https://github.com/aayush3011/amt-copilot-plugin --git-ref feature/unifiedMemoryHousePlugin
+```
+
+Then install `memory-house@memory-house-marketplace` with `claude plugin install`,
+`codex plugin add`, or `copilot plugin install`. Cursor's CLI (`cursor-agent`,
+also installed as `agent`) installs through the interactive `/plugin` picker:
+**Marketplace -> memory-house -> Install for you**.
 
 Cursor does **not** offer an unrestricted personal GitHub-marketplace import on
 every plan. Team marketplace access and local-code policies apply; a public
@@ -81,15 +124,19 @@ or new deduplication contract is added.
 
 ## Automatic memory
 
-**Hooks are the capture path.** They automatically attempt to send every user
+**Hooks are the capture path, where admitted by the host.** They attempt to send every user
 turn and every final agent turn in the main conversation to Memory House/AMT,
 without waiting for the model to call a tool or decide that a turn is important.
 The **AMT backend core** decides what to extract, consolidate, or discard.
 Capture is best-effort when sign-in, networking, or host payloads are unavailable.
 
-Claude Code and Codex recall at startup and on each prompt. Copilot recalls at
+The adapters declare startup and per-prompt recall for Claude Code and Codex.
+The tested Codex CLI does not admit the plugin hooks; Claude's live path was
+blocked by account billing. Copilot recalls at
 startup and during prompt transformation, with post-tool fallback. Cursor
-recalls at startup and after a tool using the latest prompt; it cannot inject
+declares startup and post-tool recall using the latest prompt; the tested CLI
+executes startup/post-tool hooks but does not deliver prompts to plugin hooks.
+Even on a host that delivers those prompts, Cursor cannot inject
 arbitrary context through `beforeSubmitPrompt`, so tool-free first answers do
 not get that post-tool recall.
 
@@ -109,6 +156,14 @@ allows sending conversation text to your Memory House deployment.
   and retry. The plugin does not silently choose an unregistered port.
 - **Publisher configuration error:** contact the publisher rather than entering
   registration settings or credentials in chat.
+- **Claude “Credit balance is too low”:** check account billing and whether the
+  CLI is using API credits instead of the intended subscription. This is not a
+  Memory House gateway or plugin error; the plugin cannot change the billing plan.
+- **Cursor branch remains pinned:** the tested CLI retained an old marketplace
+  commit across `add --git-ref` and `update`. Removing that specific Memory House
+  marketplace registration and re-adding it with the intended ref, then
+  reinstalling through `/plugin`, selected the new revision. Do not remove
+  unrelated marketplaces.
 - **Sign out:** use `mh-logout` (the `memory_logout` tool). This clears the shared
   local credentials and attempts refresh-token revocation without opening a
   browser. Existing access tokens remain subject to their issued expiry.

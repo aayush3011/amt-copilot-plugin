@@ -6,6 +6,9 @@ description: Check local Memory House sign-in status without opening a browser o
 Call the plugin's `memory_status` MCP tool with no arguments. Report whether
 Memory House is signed in and whether a sign-in attempt is running, completed,
 cancelled, or failed. Do not show credentials or deployment URLs.
+Sign-in status does not prove that this host admits or executes capture hooks;
+refer to the documented CLI support limits rather than claiming automatic
+capture from `signedIn` alone.
 
 If sign-in is required, suggest the `mh-login` skill, but do not invoke it unless
 the user asks. A publisher-configuration error requires the publisher to fix

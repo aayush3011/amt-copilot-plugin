@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "memory-house",
-  "version": "0.12.1",
-  "description": "Shared Memory House search, remembering, Microsoft sign-in, and automatic conversational memory.",
+  "version": "0.12.2",
+  "description": "Shared Memory House search, remembering, Microsoft sign-in, and host-specific capture hooks.",
   "author": { "name": "Aayush Kataria", "url": "https://github.com/aayush3011" },
   "repository": "https://github.com/aayush3011/amt-copilot-plugin",
   "license": "MIT",

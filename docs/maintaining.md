@@ -19,8 +19,8 @@ catalog fallback does not point to a different product. Do not add top-level
 `hooks`, `skills`, or `mcpServers` to the portable manifest: its schema is closed
 and those path fields would be ignored.
 
-Hooks automatically capture every conversational user turn and final agent turn
-in the main conversation. Their capture calls do not ask the model to choose
+Where a host admits and dispatches them, hooks capture every conversational user
+turn and final agent turn in the main conversation. Their capture calls do not ask the model to choose
 important material; the AMT backend handles extraction, consolidation and
 discarding. `add_memory` is only an explicit user-requested one-off write, never
 a substitute for the hook stream or an importance-based extra write. Existing
@@ -52,6 +52,60 @@ Official contracts:
 [Cursor native marketplace resolution](https://cursor.com/docs/reference/plugins#how-resolution-works),
 [Cursor distribution policies](https://cursor.com/docs/plugins),
 [Copilot portable hooks and catalogs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference).
+
+## Live CLI limitations
+
+The 2026-09-16 live checks used plugin 0.12.1 and the vendor builds below.
+Version 0.12.2 records these findings; it does not pretend to remove vendor
+admission policy or repair an account's billing.
+
+**Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
+status, sign-out and restoration passed. A tool-free conversation produced one
+HTTP 201 user capture and one HTTP 201 agent capture with the same thread hash.
+A later turn in that session received injected recall. Passive observation
+recorded only operation/status, role, content byte count and hashed thread ID,
+not request text, returned memories, tokens or authorization headers.
+
+**Codex CLI rust-v0.154.0:** the MCP operations passed, including narrow native
+tool approvals for writes/sign-in. Plugin hooks were absent, not merely waiting
+for trust. Fresh `hooks/list` probes returned zero hooks for the shipped
+extension, compatibility-overlay variants, inline hook objects and default
+hook paths. A no-op user-scope control appeared as one **untrusted** hook.
+The release's
+[executor hook admission](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/core-plugins/src/executor_hooks.rs)
+and [shared bundled-hook allowlist](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/plugin/src/bundled_hooks.rs)
+temporarily admit only named OpenAI cleanup MCP hooks, not unsigned third-party
+plugin command hooks. Changing manifest spelling or bypassing hook review
+does not grant admission. Never impersonate an allowlisted plugin identity.
+
+**Cursor CLI 2026.09.10-fd3934a:** after replacing a stale pinned marketplace
+registration and installing Git revision `3712a60`, the MCP operations passed.
+Startup, post-tool and session-end plugin hooks ran. Ordinary prompts and final
+responses did not, in both print and interactive checks. The installed CLI's
+`beforeSubmitPrompt` guard checks only
+`hooksConfig.userHooks`/`hooksConfig.projectHooks`; its `afterAgentResponse`
+helper has the same user/project-only gate. Plugin hooks are excluded before
+dispatch. Startup recall is therefore available, but the per-turn query cache
+cannot be populated for post-tool recall. `--approve-mcps` approves connections,
+not tool calls; print-mode MCP operations also needed `--force` for this
+explicitly authorized verification.
+
+**Claude Code 2.1.273:** installation/current-cache loading and real account
+authentication were verified using the user's normal login-shell environment.
+Model execution returned **HTTP 400, `Credit balance is too low`**, with zero API
+execution duration. Its live tool and capture legs remain unproven. Check the
+account's billing or whether the CLI uses API credits rather than the intended
+subscription. No billing change was attempted. Temporary local-scope plugin
+settings were removed, preserving the preexisting user installation.
+
+The product conclusion is explicit: plugin MCP tools are deliverable where the
+host can run them, but automatic plugin-delivered capture was verified only on
+Copilot in these builds. Codex/Cursor need a separately user-approved
+user/project-hook configuration for automatic capture. A future
+`mh-enable-capture`/matching-disable workflow could provide that opt-in after
+consent; it is **not implemented**, and no such files were silently installed
+in a real profile during this work. Do not substitute model-selected
+`add_memory` calls for the missing automatic stream.
 
 ## Publisher configuration
 
@@ -153,13 +207,13 @@ therefore has no dependency list or lockfile. The maintainer-only module loader
 lets tests/builds resolve that separate dependency directory; no native entry
 uses it. Maintainer tooling needs Node.js 20.6+, while the bundled plugin needs
 Node.js 20+. The build
-allowlists entry points, refuses unresolved non-builtin runtime imports,
+allowlists bundled runtime entry points, refuses unresolved non-builtin runtime imports,
 preserves dependency license texts, records source/package/lock hashes, and
 refuses to overwrite unknown or modified runtime files. There are no binary
 Node runtimes or platform-specific native npm modules in the package.
 
 Tests reconstruct fresh repository-shaped install snapshots from the root
-package allowlist and the included runtime. They exercise actual SDK
+minimum-runtime inventory and the included runtime. They exercise actual SDK
 initialize/list/call flows, search/insertion, synthetic MSAL PKCE + authenticated
 enrollment, shared credentials/recall, hook discovery/isolation, and command
 execution without source `node_modules`. The available Claude CLI strictly validates and installs the root plugin/catalog
@@ -168,15 +222,26 @@ catalog and installs its root plugin in an isolated profile. Neither test signs
 in or starts a model session. Cursor/Codex contract fixtures are not a substitute
 for live desktop testing.
 
+`scripts/package-files.mjs` is a **minimum-runtime test/provenance inventory,
+not a Git distribution filter**. With marketplace `source: "./"`, real native
+Git installers clone/copy the entire repository. That deliberately includes
+`src/`, tests, docs, scripts and `.maintainer/`; some hosts also retain `.git`.
+The publisher must review the whole tracked tree before pushing. No credential
+caches or installed `node_modules` are part of the published tree. The nested
+maintainer lockfile does not trigger Claude's root-only dependency-install
+rule. This keeps the user's requested one-repository/root product while proving
+that the runtime also works without any developer files or dependencies.
+
 Copilot's event log can still be flushing when its stop hook fires. The adapter
 waits up to one second for the final transcript text, then makes at most one
 capture request. This is bounded local transcript reading, not a capture queue,
 idempotency mechanism, or network replay.
 
-No tests should read a real app profile, sign in to a production tenant, send
+The default automated suite must not read a real app profile, sign in to a production tenant, send
 real conversations, or install a plugin into an active user profile. Loopback
 HTTP fixtures explicitly use `MH_ALLOW_INSECURE_LOCALHOST=1`. Capture is
-best-effort and is never automatically replayed.
+best-effort and is never automatically replayed. The live checks above were
+separate, explicitly authorized operations; they are not run by `npm test`.
 
 ## Publication
 

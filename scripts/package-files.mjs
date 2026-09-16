@@ -1,3 +1,4 @@
+// Minimum runtime verification/provenance inventory, not a Git clone filter.
 export const PACKAGE_FILES = Object.freeze([
   'plugin.json', 'mcp.json', 'deployment.json', 'package.json', 'README.md', 'docs/maintaining.md', 'LICENSE', '.gitattributes',
   '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json',

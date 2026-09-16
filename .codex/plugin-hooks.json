@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'.codex/entry.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- session-start", "timeout": 30 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'.codex/entry.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- user-prompt", "timeout": 30 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'.codex/entry.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- assistant-stop", "timeout": 30 }] }]
+  }
+}

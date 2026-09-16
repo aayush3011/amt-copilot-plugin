@@ -1,34 +1,8 @@
 {
   "name": "memory-house-marketplace",
-  "metadata": {
-    "description": "Memory House plugins for GitHub Copilot.",
-    "version": "1.0.0"
-  },
-  "owner": {
-    "name": "Aayush Kataria",
-    "url": "https://github.com/aayush3011"
-  },
+  "owner": { "name": "Aayush Kataria", "url": "https://github.com/aayush3011" },
+  "metadata": { "description": "One Memory House plugin for desktop coding apps." },
   "plugins": [
-    {
-      "name": "memory-house",
-      "source": "./plugin",
-      "description": "Persistent, scoped agent memory (personal, team, org) backed by Azure Cosmos DB, delivered through the Inference Platform gateway. Bundles the Memory House MCP server, a memory skill, deterministic inject/capture hooks, a Memory canvas, and one-click import of GitHub Copilot memory and sessions.",
-      "version": "0.8.1",
-      "author": {
-        "name": "Aayush Kataria",
-        "url": "https://github.com/aayush3011"
-      },
-      "homepage": "https://github.com/aayush3011/amt-copilot-plugin/tree/main/plugin",
-      "repository": "https://github.com/aayush3011/amt-copilot-plugin",
-      "keywords": [
-        "amt",
-        "agent-memory",
-        "cosmos-db",
-        "mcp",
-        "canvas",
-        "memory"
-      ],
-      "license": "MIT"
-    }
+    { "name": "memory-house", "source": "./", "description": "Shared memory with Microsoft sign-in, search, remembering, and native Copilot hooks.", "version": "0.11.0" }
   ]
 }

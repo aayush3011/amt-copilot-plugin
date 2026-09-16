@@ -1,0 +1,28 @@
+{
+  "sessionStart": {
+    "conversation_id": "same-session",
+    "hook_event_name": "sessionStart",
+    "workspace_roots": ["/workspace/example"]
+  },
+  "userPrompt": {
+    "conversation_id": "same-session",
+    "generation_id": "turn-1",
+    "hook_event_name": "beforeSubmitPrompt",
+    "workspace_roots": ["/workspace/example"],
+    "prompt": "Prefer focused tests.\n<canvas-context>Do not record canvas instructions.</canvas-context>"
+  },
+  "assistantResponse": {
+    "conversation_id": "same-session",
+    "generation_id": "turn-1",
+    "hook_event_name": "afterAgentResponse",
+    "text": "The focused tests pass."
+  },
+  "postTool": {
+    "conversation_id": "same-session",
+    "generation_id": "turn-1",
+    "hook_event_name": "postToolUse",
+    "tool_name": "read_file",
+    "tool_input": {"path": "example.js"},
+    "tool_output": "DO_NOT_CAPTURE_TOOL_OUTPUT"
+  }
+}

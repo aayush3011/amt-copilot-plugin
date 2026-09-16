@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/.claude/entry.mjs", "session-start"], "timeout": 30 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/.claude/entry.mjs", "user-prompt"], "timeout": 30 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/.claude/entry.mjs", "assistant-stop"], "timeout": 30 }] }]
+  }
+}

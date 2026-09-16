@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "type": "command", "command": "node -e \"const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'.cursor/entry.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- session-start", "timeout": 30 }],
+    "beforeSubmitPrompt": [{ "type": "command", "command": "node -e \"const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'.cursor/entry.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- user-prompt", "timeout": 30 }],
+    "postToolUse": [{ "type": "command", "command": "node -e \"const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'.cursor/entry.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- post-tool", "timeout": 30 }],
+    "afterAgentResponse": [{ "type": "command", "command": "node -e \"const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'.cursor/entry.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- assistant-response", "timeout": 30 }],
+    "sessionEnd": [{ "type": "command", "command": "node -e \"const p=require('node:path').join(process.env.CURSOR_PLUGIN_ROOT,'.cursor/entry.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- session-end", "timeout": 10 }]
+  }
+}

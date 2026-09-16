@@ -1,0 +1,20 @@
+{
+  "sessionStart": {
+    "session_id": "same-session",
+    "hook_event_name": "SessionStart",
+    "source": "startup",
+    "cwd": "/workspace/example"
+  },
+  "userPrompt": {
+    "session_id": "same-session",
+    "hook_event_name": "UserPromptSubmit",
+    "prompt": "Prefer focused tests.\n<skill-context name=\"fixture\">Do not record these instructions.</skill-context>\n<memory-house-context>Previously recalled memory.</memory-house-context>",
+    "cwd": "/workspace/example"
+  },
+  "stop": {
+    "session_id": "same-session",
+    "hook_event_name": "Stop",
+    "stop_hook_active": false,
+    "last_assistant_message": "The focused tests pass."
+  }
+}

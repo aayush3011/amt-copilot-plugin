@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "type": "command", "exec": "node", "args": ["${PLUGIN_ROOT}/.github/entry.mjs", "session-start"], "timeoutSec": 30 }],
+    "userPromptSubmitted": [{ "type": "command", "exec": "node", "args": ["${PLUGIN_ROOT}/.github/entry.mjs", "user-prompt"], "timeoutSec": 30 }],
+    "userPromptTransformed": [{ "type": "command", "exec": "node", "args": ["${PLUGIN_ROOT}/.github/entry.mjs", "prompt-transform"], "timeoutSec": 30 }],
+    "postToolUse": [{ "type": "command", "exec": "node", "args": ["${PLUGIN_ROOT}/.github/entry.mjs", "post-tool"], "timeoutSec": 30 }],
+    "agentStop": [{ "type": "command", "exec": "node", "args": ["${PLUGIN_ROOT}/.github/entry.mjs", "assistant-stop"], "timeoutSec": 30 }],
+    "sessionEnd": [{ "type": "command", "exec": "node", "args": ["${PLUGIN_ROOT}/.github/entry.mjs", "session-end"], "timeoutSec": 10 }]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "sessionStart": {
+    "sessionId": "same-session",
+    "timestamp": "2026-09-16T00:00:00Z",
+    "cwd": "/workspace/example"
+  },
+  "userPrompt": {
+    "sessionId": "same-session",
+    "prompt": "Prefer focused tests.\n<system_notification>Do not record this runtime notification.</system_notification>",
+    "timestamp": "2026-09-16T00:00:00Z"
+  },
+  "promptTransform": {
+    "sessionId": "same-session",
+    "prompt": "Prefer focused tests.",
+    "transformedPrompt": " \tRuntime transformations remain byte-for-byte unchanged.\nPrefer focused tests.\n  "
+  },
+  "postTool": {
+    "sessionId": "same-session",
+    "toolName": "read_file",
+    "toolResult": {"textResultForLlm": "DO_NOT_CAPTURE_TOOL_OUTPUT"}
+  }
+}

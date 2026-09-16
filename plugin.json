@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "memory-house",
+  "version": "0.11.0",
+  "description": "Shared Memory House search, remembering, Microsoft sign-in, and automatic conversational memory.",
+  "author": { "name": "Aayush Kataria", "url": "https://github.com/aayush3011" },
+  "repository": "https://github.com/aayush3011/amt-copilot-plugin",
+  "license": "MIT",
+  "keywords": ["memory", "memory-house", "mcp"],
+  "extensions": {
+    "com.openai": {
+      "hooks": "./.codex/plugin-hooks.json",
+      "interface": {
+        "displayName": "Memory House",
+        "shortDescription": "Shared memory with Microsoft sign-in",
+        "developerName": "Aayush Kataria",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "defaultPrompt": ["Sign in to Memory House", "Search my memories", "Remember my preferences"]
+      }
+    }
+  }
+}

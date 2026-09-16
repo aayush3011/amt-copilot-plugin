@@ -11,7 +11,11 @@ test('real stdio MCP initialization and discovery work before sign-in', async t 
   const mcp = await memoryFixture(t, gateway);
   assert.equal(mcp.client.getServerVersion().name, 'memory-house');
   const { tools } = await mcp.client.listTools();
-  assert.deepEqual(tools.map(tool => tool.name).sort(), ['add_memory', 'memory_login', 'memory_setup', 'memory_status', 'search_memories']);
+  assert.deepEqual(tools.map(tool => tool.name).sort(), ['add_memory', 'memory_login', 'memory_logout', 'memory_status', 'search_memories']);
+  assert.equal(mcp.client.getServerVersion().version, '0.12.0');
+  assert.match(tools.find(tool => tool.name === 'memory_login').description, /Opens the Microsoft sign-in page directly in your browser/);
+  assert.equal(tools.find(tool => tool.name === 'memory_login').annotations.readOnlyHint, false);
+  assert.equal(tools.find(tool => tool.name === 'memory_logout').annotations.destructiveHint, true);
   assert.equal(tools.find(tool => tool.name === 'search_memories').annotations.readOnlyHint, true);
   assert.equal(tools.find(tool => tool.name === 'add_memory').annotations.readOnlyHint, false);
   assert.equal(tools.find(tool => tool.name === 'add_memory').annotations.idempotentHint, false);
@@ -63,7 +67,9 @@ test('MCP inputs reject identities, endpoints, credentials, and oversize text be
     ['add_memory', { content: 'note', user_id: 'user:other' }],
     ['add_memory', { content: 'x'.repeat(32769) }],
     ['memory_login', { access_token: 'fixture-forbidden-secret' }],
-    ['memory_setup', { gatewayBase: 'https://wrong.example' }],
+    ['memory_login', { gatewayBase: 'https://wrong.example' }],
+    ['memory_logout', { refresh_token: 'fixture-forbidden-secret' }],
+    ['memory_status', { user_id: 'different-user' }],
   ]) {
     const response = await mcp.call(name, input);
     assert.equal(response.isError, true);
@@ -87,19 +93,50 @@ test('MCP capture failures are actionable errors with no automatic replay or pro
   assert.equal(gateway.state.turns.length, 0);
 });
 
-test('model-visible setup and login return only a local page, never enrollment or sign-in credentials', async t => {
+test('a clean MCP process opens Microsoft directly, signs in, then supports status and sign-out tools', async t => {
   const gateway = await mockGateway(t);
-  const mcp = await memoryFixture(t, gateway);
-  const opened = data(await mcp.call('memory_setup'));
-  const url = new URL(opened.url);
-  assert.equal(url.hostname, '127.0.0.1');
-  assert.equal(url.search + url.hash, '');
-  assert.equal(opened.browserOpened, false);
-  assert.equal(data(await mcp.call('memory_login')).url, opened.url);
-  const page = await fetch(opened.url);
-  assert.equal(page.status, 200);
-  assert.match(await page.text(), /Sign in with Microsoft/);
+  const mcp = await memoryFixture(t, gateway, { loginFixture: true });
   assert.equal(gateway.state.requests.length, 0);
-  await mcp.client.close();
-  await assert.rejects(fetch(opened.url));
+  const signedIn = await mcp.call('memory_login');
+  assert.equal(signedIn.isError, undefined, JSON.stringify(signedIn));
+  assert.equal(data(signedIn).signedIn, true);
+  assert.doesNotMatch(JSON.stringify(signedIn), /https?:|fixture-(entra|access|refresh|enrollment|provider)/);
+  const status = data(await mcp.call('memory_status'));
+  assert.equal(status.signedIn, true);
+  assert.equal(status.login.state, 'complete');
+  assert.equal(status.gatewayBase, undefined);
+  const count = gateway.state.requests.length;
+  await mcp.call('memory_status');
+  assert.equal(gateway.state.requests.length, count);
+  assert.equal(data(await mcp.call('search_memories', { query: 'TypeScript' })).count, 1);
+  const added = data(await mcp.call('add_memory', { content: 'Remember concise examples.' }));
+  assert.equal(added.accepted, true);
+  assert.equal(added.processing, 'asynchronous');
+  const signedOut = await mcp.call('memory_logout');
+  assert.equal(signedOut.isError, undefined);
+  assert.deepEqual(data(signedOut), {
+    signedOut: true, localCleared: true, revoked: true,
+    message: 'Signed out of Memory House on this device. Previously issued access tokens may remain valid until expiry.',
+  });
+  assert.equal(data(await mcp.call('memory_status')).signedIn, false);
+  assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/redeem')).length, 1);
+  assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/revoke')).length, 1);
+  assert.equal(gateway.state.refreshTokens.size, 0);
+  assert.equal(mcp.stderr(), '');
 });
+
+for (const behavior of ['browser-failed', 'denied']) {
+  test(`a clean MCP sign-in handles ${behavior} without exposing provider content or redeeming`, async t => {
+    const gateway = await mockGateway(t);
+    const mcp = await memoryFixture(t, gateway, { loginFixture: true, browserBehavior: behavior });
+    const response = await mcp.call('memory_login');
+    assert.equal(response.isError, true);
+    assert.equal(data(response).code, behavior === 'browser-failed' ? 'BROWSER_LAUNCH_FAILED' : 'ENTRA_LOGIN_FAILED');
+    assert.doesNotMatch(JSON.stringify(response), /fixture-|https?:/);
+    const status = data(await mcp.call('memory_status'));
+    assert.equal(status.login.state, 'error');
+    assert.equal(status.signedIn, false);
+    assert.equal(gateway.state.requests.length, 0);
+    assert.equal(mcp.stderr(), '');
+  });
+}

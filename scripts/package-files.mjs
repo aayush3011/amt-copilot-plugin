@@ -7,5 +7,7 @@ export const PACKAGE_FILES = Object.freeze([
   '.codex/entry.mjs', '.codex/plugin-hooks.json',
   '.cursor/entry.mjs', '.cursor/mcp.json', '.cursor/plugin-hooks.json',
   '.github/entry.mjs', 'com.github.copilot/hooks/hooks.json',
-  'skills/memory/SKILL.md', 'skills/memory-login/SKILL.md',
+  'skills/mh-memory/SKILL.md', 'skills/mh-login/SKILL.md',
+  'skills/mh-logout/SKILL.md', 'skills/mh-status/SKILL.md',
+  'skills/mh-login/agents/openai.yaml', 'skills/mh-logout/agents/openai.yaml',
 ]);

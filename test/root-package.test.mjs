@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -35,13 +35,14 @@ async function discover(root, host) {
   assert.equal(catalog.plugins.length, 1);
   const entry = catalog.plugins[0];
   assert.equal(entry.name, 'memory-house');
+  assert.equal(entry.version, '0.12.0');
   const source = entry.source.path ?? entry.source;
   assert.equal(source, './');
   const pluginRoot = resolve(root, source);
   assert.equal(pluginRoot, resolve(root));
   const manifest = await json(join(pluginRoot, spec.manifest));
   assert.equal(manifest.name, 'memory-house');
-  assert.equal(manifest.version, '0.11.0');
+  assert.equal(manifest.version, '0.12.0');
   let hookPath;
   let mcpPath;
   if (host === 'codex' || host === 'copilot') {
@@ -124,6 +125,21 @@ test('every catalog selects this same root and precisely its own native componen
   assert.equal((await json(join(ROOT, 'package.json'))).workspaces, undefined);
 });
 
+test('packaged mh commands match their directories and real MCP tools', async t => {
+  const root = await rootSnapshot(t);
+  assert.deepEqual((await readdir(join(root, 'skills'))).sort(), ['mh-login', 'mh-logout', 'mh-memory', 'mh-status']);
+  for (const [name, tool] of [['mh-login', 'memory_login'], ['mh-logout', 'memory_logout'], ['mh-status', 'memory_status'], ['mh-memory', 'search_memories']]) {
+    const source = await readFile(join(root, 'skills', name, 'SKILL.md'), 'utf8');
+    assert.match(source, new RegExp(`^name: ${name}$`, 'm'));
+    assert.ok(source.includes(`\`${tool}\``));
+    if (['mh-login', 'mh-logout'].includes(name)) {
+      assert.match(source, /^disable-model-invocation: true$/m);
+      assert.match(await readFile(join(root, 'skills', name, 'agents/openai.yaml'), 'utf8'), /allow_implicit_invocation: false/);
+    }
+  }
+  assert.match(await readFile(join(root, 'skills/mh-memory/SKILL.md'), 'utf8'), /`add_memory`/);
+});
+
 test('included runtime is reproducible, license-complete and in the Git-publishable tree', async t => {
   await buildRuntime({ check: true });
   const env = await isolatedEnvironment(t);
@@ -147,10 +163,15 @@ test('a fresh root copy performs bundled Microsoft enrollment then search/add/re
   const gateway = await mockGateway(t);
   const env = await isolatedEnvironment(t);
   const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
-  const probe = fileURLToPath(new URL('./helpers/native-auth-probe.mjs', import.meta.url));
-  const login = await run(process.execPath, [probe, join(root, 'runtime/auth.mjs')], { env, cwd: env.HOME, timeout: 15_000 });
-  assert.deepEqual(JSON.parse(login.stdout), { signedIn: true, pkce: true });
-  assert.equal(login.stderr, '');
+  const auth = await connectMcp(t, {
+    args: ['--import', fileURLToPath(new URL('./helpers/direct-login-bootstrap.mjs', import.meta.url)), join(root, 'runtime/server.mjs')],
+    env, cwd: env.HOME,
+  });
+  const login = await auth.call('memory_login');
+  assert.equal(login.isError, undefined, JSON.stringify(login));
+  assert.equal(data(login).signedIn, true);
+  assert.equal(auth.stderr(), '');
+  await auth.client.close();
   for (const host of Object.keys(HOSTS)) {
     const spec = await discover(root, host);
     const server = await connectMcp(t, {
@@ -158,7 +179,7 @@ test('a fresh root copy performs bundled Microsoft enrollment then search/add/re
       env: { ...env, [spec.variable]: root }, cwd: env.HOME,
     });
     const { tools } = await server.client.listTools();
-    assert.deepEqual(tools.map(tool => tool.name).sort(), ['add_memory', 'memory_login', 'memory_setup', 'memory_status', 'search_memories']);
+    assert.deepEqual(tools.map(tool => tool.name).sort(), ['add_memory', 'memory_login', 'memory_logout', 'memory_status', 'search_memories']);
     assert.equal(data(await server.call('memory_status')).signedIn, true);
     const added = await server.call('add_memory', { content: `Remember concise ${host} examples.` });
     assert.equal(added.isError, undefined);
@@ -194,6 +215,33 @@ test('a fresh root copy performs bundled Microsoft enrollment then search/add/re
   assert.equal(gateway.state.turns.filter(turn => turn.thread_id.startsWith('mh:manual:')).length, 4);
   assert.equal(gateway.state.turns.filter(turn => turn.role === 'agent').length, 4);
   assert.equal(new Set(gateway.state.turns.filter(turn => !turn.thread_id.startsWith('mh:manual:')).map(turn => turn.thread_id)).size, 4);
+});
+
+test('all four native hooks capture ordinary user and agent turns without explicit memory tool calls', async t => {
+  const gateway = await mockGateway(t);
+  const env = await isolatedEnvironment(t);
+  const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
+  const probe = fileURLToPath(new URL('./helpers/native-auth-probe.mjs', import.meta.url));
+  await run(process.execPath, [probe, join(root, 'runtime/auth.mjs')], { env, cwd: env.HOME, timeout: 15_000 });
+  const expected = [];
+  for (const host of Object.keys(HOSTS)) {
+    const session = host === 'cursor' ? { conversation_id: `${host}-automatic` } : { session_id: `${host}-automatic` };
+    const promptEvent = host === 'cursor' ? 'beforeSubmitPrompt' : host === 'copilot' ? 'userPromptSubmitted' : 'UserPromptSubmit';
+    const stopEvent = host === 'cursor' ? 'afterAgentResponse' : host === 'copilot' ? 'agentStop' : 'Stop';
+    for (let turn = 1; turn <= 3; turn++) {
+      const prompt = `Ordinary conversation ${turn} for ${host}.`;
+      const answer = `Acknowledged ordinary conversation ${turn}.`;
+      await hook(host, promptEvent, { ...session, turn_id: `turn-${turn}`, prompt }, env, root);
+      await hook(host, stopEvent, {
+        ...session, turn_id: `turn-${turn}`,
+        ...(host === 'cursor' ? { text: answer } : { last_assistant_message: answer }),
+      }, env, root);
+      expected.push({ role: 'user', content: prompt }, { role: 'agent', content: answer });
+    }
+  }
+  assert.deepEqual(gateway.state.turns.map(({ role, content }) => ({ role, content })), expected);
+  assert.equal(gateway.state.turns.length, 24);
+  assert.ok(gateway.state.turns.every(turn => !turn.thread_id.startsWith('mh:manual:')));
 });
 
 test('each entry fails open for absent/wrong plugin roots, malformed input and wrong host events', async t => {
@@ -247,11 +295,8 @@ test('publisher defaults cannot be overridden through model tools or environment
   const status = data(await server.call('memory_status'));
   assert.equal(status.signedIn, false);
   assert.equal(status.publisherConfigReady, true);
-  assert.match(status.gatewayBase, /reranker-api-/);
-  const opened = data(await server.call('memory_login'));
-  const page = await fetch(opened.url);
-  const html = await page.text();
-  assert.doesNotMatch(html, /<input|<form|Save public settings/);
+  assert.equal(status.gatewayBase, undefined);
+  assert.doesNotMatch(JSON.stringify(status), /https?:/);
   for (const input of [{ gatewayBase: 'https://wrong.example' }, { token: 'fake-secret' }]) {
     const result = await server.call('memory_login', input);
     assert.equal(result.isError, true);
@@ -317,7 +362,9 @@ test('available Copilot CLI registers the native catalog and installs exactly on
   await run('copilot', ['plugin', 'install', 'memory-house@memory-house-marketplace'], { env, cwd: env.HOME, timeout: 30_000 });
   const listed = await run('copilot', ['plugin', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   assert.match(listed.stdout, /memory-house/);
-  assert.match(listed.stdout, /0\.11\.0/);
+  assert.match(listed.stdout, /0\.12\.0/);
   assert.match(listed.stdout, /memory-house-marketplace/);
-  assert.equal((listed.stdout.match(/0\.11\.0/g) ?? []).length, 1, listed.stdout);
+  assert.equal((listed.stdout.match(/0\.12\.0/g) ?? []).length, 1, listed.stdout);
+  const skills = await run('copilot', ['skill', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
+  for (const name of ['mh-login', 'mh-logout', 'mh-status', 'mh-memory']) assert.match(skills.stdout, new RegExp(`\\b${name}\\b`));
 });

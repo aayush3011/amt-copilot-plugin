@@ -19,6 +19,13 @@ catalog fallback does not point to a different product. Do not add top-level
 `hooks`, `skills`, or `mcpServers` to the portable manifest: its schema is closed
 and those path fields would be ignored.
 
+Hooks automatically capture every conversational user turn and final agent turn
+in the main conversation. Their capture calls do not ask the model to choose
+important material; the AMT backend handles extraction, consolidation and
+discarding. `add_memory` is only an explicit user-requested one-off write, never
+a substitute for the hook stream or an importance-based extra write. Existing
+credential/runtime filtering and best-effort delivery still apply.
+
 Claude uses its native manifest rather than `plugin.json` for components.
 Codex's supported portable-root selector takes precedence over its compatibility
 manifests. Cursor's documented **native marketplace** resolution checks
@@ -67,8 +74,12 @@ the same application ID, `isFallbackPublicClient=true`, and that exact
 public-client loopback callback (as well as `http://localhost`). No registration
 was changed and no user access token was issued by that verification.
 
-The private sign-in page has no deployment-edit endpoint or settings form.
-No model tool accepts identity, endpoints or credentials. The shipped
+`memory_login` invokes the Entra helper directly and opens Microsoft's HTTPS
+authorization URL in the browser after the host's tool approval. It waits for
+sign-in and returns only safe outcome text. `memory_status` checks local state
+without a network request or deployment URL, and `memory_logout` revokes/clears
+the shared sign-in without a browser. No model tool accepts identity, endpoints
+or credentials. The shipped
 application registration is read from `deployment.json`, not arbitrary host
 OAuth caches, legacy token files, per-user public configuration, or
 gateway/token environment overrides.
@@ -80,10 +91,38 @@ and registered port/path. An occupied fixed port fails explicitly instead of
 falling back to an arbitrary port. Tenant policy, account entitlement, network
 reachability and user consent still govern actual live sign-in.
 
+The only local HTTP listener is the registered OAuth callback during sign-in;
+there is no landing page, configuration server, or ephemeral-port management UI.
+PKCE, callback-state validation and fixed-port binding remain in `src/entra.mjs`.
+Auth tool calls are serialized per MCP connection so an overlapping sign-out
+cannot race an in-progress sign-in; status remains readable during sign-in.
+MCP cancellation/shutdown aborts the active auth helper.
+
 Shared credentials live in `~/.memory-house/token.json` (or an explicitly
 operator-selected `MEMORY_HOUSE_HOME`). Auth writes use private files and
 cross-process locks. Tokens are gateway-bound and never copied into the repo.
 Gateway refresh/capture/search/revoke APIs and AMT remain unchanged.
+
+## Skill commands
+
+The root skills are `mh-login`, `mh-logout`, `mh-status`, and `mh-memory`;
+each directory and frontmatter name matches. Login and logout set
+`disable-model-invocation: true` and Codex's `allow_implicit_invocation: false`
+metadata. Skills do not pre-approve the MCP tools.
+
+Claude Code invokes plugin skills as `/memory-house:mh-login` (and the same
+prefix for the other three names). Copilot app/CLI invokes `/mh-login`, Cursor
+selects `mh-login` from its `/` picker, and Codex CLI/IDE mentions `$mh-login`
+or selects it through `/skills`. The same substitutions apply to logout,
+status and memory. ChatGPT desktop's skill picker uses `@`; exact Codex desktop
+controls depend on the surface/version, so the user docs do not invent a
+universal bare slash alias there.
+
+Invocation references:
+[Claude plugin namespace](https://code.claude.com/docs/en/plugin-marketplaces),
+[Copilot skill invocation](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills#using-agent-skills),
+[Codex and ChatGPT skill invocation](https://learn.chatgpt.com/docs/build-skills),
+[Cursor skill picker](https://cursor.com/docs/skills).
 
 ## Developer-only build and checks
 

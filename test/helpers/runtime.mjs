@@ -19,7 +19,6 @@ export async function isolatedEnvironment(t) {
     CLAUDE_CONFIG_DIR: join(home, '.claude'),
     CODEX_HOME: join(home, '.codex'),
     MH_ALLOW_INSECURE_LOCALHOST: '1',
-    MEMORY_HOUSE_NO_BROWSER: '1',
   };
 }
 
@@ -39,11 +38,15 @@ export async function rootSnapshot(t, { deployment, name = 'installed plugin' } 
   return root;
 }
 
-export async function memoryFixture(t, gateway) {
+export async function memoryFixture(t, gateway, { loginFixture = false, browserBehavior = 'success' } = {}) {
   const env = await isolatedEnvironment(t);
   const deployment = fixtureDeployment(gateway.base);
   const root = await rootSnapshot(t, { deployment });
-  const mcp = await connectMcp(t, { args: [join(root, 'runtime/server.mjs')], cwd: env.HOME, env });
+  const args = [
+    ...(loginFixture ? ['--import', fileURLToPath(new URL('./direct-login-bootstrap.mjs', import.meta.url))] : []),
+    join(root, 'runtime/server.mjs'),
+  ];
+  const mcp = await connectMcp(t, { args, cwd: env.HOME, env: { ...env, ...(loginFixture ? { MH_FIXTURE_BROWSER_BEHAVIOR: browserBehavior } : {}) } });
   return { env, deployment, root, ...mcp };
 }
 

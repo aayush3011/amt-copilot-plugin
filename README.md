@@ -40,21 +40,38 @@ elsewhere and do not inherit your local sign-in.
 
 ## Sign in, search, remember
 
-Ask **"Sign in to Memory House."** The `memory_login` tool opens a private local
-page. Select **Sign in with Microsoft** and complete account sign-in and consent
-in the browser. The publisher has configured the gateway, tenant, public-client
-ID, API scope and registered callback; users do not enter these settings.
-No password, token, or enrollment code goes through chat.
+Use **`mh-login`** through your app's skill command, approve the tool when
+prompted, and complete Microsoft sign-in in your browser. `memory_login` opens
+Microsoft directly and reports the outcome after you finish. There is no
+intermediate landing page or deployment display. The publisher supplies the
+registration settings; no password, token, or enrollment code goes through chat.
+
+| Host | Sign in | Sign out | Status | Search / remember |
+| --- | --- | --- | --- | --- |
+| **Claude Code** | `/memory-house:mh-login` | `/memory-house:mh-logout` | `/memory-house:mh-status` | `/memory-house:mh-memory` |
+| **Copilot app / CLI** | `/mh-login` | `/mh-logout` | `/mh-status` | `/mh-memory` |
+| **Codex CLI / IDE** | `$mh-login` | `$mh-logout` | `$mh-status` | `$mh-memory` |
+| **Cursor Agent chat** | `/mh-login` | `/mh-logout` | `/mh-status` | `/mh-memory` |
+
+Codex also provides `/skills` to select a skill. Desktop surfaces can differ:
+ChatGPT's desktop skill picker uses `@`; select the installed `mh-login`,
+`mh-logout`, `mh-status`, or `mh-memory` skill by name. A bare `/mh-login` is not
+promised for every Codex desktop version. In Cursor, type `/` and select the
+named skill. Claude Code intentionally namespaces plugin skills.
 
 Then ask:
 
 - **"Search Memory House for my TypeScript preferences."**
 - **"Remember in Memory House that I prefer concise examples."**
 
-The app exposes `search_memories`, `add_memory`, `memory_login`, `memory_setup`
-(the same sign-in page), and `memory_status`. Tool names may carry the app's
+The app exposes `search_memories`, `add_memory`, `memory_login`, `memory_logout`,
+and `memory_status`. Tool names may carry the app's
 plugin namespace. Identity comes from your authenticated gateway session, never
 from a model-supplied user, tenant, or endpoint.
+
+`add_memory` is only a one-off write for an explicit "remember this." It is not
+routine capture. Hooks send the conversation automatically; the model must not
+call `add_memory` just because something seems important.
 
 **Remembering submits conversational text for asynchronous extraction.**
 Acceptance is not immediate publication of a durable fact or a promise that the
@@ -63,14 +80,20 @@ or new deduplication contract is added.
 
 ## Automatic memory
 
+**Hooks are the capture path.** They automatically attempt to send every user
+turn and every final agent turn in the main conversation to Memory House/AMT,
+without waiting for the model to call a tool or decide that a turn is important.
+The **AMT backend core** decides what to extract, consolidate, or discard.
+Capture is best-effort when sign-in, networking, or host payloads are unavailable.
+
 Claude Code and Codex recall at startup and on each prompt. Copilot recalls at
 startup and during prompt transformation, with post-tool fallback. Cursor
 recalls at startup and after a tool using the latest prompt; it cannot inject
 arbitrary context through `beforeSubmitPrompt`, so tool-free first answers do
 not get that post-tool recall.
 
-Hooks capture original user text and final assistant answers, not tool outputs
-or private reasoning. Common credentials and runtime envelopes are filtered.
+The automatic stream contains original user text and final assistant answers,
+not tool outputs or private reasoning. Common credentials and runtime envelopes are filtered.
 This is not comprehensive DLP: enable capture only where your data policy
 allows sending conversation text to your Memory House deployment.
 
@@ -85,9 +108,12 @@ allows sending conversation text to your Memory House deployment.
   and retry. The plugin does not silently choose an unregistered port.
 - **Publisher configuration error:** contact the publisher rather than entering
   registration settings or credentials in chat.
-- **Sign out:** open `memory_login` and select **Sign out**. This clears the
-  shared local credentials and attempts refresh-token revocation. Existing
-  access tokens remain subject to their issued expiry.
+- **Sign out:** use `mh-logout` (the `memory_logout` tool). This clears the shared
+  local credentials and attempts refresh-token revocation without opening a
+  browser. Existing access tokens remain subject to their issued expiry.
+- **Interrupted sign-in:** finish or cancel the current attempt before starting
+  another. Cancelling the MCP request or closing its connection aborts sign-in
+  and closes the callback listener; retry if the host's tool timeout expires.
 
 The single source package is at this repository root: `.claude/`, `.codex/`,
 `.cursor/`, and `.github/` select host behavior, while `src/` and the included

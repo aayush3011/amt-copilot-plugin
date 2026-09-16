@@ -450,7 +450,8 @@ async function capture(client, threadId, role, content, log) {
   }
   try {
     const result = await client.capture({ thread_id: threadId, role, content });
-    if (result === false || result?.ok === false || result?.success === false) {
+    if (result === false || result?.ok === false || result?.success === false
+      || result?.accepted === false || result?.captured === false) {
       log(`capture:${role}:failed:schema`);
       return;
     }

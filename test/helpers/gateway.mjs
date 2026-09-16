@@ -9,6 +9,7 @@ export async function mockGateway(t, options = {}) {
     refreshTokens: new Set(),
     counter: 0,
     captureStatus: 200,
+    revokeStatus: 204,
   };
   function grant(expiresIn = 3600) {
     const n = ++state.counter;
@@ -46,6 +47,7 @@ export async function mockGateway(t, options = {}) {
       return send(200, grant());
     }
     if (path === "/inference/memory/hook/revoke") {
+      if (state.revokeStatus !== 204) return send(state.revokeStatus, { error: "fixture-provider-secret" });
       state.refreshTokens.delete(body?.refresh_token);
       return send(204);
     }

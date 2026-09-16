@@ -5,6 +5,8 @@ import { atomicJson, ensureDirectory, inspect, owned, readState as readFile, rem
 export { MemoryHouseError } from './config.mjs';
 
 const credentialLimit = 32 * 1024;
+export const MEMORY_TYPES = Object.freeze(['fact', 'episodic', 'procedural']);
+export const MEMORY_LIST_LIMITS = Object.freeze({ defaultCount: 50, maxCount: 200, maxScopes: 20, scopeBytes: 256 });
 
 function fail(code, message, details) {
   return new MemoryHouseError(code, message, details);
@@ -59,7 +61,7 @@ function jsonObject(raw, operation) {
 }
 
 /**
- * Internal shared transport for hook requests and the Entra MCP handshake.
+ * Internal shared transport for memory requests and the Entra MCP handshake.
  * The deadline includes response-body streaming, and errors never include server text.
  */
 export async function sendRequest({
@@ -223,12 +225,13 @@ export function createClient(options = {}) {
     if (!Number.isFinite(value) || value < 0) throw fail('INVALID_CLOCK', 'The Memory House clock must return milliseconds since the Unix epoch.');
     return Math.floor(value / 1000);
   };
-  const request = (endpoint, { method = 'POST', body, token, allowEmpty = false, operation = endpoint } = {}) =>
+  const requestUrl = (url, { method = 'POST', body, token, allowEmpty = false, operation = 'request' } = {}) =>
     sendRequest({
-      url: `${config.hookBase}/${endpoint}`, fetch: fetchImpl, timeoutMs: config.timeoutMs,
+      url, fetch: fetchImpl, timeoutMs: config.timeoutMs,
       maxResponseBytes: config.maxResponseBytes, method, body, operation, allowEmpty,
       headers: token ? { Authorization: `HookToken ${token}` } : {},
     });
+  const request = (endpoint, options) => requestUrl(`${config.hookBase}/${endpoint}`, { operation: endpoint, ...options });
   const locked = async work => {
     await ensureDirectory(config.stateDir);
     return withLock(config.lockPath, config.lockTimeoutMs, async () => {
@@ -364,9 +367,34 @@ export function createClient(options = {}) {
     return data;
   }
 
+  async function getMemories(options = {}) {
+    if (!isObject(options) || Object.keys(options).some(key => !['recent_k', 'memory_types', 'scopes', 'include_superseded'].includes(key))) {
+      throw fail('INVALID_PAYLOAD', 'Memory listing accepts only count, type/scope filters and superseded visibility.');
+    }
+    const { recent_k = MEMORY_LIST_LIMITS.defaultCount, memory_types = [], scopes = [], include_superseded = false } = options;
+    if (!Number.isSafeInteger(recent_k) || recent_k < 1 || recent_k > MEMORY_LIST_LIMITS.maxCount
+      || !Array.isArray(memory_types) || memory_types.length > MEMORY_TYPES.length || memory_types.some(value => !MEMORY_TYPES.includes(value))
+      || !Array.isArray(scopes) || scopes.length > MEMORY_LIST_LIMITS.maxScopes
+      || scopes.some(value => typeof value !== 'string' || !value || Buffer.byteLength(value) > MEMORY_LIST_LIMITS.scopeBytes || /[\s\u0000-\u001f\u007f-\u009f]/u.test(value))
+      || typeof include_superseded !== 'boolean') {
+      throw fail('INVALID_PAYLOAD', 'Memory listing requires a count from 1 to 200, supported memory types, bounded scope keys and a boolean superseded filter.');
+    }
+    const query = new URLSearchParams({ recent_k: String(recent_k) });
+    for (const type of new Set(memory_types)) query.append('memory_types', type);
+    for (const scope of new Set(scopes)) query.append('scopes', scope);
+    if (include_superseded) query.set('include_superseded', 'true');
+    const token = await getAccessToken();
+    const { data } = await requestUrl(`${config.gatewayBase}/memories?${query}`, { method: 'GET', token, operation: 'listing' });
+    if (!isObject(data) || !Array.isArray(data.items) || !Number.isSafeInteger(data.count) || data.count < 0
+      || typeof data.truncated !== 'boolean') {
+      throw fail('INVALID_RESPONSE', 'Memory House listing did not return valid items, count and truncation status.');
+    }
+    return data;
+  }
+
   async function status() {
     return statusFor(await readCache());
   }
 
-  return Object.freeze({ config, getAccessToken, redeem, logout, capture, search, status });
+  return Object.freeze({ config, getAccessToken, redeem, logout, capture, search, getMemories, status });
 }

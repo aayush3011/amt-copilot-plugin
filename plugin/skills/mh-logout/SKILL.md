@@ -1,8 +1,10 @@
 ---
 name: mh-logout
-description: Sign out of Memory House on this device and clear its shared credentials.
-disable-model-invocation: true
+description: Sign out of Memory House only when the user explicitly requests it; affects all hosts sharing this OS user.
 ---
+
+Use this skill only for an explicit user request to sign out. Being discoverable
+does not authorize logout; host tool approval still applies.
 
 Call the plugin's `memory_logout` MCP tool with no arguments. This revokes the
 current refresh token and clears the local sign-in shared by the user's

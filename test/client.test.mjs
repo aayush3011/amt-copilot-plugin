@@ -226,7 +226,53 @@ test('capture and search expose only narrow request bodies and HookToken authent
   assert.deepEqual(JSON.parse(f.calls[0].body), { thread_id: 'test', role: 'agent', content: 'A note.' });
   assert.deepEqual(JSON.parse(f.calls[1].body), { query: 'query', top_k: 3 });
   assert.ok(f.calls.every(call => call.headers.Authorization === 'HookToken fake-access-1'));
-  assert.deepEqual(Object.keys(f.client).sort(), ['capture', 'config', 'getAccessToken', 'logout', 'redeem', 'search', 'status']);
+  assert.deepEqual(Object.keys(f.client).sort(), ['capture', 'config', 'getAccessToken', 'getMemories', 'logout', 'redeem', 'search', 'status']);
+});
+
+test('memory listing uses the existing GET route with encoded repeated filters and shared HookToken auth', async t => {
+  const f = await fixture(t);
+  await f.signIn();
+  f.handler(() => json({ items: [], count: 0, truncated: false }));
+  assert.deepEqual(await f.client.getMemories(), { items: [], count: 0, truncated: false });
+  await f.client.getMemories({
+    recent_k: 200, memory_types: ['fact', 'procedural'], scopes: ['scope:team&recent_k=999', 'scope:org'], include_superseded: true,
+  });
+  assert.equal(f.calls[0].url, `${f.config.gatewayBase}/memories?recent_k=50`);
+  const filtered = new URL(f.calls[1].url);
+  assert.equal(filtered.pathname, '/inference/memory/memories');
+  assert.equal(filtered.searchParams.get('recent_k'), '200');
+  assert.deepEqual(filtered.searchParams.getAll('memory_types'), ['fact', 'procedural']);
+  assert.deepEqual(filtered.searchParams.getAll('scopes'), ['scope:team&recent_k=999', 'scope:org']);
+  assert.equal(filtered.searchParams.get('include_superseded'), 'true');
+  assert.ok(f.calls.every(call => call.method === 'GET' && call.body === undefined && call.headers.Authorization === 'HookToken fake-access-1'));
+});
+
+test('memory listing validates filters and rejects identity or endpoint overrides before auth or network', async t => {
+  const f = await fixture(t);
+  for (const options of [null, [], { recent_k: 0 }, { recent_k: 201 }, { recent_k: '50' }, { recent_k: 1.5 },
+    { memory_types: ['unknown'] }, { memory_types: 'fact' }, { memory_types: Array(4).fill('fact') },
+    { scopes: 'scope:one' }, { scopes: [''] }, { scopes: ['two scopes'] }, { scopes: ['\u00e9'.repeat(129)] },
+    { scopes: Array(21).fill('scope:one') }, { include_superseded: 'true' },
+    { token: 'fake-secret' }, { user_id: 'other' }, { gatewayBase: 'https://other.example' }, { offset: 50 }]) {
+    await assert.rejects(f.client.getMemories(options), { code: 'INVALID_PAYLOAD' });
+  }
+  assert.equal(f.calls.length, 0);
+  await absent(f.config.stateDir);
+});
+
+test('listing validates truncation metadata and preserves safe transport failures without retry', async t => {
+  const f = await fixture(t);
+  await f.signIn();
+  for (const bad of [{}, { items: [] }, { items: [], count: -1, truncated: false },
+    { items: [], count: 0, truncated: 'false' }, { items: 'fake-secret', count: 1, truncated: false }]) {
+    f.handler(() => json(bad));
+    await assert.rejects(f.client.getMemories(), { code: 'INVALID_RESPONSE' });
+  }
+  f.handler(() => json({ error: 'fake-server-secret' }, 403));
+  const before = f.calls.length;
+  await assert.rejects(f.client.getMemories(), error =>
+    error.status === 403 && !error.message.includes('fake-server-secret'));
+  assert.equal(f.calls.length, before + 1);
 });
 
 test('invalid conversational payloads fail before authentication or network', async t => {

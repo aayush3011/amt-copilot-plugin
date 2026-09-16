@@ -1,7 +1,7 @@
 {
   "name": "memory-house",
-  "version": "0.12.6",
-  "description": "Shared Memory House search, remembering, Microsoft sign-in, and native Codex capture hooks.",
+  "version": "0.13.0",
+  "description": "Shared Memory House listing, search, remembering, Microsoft sign-in, and native Codex capture hooks.",
   "author": { "name": "Aayush Kataria", "url": "https://github.com/aayush3011" },
   "repository": "https://github.com/aayush3011/amt-copilot-plugin",
   "license": "MIT",
@@ -15,6 +15,6 @@
     "developerName": "Aayush Kataria",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
-    "defaultPrompt": ["Sign in to Memory House", "Search my memories", "Remember my preferences"]
+    "defaultPrompt": ["Sign in to Memory House", "List my memories", "Search my memories", "Remember my preferences"]
   }
 }

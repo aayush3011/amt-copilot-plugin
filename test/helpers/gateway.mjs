@@ -10,6 +10,8 @@ export async function mockGateway(t, options = {}) {
     counter: 0,
     captureStatus: 200,
     revokeStatus: 204,
+    listingStatus: 200,
+    listingResponse: null,
   };
   function grant(expiresIn = 3600) {
     const n = ++state.counter;
@@ -31,8 +33,9 @@ export async function mockGateway(t, options = {}) {
       res.writeHead(400).end();
       return;
     }
-    const path = new URL(req.url, "http://localhost").pathname;
-    state.requests.push({ path, body, authorization: req.headers.authorization, headers: req.headers });
+    const url = new URL(req.url, "http://localhost");
+    const path = url.pathname;
+    state.requests.push({ path, method: req.method, query: [...url.searchParams], body, authorization: req.headers.authorization, headers: req.headers });
     const send = (status, value) => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(value === undefined ? undefined : JSON.stringify(value));
@@ -70,6 +73,19 @@ export async function mockGateway(t, options = {}) {
     }
     const token = req.headers.authorization?.replace(/^HookToken /, "");
     if (!state.accessTokens.has(token)) return send(401, { error: "unauthorized" });
+    if (path === "/inference/memory/memories" && req.method === "GET") {
+      if (state.listingStatus !== 200) return send(state.listingStatus, { error: "fixture-provider-secret" });
+      if (state.listingResponse !== null) return send(200, state.listingResponse);
+      const count = Number(url.searchParams.get("recent_k"));
+      const types = url.searchParams.getAll("memory_types");
+      const scopes = url.searchParams.getAll("scopes");
+      const matching = state.memories.filter(item =>
+        (!types.length || types.includes(item.memory_type ?? item.type))
+        && (!scopes.length || scopes.includes(item.scope_key))
+        && (url.searchParams.get("include_superseded") === "true" || !item.superseded_by));
+      const items = matching.slice(0, count);
+      return send(200, { items, count: items.length, truncated: matching.length > count });
+    }
     if (path === "/inference/memory/hook/capture") {
       if (state.captureStatus !== 200) return send(state.captureStatus, { error: "unavailable" });
       state.turns.push(body);

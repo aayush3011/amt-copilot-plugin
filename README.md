@@ -81,7 +81,7 @@ new session or reload plugins. Install one copy; do not also configure a second
 Memory House MCP server or duplicate hooks manually. Remote/cloud sessions run
 elsewhere and do not inherit your local sign-in.
 
-## Sign in, search, remember
+## Sign in, list, search, remember
 
 Use **`mh-login`** through your app's skill command, approve the tool when
 prompted, and complete Microsoft sign-in in your browser. `memory_login` opens
@@ -89,29 +89,64 @@ Microsoft directly and reports the outcome after you finish. There is no
 intermediate landing page or deployment display. The publisher supplies the
 registration settings; no password, token, or enrollment code goes through chat.
 
+**Sign in once, use every host.** Claude Code, Codex, Cursor and Copilot running
+on the same machine as the same OS user share `~/.memory-house/token.json`.
+Signing in through any one of them connects the others; signing out affects
+them all. Each host's own provider login is separate. Remote/cloud sessions,
+different OS users, or an explicitly different `MEMORY_HOUSE_HOME` use separate
+Memory House state and need their own sign-in.
+
 | Host | Sign in | Sign out | Status | Search / remember |
 | --- | --- | --- | --- | --- |
 | **Claude Code** | `/memory-house:mh-login` | `/memory-house:mh-logout` | `/memory-house:mh-status` | `/memory-house:mh-memory` |
 | **Copilot app / CLI** | `/memory-house:mh-login` | `/memory-house:mh-logout` | `/memory-house:mh-status` | `/memory-house:mh-memory` |
-| **Codex CLI / IDE** | `$mh-login` | `$mh-logout` | `$mh-status` | `$mh-memory` |
+| **Codex CLI 0.154.0 plugin** | `$memory-house:mh-login` | `$memory-house:mh-logout` | `$memory-house:mh-status` | `$memory-house:mh-memory` |
 | **Cursor Agent chat** | `/mh-login` | `/mh-logout` | `/mh-status` | `/mh-memory` |
 
-Codex also provides `/skills` to select a skill. Desktop surfaces can differ:
-ChatGPT's desktop skill picker uses `@`; select the installed `mh-login`,
-`mh-logout`, `mh-status`, or `mh-memory` skill by name. A bare `/mh-login` is not
-promised for every Codex desktop version. In Cursor, type `/` and select the
-named skill. Claude Code and the verified Copilot CLI namespace plugin skills;
-use the names shown in their skill picker rather than assuming a bare alias.
+Codex also provides `/skills` or `$` to select a skill. Its tested native
+plugin loader registers **`memory-house:mh-login`**, including the namespace;
+generic standalone-skill examples using `$mh-login` do not describe this plugin.
+Claude Code and Copilot likewise namespace plugin commands. Use the names in
+the host's picker rather than guessing a bare alias. Desktop/IDE surfaces can
+differ: ChatGPT's desktop skill picker uses `@`. In Cursor, type `/` and select
+the named skill.
+
+All four skills are discoverable; login/logout no longer carry metadata that
+hides them from model discovery. Their instructions still require an explicit
+user request, and the host's MCP tool approval remains in effect. After an
+update, restart the host or use its native skill reload; an existing session
+can retain the old skill inventory.
 
 Then ask:
 
+- **"Show my Memory House memories."**
 - **"Search Memory House for my TypeScript preferences."**
 - **"Remember in Memory House that I prefer concise examples."**
 
-The app exposes `search_memories`, `add_memory`, `memory_login`, `memory_logout`,
-and `memory_status`. Tool names may carry the app's
+The app exposes `get_memories`, `search_memories`, `add_memory`, `memory_login`,
+`memory_logout`, and `memory_status`. Tool names may carry the app's
 plugin namespace. Identity comes from your authenticated gateway session, never
 from a model-supplied user, tenant, or endpoint.
+
+`get_memories` lists recent records without a search query: default `recent_k`
+50, maximum 200, with optional `memory_types` (`fact`, `episodic`, `procedural`),
+repeatable `scopes`, and `include_superseded`. Scope keys are filters within the
+gateway's existing access checks, not a way to impersonate another identity.
+Use only known returned scope keys. `search_memories` remains query-based
+retrieval and is not an exhaustive listing.
+
+**A listing is not necessarily all memories.** `truncated` is true when the
+gateway reports truncation, the requested window is full, or local output limits
+omit records/content. `gatewayTruncated`, `limitReached`, `omittedItems`, and
+`contentTruncated` explain why. The gateway may cap results below the requested
+count; a higher `recent_k` is not a pagination cursor. This endpoint exposes no
+cursor/offset pagination or guaranteed complete export. The tool also bounds
+content to 8 KiB per record and 128 KiB per listing and reports those limits.
+
+If an exposed tool cannot complete a request, the agent must report that
+limitation, not inspect plugin bundles or credentials, import internal modules,
+reverse-engineer other services, or call the gateway directly as a workaround.
+Memory House tools are the supported access path.
 
 `add_memory` is only a one-off write for an explicit "remember this." It is not
 routine capture. Hooks send the conversation automatically; the model must not
@@ -151,6 +186,10 @@ allows sending conversation text to your Memory House deployment.
 
 - **Connection missing:** confirm the plugin and its one MCP server are enabled,
   Node.js 20+ is reachable by the app, and enterprise policy permits local tools.
+- **Skill not found:** update the plugin and start a fresh session. For Codex,
+  use `$memory-house:mh-login` or select it with `$`/`/skills`; for Copilot use
+  `/memory-house:mh-login`. A host inventory listing and the model's currently
+  loaded skill list can differ. Do not read credential files to work around it.
 - **Codex hooks need review:** run `/hooks`, review Memory House's session-start,
   user-prompt and stop hooks, and trust those definitions. Do not bypass hook
   trust or install duplicate user/project hooks.

@@ -91,6 +91,8 @@ Version 0.12.5 fixes the separate legacy Codex MCP working-directory/argument
 contract; 0.12.4's native MCP startup failed even though its hooks worked.
 Version 0.12.6 records successful Claude verification and corrects the stale
 skill/documentation wording; no authentication or capture implementation changed.
+Version 0.13.0 adds the supported listing tool and corrects auth-skill
+discoverability and Codex plugin invocation names.
 Hook discovery, native trust and real capture are distinct checks.
 
 **Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
@@ -118,7 +120,7 @@ root and native `.codex-plugin/plugin.json` also coexist successfully. The
 blanket vendor-admission conclusion was incorrect; it must not be repeated.
 The native regression test checks real `hooks/list` discovery without granting
 trust or executing any hook, and native `mcpServerStatus/list` must return all
-five tools with no startup error. A direct SDK client with manually expanded
+all exposed tools with no startup error. A direct SDK client with manually expanded
 arguments is not sufficient to test the native loader. A separate real Codex session, using the existing
 ChatGPT-authenticated profile, then trusted exactly the three Memory House
 plugin definitions through the native API used by `/hooks`. No trust-bypass
@@ -259,24 +261,76 @@ MCP cancellation/shutdown aborts the active auth helper.
 Shared credentials live in `~/.memory-house/token.json` (or an explicitly
 operator-selected `MEMORY_HOUSE_HOME`). Auth writes use private files and
 cross-process locks. Tokens are gateway-bound and never copied into the repo.
-Gateway refresh/capture/search/revoke APIs and AMT remain unchanged.
+One sign-in through any host is sufficient for all hosts using that same state
+directory as the same OS user on the same machine. Sign-out clears it for all
+of them. Different users, remote machines and explicit state-directory
+overrides are separate; host-provider authentication is also independent.
+Gateway APIs and AMT remain unchanged.
+
+## Supported listing
+
+`get_memories` uses the existing authenticated `GET {gatewayBase}/memories`
+route, not the semantic-search route or a new service. Its strict schema
+accepts only `recent_k` (default 50, maximum 200), `memory_types` (fact,
+episodic, procedural), `scopes`, and `include_superseded`. Arrays become
+repeatable URL-encoded query parameters. Identity comes from the same
+gateway-bound HookToken session as capture/search; no tool accepts credentials,
+tenant/user identity or endpoint overrides.
+
+The response projects content and bounded record metadata, sanitizes common
+credentials/runtime envelopes, and preserves reference-only semantics.
+`count` is the number returned, not a total count. The tool reports
+`truncated`, `gatewayTruncated`, `limitReached`, `omittedItems` and
+`contentTruncated`. A full requested window is conservatively marked potentially
+partial even when the gateway reports `truncated: false`; it is not proof of an
+exhaustive listing. Content is bounded to 8 KiB per item and 128 KiB per listing.
+Malformed truncation metadata and failed responses produce errors, not empty
+success-shaped fallbacks.
+
+There is no verified cursor/offset pagination contract. A live probe requesting
+51 records returned 50 with gateway truncation set; requesting 50 returned 50
+without that gateway flag. Report the requested-window limit as well as the
+server flag. Higher counts or narrower filters can help, but no complete
+export or hidden pagination is promised. The skill/server instructions direct
+unsupported requests back to the user rather than reading plugin internals,
+credential files, other service code or OpenAPI endpoints.
 
 ## Skill commands
 
 The payload skills are `mh-login`, `mh-logout`, `mh-status`, and `mh-memory`;
-each directory and frontmatter name matches. Login and logout set
-`disable-model-invocation: true` and Codex's `allow_implicit_invocation: false`
-metadata. Skills do not pre-approve the MCP tools.
+each directory and frontmatter name matches. All are available for discovery.
+Login/logout descriptions and instructions require an explicit user request;
+the skill itself does not pre-approve its MCP tools. Neither the Claude-style
+`disable-model-invocation` flag nor Codex-only implicit-invocation metadata is
+shipped. Host MCP approval remains the executable-action gate.
 
 Claude Code invokes plugin skills as `/memory-house:mh-login` (and the same
 prefix for the other three names). The verified Copilot CLI registers the same
 `/memory-house:mh-login` command name; the app's picker is authoritative for its
 version. Cursor
-selects `mh-login` from its `/` picker, and Codex CLI/IDE mentions `$mh-login`
-or selects it through `/skills`. The same substitutions apply to logout,
+selects `mh-login` from its `/` picker. The tested Codex 0.154.0 plugin loader
+registers `memory-house:mh-login`; mention `$memory-house:mh-login`
+or select it through `$`/`/skills`. The same substitutions apply to logout,
 status and memory. ChatGPT desktop's skill picker uses `@`; exact Codex desktop
 controls depend on the surface/version, so the user docs do not invent a
 universal bare slash alias there.
+
+Controlled native discovery compared the published metadata, removal of only
+the Claude flag, removal of only `agents/openai.yaml`, and removal of both.
+Codex and Copilot discovered all four enabled skills in every case; the flags
+did not delete the native inventory entries. Codex's names were namespaced in
+every case, so the old bare `$mh-login` documentation was incorrect for the
+tested plugin path. Explicit mention matching uses the discovered skill name.
+Invocation policy can separately hide skills from model discovery; removing
+these metadata restrictions keeps all four visible for user-requested use.
+Native regression checks include the actual Codex names, not just filesystem
+presence. Host inventories can still be cached until reload/restart.
+
+A controlled Copilot model lookup confirmed the distinction: both variants
+listed four installed skills, but with `disable-model-invocation: true` the
+model reported `mh-login` unavailable; without it the native `skill` tool
+successfully loaded `mh-login`. The probe allowed only skill loading, not
+Memory House tools, sign-in or sign-out.
 
 Invocation references:
 [Claude plugin namespace](https://code.claude.com/docs/en/plugin-marketplaces),
@@ -326,7 +380,7 @@ in an isolated fake profile. The available Copilot CLI also registers the native
 catalog and installs its payload in an isolated profile. The available
 Codex CLI installs the same snapshot and asserts that all three hooks are
 discovered as plugin-scoped and untrusted beside the legacy Copilot root, and
-that native MCP startup returns all five tools rather than an initialization error.
+that native MCP startup returns all six tools rather than an initialization error.
 These tests do not sign in, grant hook trust or start a model session. Native
 discovery and protocol fixtures are not substitutes for live capture testing.
 
@@ -339,7 +393,8 @@ marketplace catalogs. A host may separately retain its Git marketplace clone;
 that is not the installed payload. The publisher must still review the whole
 tracked repository before pushing and must never publish credentials.
 
-The final payload contains 34 publisher files. The pre-fix 0.12.4 native Git
+The 0.13.0 payload contains 32 publisher files after removing the two
+host-specific auth-skill metadata files. The pre-fix 0.12.4 native Git
 installations verified 33 publisher files and
 their hashes on all four hosts. Claude adds an `.in_use/` bookkeeping
 directory; Cursor adds a `.cache-complete` marker. Neither is shipped by this

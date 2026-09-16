@@ -17,7 +17,6 @@ export const PACKAGE_FILES = Object.freeze([
   '.github/entry.mjs', '.github/plugin-hooks.json',
   'skills/mh-memory/SKILL.md', 'skills/mh-login/SKILL.md',
   'skills/mh-logout/SKILL.md', 'skills/mh-status/SKILL.md',
-  'skills/mh-login/agents/openai.yaml', 'skills/mh-logout/agents/openai.yaml',
 ]);
 
 export async function verifyPayload(runtimeFiles, root = PLUGIN_ROOT) {

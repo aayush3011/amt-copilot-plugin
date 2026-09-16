@@ -11,6 +11,7 @@ import { buildRuntime } from '../scripts/build.mjs';
 import { fixtureDeployment } from './helpers/deployment.mjs';
 import { connectMcp, isolatedEnvironment, rootSnapshot } from './helpers/runtime.mjs';
 import { mockGateway } from './helpers/gateway.mjs';
+import { connectCodexAppServer } from './helpers/codex.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const run = promisify(execFile);
@@ -19,11 +20,10 @@ const data = result => JSON.parse(result.content[0].text);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const schemaRoot = new URL('./fixtures/schemas/', import.meta.url);
 const ajv = new Ajv({ strict: true });
-const pluginSchema = ajv.compile(JSON.parse(await readFile(new URL('agent-plugin.schema.json', schemaRoot), 'utf8')));
 const mcpSchema = ajv.compile(JSON.parse(await readFile(new URL('agent-mcp.schema.json', schemaRoot), 'utf8')));
 const HOSTS = {
   claude: { catalog: '.claude-plugin/marketplace.json', manifest: '.claude-plugin/plugin.json', variable: 'CLAUDE_PLUGIN_ROOT', directory: '.claude' },
-  codex: { catalog: '.agents/plugins/marketplace.json', manifest: 'plugin.json', variable: 'PLUGIN_ROOT', directory: '.codex' },
+  codex: { catalog: '.agents/plugins/marketplace.json', manifest: '.codex-plugin/plugin.json', variable: 'PLUGIN_ROOT', directory: '.codex' },
   cursor: { catalog: '.cursor-plugin/marketplace.json', manifest: '.cursor-plugin/plugin.json', variable: 'CURSOR_PLUGIN_ROOT', directory: '.cursor' },
   copilot: { catalog: '.github/plugin/marketplace.json', manifest: 'plugin.json', variable: 'PLUGIN_ROOT', directory: '.github' },
 };
@@ -35,20 +35,24 @@ async function discover(root, host) {
   assert.equal(catalog.plugins.length, 1);
   const entry = catalog.plugins[0];
   assert.equal(entry.name, 'memory-house');
-  assert.equal(entry.version, '0.12.2');
+  assert.equal(entry.version, '0.12.3');
   const source = entry.source.path ?? entry.source;
   assert.equal(source, './');
   const pluginRoot = resolve(root, source);
   assert.equal(pluginRoot, resolve(root));
   const manifest = await json(join(pluginRoot, spec.manifest));
   assert.equal(manifest.name, 'memory-house');
-  assert.equal(manifest.version, '0.12.2');
+  assert.equal(manifest.version, '0.12.3');
   let hookPath;
   let mcpPath;
   if (host === 'codex' || host === 'copilot') {
-    assert.equal(pluginSchema(manifest), true, JSON.stringify(pluginSchema.errors));
-    hookPath = host === 'codex' ? manifest.extensions['com.openai'].hooks : 'com.github.copilot/hooks/hooks.json';
-    mcpPath = 'mcp.json';
+    assert.equal(manifest.$schema, undefined, 'A portable root would shadow Codex native hook discovery.');
+    assert.equal(manifest.extensions, undefined);
+    assert.equal(manifest.skills, './skills/');
+    hookPath = manifest.hooks;
+    mcpPath = manifest.mcpServers;
+    assert.equal(hookPath, host === 'codex' ? './.codex/plugin-hooks.json' : './com.github.copilot/hooks/hooks.json');
+    assert.equal(mcpPath, './mcp.json');
   } else {
     hookPath = manifest.hooks;
     mcpPath = manifest.mcpServers;
@@ -362,9 +366,37 @@ test('available Copilot CLI registers the native catalog and installs exactly on
   await run('copilot', ['plugin', 'install', 'memory-house@memory-house-marketplace'], { env, cwd: env.HOME, timeout: 30_000 });
   const listed = await run('copilot', ['plugin', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   assert.match(listed.stdout, /memory-house/);
-  assert.match(listed.stdout, /0\.12\.2/);
+  assert.match(listed.stdout, /0\.12\.3/);
   assert.match(listed.stdout, /memory-house-marketplace/);
-  assert.equal((listed.stdout.match(/0\.12\.2/g) ?? []).length, 1, listed.stdout);
+  assert.equal((listed.stdout.match(/0\.12\.3/g) ?? []).length, 1, listed.stdout);
   const skills = await run('copilot', ['skill', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   for (const name of ['mh-login', 'mh-logout', 'mh-status', 'mh-memory']) assert.match(skills.stdout, new RegExp(`\\b${name}\\b`));
+});
+
+test('available Codex discovers all three native plugin hooks beside the legacy Copilot root', async t => {
+  const env = { ...await isolatedEnvironment(t), GIT_CONFIG_NOSYSTEM: '1' };
+  await mkdir(env.CODEX_HOME, { recursive: true });
+  const available = spawnSync('codex', ['plugin', '--help'], { env, cwd: env.HOME, stdio: 'ignore', timeout: 20_000 });
+  if (available.error?.code === 'ENOENT') { t.skip('Codex CLI is not installed on this test host.'); return; }
+  assert.equal(available.status, 0);
+  const root = await rootSnapshot(t);
+  await run('codex', ['plugin', 'marketplace', 'add', root, '--json'], { env, cwd: env.HOME, timeout: 30_000 });
+  const installed = await run('codex', ['plugin', 'add', 'memory-house@memory-house-marketplace', '--json'], {
+    env, cwd: env.HOME, timeout: 30_000,
+  });
+  const installedRoot = JSON.parse(installed.stdout).installedPath;
+  const server = await connectCodexAppServer(t, { env, cwd: env.HOME });
+  const { data: entries } = await server.request('hooks/list', { cwds: [env.HOME] });
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0].warnings, []);
+  const hooks = entries[0].hooks.filter(value => value.pluginId === 'memory-house@memory-house-marketplace');
+  assert.deepEqual(hooks.map(value => value.eventName).sort(), ['sessionStart', 'stop', 'userPromptSubmit']);
+  const hookPath = await realpath(join(installedRoot, '.codex/plugin-hooks.json'));
+  for (const value of hooks) {
+    assert.equal(value.source, 'plugin');
+    assert.equal(value.enabled, true);
+    assert.equal(value.trustStatus, 'untrusted');
+    assert.equal(await realpath(value.sourcePath), hookPath);
+  }
+  await assert.rejects(access(join(env.CODEX_HOME, 'hooks.json')), { code: 'ENOENT' });
 });

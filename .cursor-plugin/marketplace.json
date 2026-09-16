@@ -5,7 +5,7 @@
   "plugins": [
     {
       "name": "memory-house",
-      "version": "0.12.2",
+      "version": "0.12.3",
       "source": "./",
       "description": "Shared memory with Microsoft sign-in, search, remembering, and native Cursor hooks."
     }

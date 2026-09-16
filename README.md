@@ -23,7 +23,7 @@ Observed on 2026-09-16:
 | Host version | Plugin MCP tools | Automatic per-turn capture from the plugin |
 | --- | --- | --- |
 | **Copilot CLI 1.0.81-4** | Real login, search, explicit add, status, logout and sign-in restoration passed | **Passed:** ordinary user and final agent turns accepted by the gateway; recall injected on a later turn without explicit memory calls |
-| **Codex CLI 0.154.0** | Real login, search, explicit add, status, logout and restoration passed | **Blocked by vendor admission policy:** third-party plugin command hooks are not admitted; user/project hooks are a separate opt-in |
+| **Codex CLI 0.154.0** | Real login, search, explicit add, status, logout and restoration passed | **Passed with native hook trust:** two tool-free turns each produced one HTTP 201 user capture and one agent capture; recall injected on the later turn |
 | **Cursor CLI 2026.09.10-fd3934a** | Real login, search, explicit add, status, logout and restoration passed | **Blocked by CLI dispatch:** prompt/final-response events check user/project hooks, not plugin hooks. Startup recall works; post-tool hooks run, but without prompt capture they have no latest-prompt query |
 | **Claude Code 2.1.273** | Installation and authenticated account/current plugin loading verified; model-executed operations blocked by **HTTP 400: “Credit balance is too low”** | **Unproven in this account**, not claimed to work or fail |
 
@@ -32,7 +32,7 @@ send every conversational user turn and final agent turn; the AMT backend
 decides what to extract, consolidate, or discard. **Do not replace missing hook
 support with model-selected `add_memory` calls.**
 
-For Codex and Cursor, the appropriate follow-up is an **explicit,
+For Cursor, the appropriate follow-up is an **explicit,
 user-consented user/project-hook opt-in**, with a matching disable operation.
 A possible `mh-enable-capture` workflow is a recommendation, **not a shipped
 command**. Plugin installation does not silently write those hook files.
@@ -131,7 +131,8 @@ The **AMT backend core** decides what to extract, consolidate, or discard.
 Capture is best-effort when sign-in, networking, or host payloads are unavailable.
 
 The adapters declare startup and per-prompt recall for Claude Code and Codex.
-The tested Codex CLI does not admit the plugin hooks; Claude's live path was
+Codex's native legacy manifest exposes its plugin hooks for review with `/hooks`;
+the earlier portable manifest prevented their discovery. Claude's live path was
 blocked by account billing. Copilot recalls at
 startup and during prompt transformation, with post-tool fallback. Cursor
 declares startup and post-tool recall using the latest prompt; the tested CLI
@@ -149,6 +150,9 @@ allows sending conversation text to your Memory House deployment.
 
 - **Connection missing:** confirm the plugin and its one MCP server are enabled,
   Node.js 20+ is reachable by the app, and enterprise policy permits local tools.
+- **Codex hooks need review:** run `/hooks`, review Memory House's session-start,
+  user-prompt and stop hooks, and trust those definitions. Do not bypass hook
+  trust or install duplicate user/project hooks.
 - **Sign-in required/expired:** use `memory_login`; `memory_status` is local-only
   and never returns credentials.
 - **Sign-in port occupied:** this deployment registers

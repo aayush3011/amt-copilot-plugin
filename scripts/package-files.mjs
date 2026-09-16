@@ -2,6 +2,7 @@
 export const PACKAGE_FILES = Object.freeze([
   'plugin.json', 'mcp.json', 'deployment.json', 'package.json', 'README.md', 'docs/maintaining.md', 'LICENSE', '.gitattributes',
   '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json',
+  '.codex-plugin/plugin.json',
   '.cursor-plugin/plugin.json', '.cursor-plugin/marketplace.json',
   '.agents/plugins/marketplace.json', '.github/plugin/marketplace.json',
   '.claude/entry.mjs', '.claude/mcp.json', '.claude/plugin-hooks.json',

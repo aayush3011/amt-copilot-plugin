@@ -9,15 +9,18 @@ is part of the product.
 | Host | Catalog | Manifest and component selection |
 | --- | --- | --- |
 | Claude Code | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` explicitly selects `.claude/plugin-hooks.json` and `.claude/mcp.json`. There is no default `.mcp.json` or `hooks/hooks.json` to merge. |
-| Codex | `.agents/plugins/marketplace.json` | Root Agent Plugins 1.0 `plugin.json` supplies canonical identity, root `skills/` and `mcp.json`. `extensions.com.openai.hooks` selects `.codex/plugin-hooks.json`; no legacy overlay is used. |
+| Codex | `.agents/plugins/marketplace.json` | Native legacy `.codex-plugin/plugin.json` directly selects `skills/`, `mcp.json` and `.codex/plugin-hooks.json`. No root manifest opts into Agent Plugins 1.0. |
 | Cursor | `.cursor-plugin/marketplace.json` | Its native catalog resolves `.cursor-plugin/plugin.json`, whose explicit hooks/MCP paths select `.cursor/plugin-hooks.json` and `.cursor/mcp.json`. Native marketplace resolution, not the root portable-only format, supplies Cursor hooks. |
-| Copilot | `.github/plugin/marketplace.json` | Root Agent Plugins 1.0 manifest and `mcp.json`, with the required `com.github.copilot/hooks/hooks.json` loader invoking `.github/entry.mjs`. An `extensions.com.github.copilot.hooks` override would not work. |
+| Copilot | `.github/plugin/marketplace.json` | Legacy root `plugin.json` explicitly selects `skills/`, `mcp.json` and the unchanged `com.github.copilot/hooks/hooks.json` loader invoking `.github/entry.mjs`. |
 
 Each installed host has one named MCP connection, `memory-house`, and one hook
 set. The catalogs share a name and root source, so a host's compatibility
-catalog fallback does not point to a different product. Do not add top-level
-`hooks`, `skills`, or `mcpServers` to the portable manifest: its schema is closed
-and those path fields would be ignored.
+catalog fallback does not point to a different product. The root manifest is
+deliberately legacy, with direct `hooks`, `skills`, and `mcpServers` fields.
+Do not add the canonical Agent Plugins 1.0 `$schema`: that opts into a different
+Codex loading path, shadows the native manifest, and loses hook discovery in
+the tested CLI. Adding a compatibility overlay while retaining that portable
+root does not fix it.
 
 Where a host admits and dispatches them, hooks capture every conversational user
 turn and final agent turn in the main conversation. Their capture calls do not ask the model to choose
@@ -27,8 +30,8 @@ a substitute for the hook stream or an importance-based extra write. Existing
 credential/runtime filtering and best-effort delivery still apply.
 
 Claude uses its native manifest rather than `plugin.json` for components.
-Codex's supported portable-root selector takes precedence over its compatibility
-manifests. Cursor's documented **native marketplace** resolution checks
+Codex selects `.codex-plugin/plugin.json` beside the nonportable Copilot root.
+Cursor's documented **native marketplace** resolution checks
 `.cursor-plugin/plugin.json`, with manifest values overriding catalog values;
 the explicit `mcpServers` field replaces root `mcp.json` discovery. Do not use a
 portable-only Cursor import path: that format supports only MCP/skills and does
@@ -47,17 +50,18 @@ code, including on Windows.
 Official contracts:
 [Claude native manifests](https://code.claude.com/docs/en/plugins-reference),
 [Claude root-relative marketplaces](https://code.claude.com/docs/en/plugin-marketplaces),
-[Codex portable-root overlays](https://developers.openai.com/plugins/build/plugins),
+[Codex native manifests](https://developers.openai.com/plugins/build/plugins),
 [Codex manifest selector](https://github.com/openai/codex/blob/main/codex-rs/utils/plugins/src/plugin_namespace.rs),
 [Cursor native marketplace resolution](https://cursor.com/docs/reference/plugins#how-resolution-works),
 [Cursor distribution policies](https://cursor.com/docs/plugins),
-[Copilot portable hooks and catalogs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference).
+[Copilot legacy manifests and catalogs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference#legacy-manifest-fields).
 
 ## Live CLI limitations
 
-The 2026-09-16 live checks used plugin 0.12.1 and the vendor builds below.
-Version 0.12.2 records these findings; it does not pretend to remove vendor
-admission policy or repair an account's billing.
+The 2026-09-16 live checks initially used plugin 0.12.1 and the vendor builds
+below. Version 0.12.3 corrects the Codex manifest format and the earlier
+0.12.2 conclusion that all third-party plugin hooks were vendor-blocked.
+Hook discovery, native trust and real capture are distinct checks.
 
 **Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
 status, sign-out and restoration passed. A tool-free conversation produced one
@@ -67,16 +71,26 @@ recorded only operation/status, role, content byte count and hashed thread ID,
 not request text, returned memories, tokens or authorization headers.
 
 **Codex CLI rust-v0.154.0:** the MCP operations passed, including narrow native
-tool approvals for writes/sign-in. Plugin hooks were absent, not merely waiting
-for trust. Fresh `hooks/list` probes returned zero hooks for the shipped
-extension, compatibility-overlay variants, inline hook objects and default
-hook paths. A no-op user-scope control appeared as one **untrusted** hook.
-The release's
-[executor hook admission](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/core-plugins/src/executor_hooks.rs)
-and [shared bundled-hook allowlist](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/plugin/src/bundled_hooks.rs)
-temporarily admit only named OpenAI cleanup MCP hooks, not unsigned third-party
-plugin command hooks. Changing manifest spelling or bypassing hook review
-does not grant admission. Never impersonate an allowlisted plugin identity.
+tool approvals for writes/sign-in. The original Agent Plugins 1.0 manifest
+exposed no hooks. The earlier compatibility-overlay permutations retained that
+portable root, so they did not exercise the pure-legacy loading path.
+
+A same-profile comparison with
+[`neo4j-labs/meta-knowledge-graph`](https://github.com/neo4j-labs/meta-knowledge-graph/tree/03e0b6f6dfd47ef40b480f4ea95066a35c97d0c4/plugin)
+0.1.43 found 17 enabled/untrusted native hooks for that legacy plugin and zero
+for portable Memory House 0.12.2. Changing only Memory House's manifest format,
+with byte-identical hook definitions, exposed all three hooks. A legacy Copilot
+root and native `.codex-plugin/plugin.json` also coexist successfully. The
+blanket vendor-admission conclusion was incorrect; it must not be repeated.
+The native regression test checks real `hooks/list` discovery without granting
+trust or executing any hook. A separate real Codex session, using the existing
+ChatGPT-authenticated profile, then trusted exactly the three Memory House
+plugin definitions through the native API used by `/hooks`. No trust-bypass
+flag or user/project hook commands were added. Two tool-free turns each sent
+one HTTP 201 user capture and one HTTP 201 final-agent capture with the same
+thread hash. Captured text hashes matched the actual prompts/final answers;
+the native hook notifications and transcript confirmed recall injection on the
+later turn. These verification turns entered the user's real Memory House.
 
 **Cursor CLI 2026.09.10-fd3934a:** after replacing a stale pinned marketplace
 registration and installing Git revision `3712a60`, the MCP operations passed.
@@ -99,9 +113,10 @@ subscription. No billing change was attempted. Temporary local-scope plugin
 settings were removed, preserving the preexisting user installation.
 
 The product conclusion is explicit: plugin MCP tools are deliverable where the
-host can run them, but automatic plugin-delivered capture was verified only on
-Copilot in these builds. Codex/Cursor need a separately user-approved
-user/project-hook configuration for automatic capture. A future
+host can run them; automatic plugin-delivered capture is verified on Copilot
+and on Codex with its corrected legacy manifest and normal hook trust.
+Cursor needs a separately
+user-approved user/project-hook configuration for automatic capture. A future
 `mh-enable-capture`/matching-disable workflow could provide that opt-in after
 consent; it is **not implemented**, and no such files were silently installed
 in a real profile during this work. Do not substitute model-selected
@@ -218,9 +233,11 @@ initialize/list/call flows, search/insertion, synthetic MSAL PKCE + authenticate
 enrollment, shared credentials/recall, hook discovery/isolation, and command
 execution without source `node_modules`. The available Claude CLI strictly validates and installs the root plugin/catalog
 in an isolated fake profile. The available Copilot CLI also registers the native
-catalog and installs its root plugin in an isolated profile. Neither test signs
-in or starts a model session. Cursor/Codex contract fixtures are not a substitute
-for live desktop testing.
+catalog and installs its root plugin in an isolated profile. The available
+Codex CLI installs the same snapshot and asserts that all three hooks are
+discovered as plugin-scoped and untrusted beside the legacy Copilot root.
+These tests do not sign in, grant hook trust or start a model session. Native
+discovery and protocol fixtures are not substitutes for live capture testing.
 
 `scripts/package-files.mjs` is a **minimum-runtime test/provenance inventory,
 not a Git distribution filter**. With marketplace `source: "./"`, real native

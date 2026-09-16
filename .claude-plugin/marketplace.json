@@ -3,6 +3,6 @@
   "owner": { "name": "Aayush Kataria" },
   "metadata": { "description": "One Memory House plugin for desktop coding apps." },
   "plugins": [
-    { "name": "memory-house", "source": "./plugin", "description": "Shared memory with Microsoft sign-in, search, remembering, and native hooks.", "version": "0.12.4" }
+    { "name": "memory-house", "source": "./plugin", "description": "Shared memory with Microsoft sign-in, search, remembering, and native hooks.", "version": "0.12.5" }
   ]
 }

@@ -11,7 +11,7 @@ No explicit MCP tool call is needed to capture those turns.
 
 Codex requires native review and trust of the plugin hooks before they can run.
 Discovery or sign-in alone does not prove capture. The tested Cursor CLI
-2026.09.10-fd3934a does not dispatch prompt/final events to plugin hooks; capture
+2026.09.15-d2fe57e does not dispatch prompt/final events to plugin hooks; capture
 there needs a separate, explicitly approved user/project-hook configuration.
 Do not silently install that configuration or substitute routine `add_memory`
 calls. Claude's live path was blocked by account billing rather than proven.

@@ -12,7 +12,7 @@ test('real stdio MCP initialization and discovery work before sign-in', async t 
   assert.equal(mcp.client.getServerVersion().name, 'memory-house');
   const { tools } = await mcp.client.listTools();
   assert.deepEqual(tools.map(tool => tool.name).sort(), ['add_memory', 'memory_login', 'memory_logout', 'memory_status', 'search_memories']);
-  assert.equal(mcp.client.getServerVersion().version, '0.12.4');
+  assert.equal(mcp.client.getServerVersion().version, '0.12.5');
   assert.match(tools.find(tool => tool.name === 'memory_login').description, /Opens the Microsoft sign-in page directly in your browser/);
   assert.equal(tools.find(tool => tool.name === 'memory_login').annotations.readOnlyHint, false);
   assert.equal(tools.find(tool => tool.name === 'memory_logout').annotations.destructiveHint, true);

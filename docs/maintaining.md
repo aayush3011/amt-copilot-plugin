@@ -26,7 +26,7 @@ Manifest/component paths below are relative to the installed payload root
 | Host | Catalog | Manifest and component selection |
 | --- | --- | --- |
 | Claude Code | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` explicitly selects `.claude/plugin-hooks.json` and `.claude/mcp.json`. There is no default `.mcp.json` or `hooks/hooks.json` to merge. |
-| Codex | `.agents/plugins/marketplace.json` | Native legacy `.codex-plugin/plugin.json` directly selects `skills/`, `mcp.json` and `.codex/plugin-hooks.json`. No root manifest opts into Agent Plugins 1.0. |
+| Codex | `.agents/plugins/marketplace.json` | Native legacy `.codex-plugin/plugin.json` directly selects `skills/`, `.codex/mcp.json` and `.codex/plugin-hooks.json`. No root manifest opts into Agent Plugins 1.0. |
 | Cursor | `.cursor-plugin/marketplace.json` | Its native catalog resolves `.cursor-plugin/plugin.json`, whose explicit hooks/MCP paths select `.cursor/plugin-hooks.json` and `.cursor/mcp.json`. Native marketplace resolution, not the root portable-only format, supplies Cursor hooks. |
 | Copilot | `.github/plugin/marketplace.json` | Legacy `plugin.json` explicitly selects `skills/`, `mcp.json` and `.github/plugin-hooks.json`, invoking `.github/entry.mjs`. |
 
@@ -38,6 +38,14 @@ Do not add the canonical Agent Plugins 1.0 `$schema`: that opts into a different
 Codex loading path, shadows the native manifest, and loses hook discovery in
 the tested CLI. Adding a compatibility overlay while retaining that portable
 root does not fix it.
+
+Codex's legacy MCP loader does not expand `${PLUGIN_ROOT}` in `args`/`cwd`,
+and it does not export `PLUGIN_ROOT` or `CODEX_PLUGIN_ROOT` to that MCP
+subprocess. This differs from its hook environment. Its dedicated
+`.codex/mcp.json` uses `cwd: "./"` (anchored by the native loader to the plugin
+root) and `args: ["runtime/server.mjs"]`. No environment fallback or cache
+glob is required. Copilot, Claude and Cursor retain their independently
+verified MCP configurations.
 
 Where a host admits and dispatches them, hooks capture every conversational user
 turn and final agent turn in the main conversation. Their capture calls do not ask the model to choose
@@ -79,6 +87,8 @@ The 2026-09-16 live checks initially used plugin 0.12.1 and the vendor builds
 below. Version 0.12.3 corrected the Codex manifest format and the earlier
 0.12.2 conclusion that all third-party plugin hooks were vendor-blocked.
 Version 0.12.4 moves the same native components into one curated payload.
+Version 0.12.5 fixes the separate legacy Codex MCP working-directory/argument
+contract; 0.12.4's native MCP startup failed even though its hooks worked.
 Hook discovery, native trust and real capture are distinct checks.
 
 **Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
@@ -105,7 +115,9 @@ with byte-identical hook definitions, exposed all three hooks. A legacy Copilot
 root and native `.codex-plugin/plugin.json` also coexist successfully. The
 blanket vendor-admission conclusion was incorrect; it must not be repeated.
 The native regression test checks real `hooks/list` discovery without granting
-trust or executing any hook. A separate real Codex session, using the existing
+trust or executing any hook, and native `mcpServerStatus/list` must return all
+five tools with no startup error. A direct SDK client with manually expanded
+arguments is not sufficient to test the native loader. A separate real Codex session, using the existing
 ChatGPT-authenticated profile, then trusted exactly the three Memory House
 plugin definitions through the native API used by `/hooks`. No trust-bypass
 flag or user/project hook commands were added. Two tool-free turns each sent
@@ -113,6 +125,13 @@ one HTTP 201 user capture and one HTTP 201 final-agent capture with the same
 thread hash. Captured text hashes matched the actual prompts/final answers;
 the native hook notifications and transcript confirmed recall injection on the
 later turn. These verification turns entered the user's real Memory House.
+
+The 0.12.4 MCP registration gap was reproduced without model execution:
+native startup returned `No such file or directory (os error 2)`. A diagnostic
+launcher received the literal `${PLUGIN_ROOT}/runtime/server.mjs` argument
+and neither root environment variable. Keeping the same explicit MCP filename
+and switching to plugin-relative cwd/argv produced all five native tools.
+The filename was honored; placeholder expansion was the issue.
 
 One initial run, immediately after marketplace-source and native-trust changes,
 captured only the first user prompt and injected startup/first-prompt recall;
@@ -282,7 +301,8 @@ execution without source `node_modules`. The available Claude CLI strictly valid
 in an isolated fake profile. The available Copilot CLI also registers the native
 catalog and installs its payload in an isolated profile. The available
 Codex CLI installs the same snapshot and asserts that all three hooks are
-discovered as plugin-scoped and untrusted beside the legacy Copilot root.
+discovered as plugin-scoped and untrusted beside the legacy Copilot root, and
+that native MCP startup returns all five tools rather than an initialization error.
 These tests do not sign in, grant hook trust or start a model session. Native
 discovery and protocol fixtures are not substitutes for live capture testing.
 
@@ -295,7 +315,8 @@ marketplace catalogs. A host may separately retain its Git marketplace clone;
 that is not the installed payload. The publisher must still review the whole
 tracked repository before pushing and must never publish credentials.
 
-Post-move native Git installations verified the same 33 publisher files and
+The final payload contains 34 publisher files. The pre-fix 0.12.4 native Git
+installations verified 33 publisher files and
 their hashes on all four hosts. Claude adds an `.in_use/` bookkeeping
 directory; Cursor adds a `.cache-complete` marker. Neither is shipped by this
 repository. Claude, Codex and Copilot were checked in throwaway profiles.

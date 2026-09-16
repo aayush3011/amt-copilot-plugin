@@ -36,14 +36,14 @@ async function discover(root, host) {
   assert.equal(catalog.plugins.length, 1);
   const entry = catalog.plugins[0];
   assert.equal(entry.name, 'memory-house');
-  assert.equal(entry.version, '0.12.4');
+  assert.equal(entry.version, '0.12.5');
   const source = entry.source.path ?? entry.source;
   assert.equal(source, './plugin');
   const pluginRoot = resolve(dirname(root), source);
   assert.equal(pluginRoot, resolve(root));
   const manifest = await json(join(pluginRoot, spec.manifest));
   assert.equal(manifest.name, 'memory-house');
-  assert.equal(manifest.version, '0.12.4');
+  assert.equal(manifest.version, '0.12.5');
   let hookPath;
   let mcpPath;
   if (host === 'codex' || host === 'copilot') {
@@ -53,7 +53,7 @@ async function discover(root, host) {
     hookPath = manifest.hooks;
     mcpPath = manifest.mcpServers;
     assert.equal(hookPath, `./${spec.directory}/plugin-hooks.json`);
-    assert.equal(mcpPath, './mcp.json');
+    assert.equal(mcpPath, host === 'codex' ? './.codex/mcp.json' : './mcp.json');
   } else {
     hookPath = manifest.hooks;
     mcpPath = manifest.mcpServers;
@@ -66,7 +66,12 @@ async function discover(root, host) {
   assert.deepEqual(Object.keys(mcp.mcpServers), ['memory-house']);
   const server = mcp.mcpServers['memory-house'];
   assert.equal(server.command, 'node');
-  assert.deepEqual(server.args, [`\${${spec.variable}}/runtime/server.mjs`]);
+  if (host === 'codex') {
+    assert.deepEqual(server.args, ['runtime/server.mjs']);
+    assert.equal(server.cwd, './');
+  } else {
+    assert.deepEqual(server.args, [`\${${spec.variable}}/runtime/server.mjs`]);
+  }
   const events = host === 'cursor'
     ? ['sessionStart', 'beforeSubmitPrompt', 'postToolUse', 'afterAgentResponse', 'sessionEnd']
     : host === 'copilot'
@@ -201,7 +206,8 @@ test('a fresh root copy performs bundled Microsoft enrollment then search/add/re
     const spec = await discover(root, host);
     const server = await connectMcp(t, {
       command: spec.server.command, args: spec.server.args.map(value => value.replaceAll(`\${${spec.variable}}`, root)),
-      env: { ...env, [spec.variable]: root }, cwd: env.HOME,
+      env: { ...env, [spec.variable]: root },
+      cwd: spec.server.cwd ? resolve(root, spec.server.cwd.replaceAll(`\${${spec.variable}}`, root)) : env.HOME,
     });
     const { tools } = await server.client.listTools();
     assert.deepEqual(tools.map(tool => tool.name).sort(), ['add_memory', 'memory_login', 'memory_logout', 'memory_status', 'search_memories']);
@@ -388,14 +394,14 @@ test('available Copilot CLI registers the native catalog and installs exactly on
   await run('copilot', ['plugin', 'install', 'memory-house@memory-house-marketplace'], { env, cwd: env.HOME, timeout: 30_000 });
   const listed = await run('copilot', ['plugin', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   assert.match(listed.stdout, /memory-house/);
-  assert.match(listed.stdout, /0\.12\.4/);
+  assert.match(listed.stdout, /0\.12\.5/);
   assert.match(listed.stdout, /memory-house-marketplace/);
-  assert.equal((listed.stdout.match(/0\.12\.4/g) ?? []).length, 1, listed.stdout);
+  assert.equal((listed.stdout.match(/0\.12\.5/g) ?? []).length, 1, listed.stdout);
   const skills = await run('copilot', ['skill', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   for (const name of ['mh-login', 'mh-logout', 'mh-status', 'mh-memory']) assert.match(skills.stdout, new RegExp(`\\b${name}\\b`));
 });
 
-test('available Codex discovers all three native plugin hooks beside the legacy Copilot root', async t => {
+test('available Codex loads five MCP tools and three native hooks beside the legacy Copilot root', async t => {
   const env = { ...await isolatedEnvironment(t), GIT_CONFIG_NOSYSTEM: '1' };
   await mkdir(env.CODEX_HOME, { recursive: true });
   const available = spawnSync('codex', ['plugin', '--help'], { env, cwd: env.HOME, stdio: 'ignore', timeout: 20_000 });
@@ -421,4 +427,10 @@ test('available Codex discovers all three native plugin hooks beside the legacy 
     assert.equal(await realpath(value.sourcePath), hookPath);
   }
   await assert.rejects(access(join(env.CODEX_HOME, 'hooks.json')), { code: 'ENOENT' });
+  const { data: servers } = await server.request('mcpServerStatus/list', { limit: 100 });
+  const memory = servers.find(value => value.pluginId === 'memory-house@memory-house-marketplace');
+  assert.ok(memory, 'The native Codex loader must register the plugin MCP server.');
+  assert.equal(memory.toolsError, null);
+  assert.equal(memory.serverInfo?.version, '0.12.5');
+  assert.deepEqual(Object.keys(memory.tools).sort(), ['add_memory', 'memory_login', 'memory_logout', 'memory_status', 'search_memories']);
 });

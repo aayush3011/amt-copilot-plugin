@@ -89,6 +89,8 @@ recorded only operation/status, role, content byte count and hashed thread ID,
 not request text, returned memories, tokens or authorization headers.
 The complete login/search/add/status/logout/restore flow and two-turn capture
 were rerun successfully against the pushed 0.12.3 legacy-manifest release.
+They passed again after the 0.12.4 payload relocation. Codex's trusted two-turn
+capture and later recall also passed against that pushed subdirectory payload.
 
 **Codex CLI rust-v0.154.0:** the MCP operations passed, including narrow native
 tool approvals for writes/sign-in. The original Agent Plugins 1.0 manifest
@@ -123,9 +125,17 @@ diagnostics for skips and transport/authentication failures, then fails open.
 Whether those diagnostics are visible in ordinary chat depends on the host;
 there is no persistent capture-health indicator. Better user-visible
 observability is a follow-up, not an excuse to add replay or deduplication.
+An initial post-relocation Copilot run similarly logged transient transport
+failures before a subsequent complete two-turn run passed. The early observer
+did not record an HTTP receipt for those failures; neither a gateway failure
+nor an observation contribution was established. No speculative adapter fix,
+deduplication or replay was added.
 
-**Cursor CLI 2026.09.10-fd3934a:** after replacing a stale pinned marketplace
-registration and installing Git revision `3712a60`, the MCP operations passed.
+**Cursor CLI 2026.09.10-fd3934a and 2026.09.15-d2fe57e:** the earlier build
+passed MCP operations after replacing a stale marketplace pin. The newer
+build passed login/search/add/status/logout/restore against the 0.12.4 payload;
+its native MCP child-process path was verified against the installed Git-SHA
+cache, independently of the model's answer.
 Startup, post-tool and session-end plugin hooks ran. Ordinary prompts and final
 responses did not, in both print and interactive checks. The installed CLI's
 `beforeSubmitPrompt` guard checks only
@@ -135,6 +145,10 @@ dispatch. Startup recall is therefore available, but the per-turn query cache
 cannot be populated for post-tool recall. `--approve-mcps` approves connections,
 not tool calls; print-mode MCP operations also needed `--force` for this
 explicitly authorized verification.
+Both gates were re-read in the newer build's `7470.index.js`. Its generic
+dispatch helper reads only `userHooks`/`projectHooks`, and `afterAgentResponse`
+calls that helper; `pluginHooks` is not included. File SHA-256:
+`d8806b0a21da0b9b84e02cbcf949d6e4da39094789b04472515aa43aa145c30f`.
 
 **Claude Code 2.1.273:** installation/current-cache loading and real account
 authentication were verified using the user's normal login-shell environment.
@@ -280,6 +294,16 @@ that subdirectory. The installed plugin root contains no `.git`, `src/`,
 marketplace catalogs. A host may separately retain its Git marketplace clone;
 that is not the installed payload. The publisher must still review the whole
 tracked repository before pushing and must never publish credentials.
+
+Post-move native Git installations verified the same 33 publisher files and
+their hashes on all four hosts. Claude adds an `.in_use/` bookkeeping
+directory; Cursor adds a `.cache-complete` marker. Neither is shipped by this
+repository. Claude, Codex and Copilot were checked in throwaway profiles.
+Cursor's `CURSOR_CONFIG_DIR`/`CURSOR_DATA_DIR` isolate CLI configuration and
+chat data, but its plugin manager still uses the real HOME plugin registry/cache.
+A fully fake HOME lacked marketplace authentication, so that installation used
+the existing native provider credentials and real plugin cache without copying
+tokens. This is not claimed to be a fully isolated Cursor profile installation.
 
 Copilot's event log can still be flushing when its stop hook fires. The adapter
 waits up to one second for the final transcript text, then makes at most one

@@ -24,7 +24,7 @@ Observed on 2026-09-16:
 | --- | --- | --- |
 | **Copilot CLI 1.0.81-4** | Real login, search, explicit add, status, logout and sign-in restoration passed | **Passed:** ordinary user and final agent turns accepted by the gateway; recall injected on a later turn without explicit memory calls |
 | **Codex CLI 0.154.0** | Real login, search, explicit add, status, logout and restoration passed | **Passed with native hook trust:** two tool-free turns each produced one HTTP 201 user capture and one agent capture; recall injected on the later turn |
-| **Cursor CLI 2026.09.10-fd3934a** | Real login, search, explicit add, status, logout and restoration passed | **Blocked by CLI dispatch:** prompt/final-response events check user/project hooks, not plugin hooks. Startup recall works; post-tool hooks run, but without prompt capture they have no latest-prompt query |
+| **Cursor CLI 2026.09.15-d2fe57e** | Real login, search, explicit add, status, logout and restoration passed | **Blocked by CLI dispatch:** prompt/final-response events check user/project hooks, not plugin hooks. Startup recall works; post-tool hooks run, but without prompt capture they have no latest-prompt query |
 | **Claude Code 2.1.273** | Installation and authenticated account/current plugin loading verified; model-executed operations blocked by **HTTP 400: “Credit balance is too low”** | **Unproven in this account**, not claimed to work or fail |
 
 The model is never the routine capture gatekeeper. Where host hooks run, they

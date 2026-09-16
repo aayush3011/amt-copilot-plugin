@@ -89,6 +89,8 @@ below. Version 0.12.3 corrected the Codex manifest format and the earlier
 Version 0.12.4 moves the same native components into one curated payload.
 Version 0.12.5 fixes the separate legacy Codex MCP working-directory/argument
 contract; 0.12.4's native MCP startup failed even though its hooks worked.
+Version 0.12.6 records successful Claude verification and corrects the stale
+skill/documentation wording; no authentication or capture implementation changed.
 Hook discovery, native trust and real capture are distinct checks.
 
 **Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
@@ -169,17 +171,39 @@ dispatch helper reads only `userHooks`/`projectHooks`, and `afterAgentResponse`
 calls that helper; `pluginHooks` is not included. File SHA-256:
 `d8806b0a21da0b9b84e02cbcf949d6e4da39094789b04472515aa43aa145c30f`.
 
-**Claude Code 2.1.273:** installation/current-cache loading and real account
-authentication were verified using the user's normal login-shell environment.
-Model execution returned **HTTP 400, `Credit balance is too low`**, with zero API
-execution duration. Its live tool and capture legs remain unproven. Check the
-account's billing or whether the CLI uses API credits rather than the intended
-subscription. No billing change was attempted. Temporary local-scope plugin
-settings were removed, preserving the preexisting user installation.
+**Claude Code 2.1.273:** the complete native plugin flow passed against the
+pushed 0.12.5 payload after a provider-auth configuration correction. Real
+Microsoft login, search (two results), one explicit accepted write, status,
+logout and re-login all passed. In a separate tool-free conversation, each of
+two user turns and two final answers produced exactly one HTTP 201 capture,
+with the same thread hash and content hashes matching the actual text. Native
+`UserPromptSubmit` hook responses confirmed recall on the later resumed turn.
+The observed `Stop` payload includes `last_assistant_message`, `prompt_id`,
+`stop_hook_active` and `transcript_path`; the existing adapter used the inline
+final answer without a transcript-flush workaround or any code change.
+
+The earlier **HTTP 400, `Credit balance is too low`** was an auth-mode mismatch,
+not a Memory House defect or a demonstrated lack of funds. The user's Claude
+settings contained `"forceLoginMethod": "console"`, pinning Console/developer
+auth instead of the personal Claude Pro identity. Before correction, status
+could say `authMethod: "claude.ai"` while also reporting
+`apiKeySource: "/login managed key"` and `subscriptionType: null`. With explicit
+user approval, the settings were backed up, only that pin was removed, and
+`claude auth logout` / `claude auth login` selected the Pro identity.
+Subsequent status showed `loggedIn: true`, `authMethod: "claude.ai"`,
+`subscriptionType: "pro"` and no managed API key source. No funds or subscription
+plan were changed. This provider login is separate from Memory House's Entra
+sign-in; the plugin did not edit Claude's authentication settings.
+
+The real Claude user-scope Memory House installation was intentionally upgraded
+from 0.11.0 for this verification and left enabled. To remove it, use
+`claude plugin uninstall memory-house@memory-house-marketplace --scope user`;
+optionally remove its marketplace afterward. Removing the plugin does not erase
+the real verification turns already submitted to Memory House.
 
 The product conclusion is explicit: plugin MCP tools are deliverable where the
-host can run them; automatic plugin-delivered capture is verified on Copilot
-and on Codex with its corrected legacy manifest and normal hook trust.
+host can run them; automatic plugin-delivered capture is verified on Claude
+Code, Copilot, and Codex with its corrected legacy manifest and normal hook trust.
 Cursor needs a separately user-approved user/project-hook configuration for
 automatic capture. A future
 `mh-enable-capture`/matching-disable workflow could provide that opt-in after

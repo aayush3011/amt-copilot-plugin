@@ -25,7 +25,7 @@ Observed on 2026-09-16:
 | **Copilot CLI 1.0.81-4** | Real login, search, explicit add, status, logout and sign-in restoration passed | **Passed:** ordinary user and final agent turns accepted by the gateway; recall injected on a later turn without explicit memory calls |
 | **Codex CLI 0.154.0** | Real login, search, explicit add, status, logout and restoration passed | **Passed with native hook trust:** two tool-free turns each produced one HTTP 201 user capture and one agent capture; recall injected on the later turn |
 | **Cursor CLI 2026.09.15-d2fe57e** | Real login, search, explicit add, status, logout and restoration passed | **Blocked by CLI dispatch:** prompt/final-response events check user/project hooks, not plugin hooks. Startup recall works; post-tool hooks run, but without prompt capture they have no latest-prompt query |
-| **Claude Code 2.1.273** | Installation and authenticated account/current plugin loading verified; model-executed operations blocked by **HTTP 400: “Credit balance is too low”** | **Unproven in this account**, not claimed to work or fail |
+| **Claude Code 2.1.273** | Real Microsoft login, search, explicit add, status, logout and restoration passed after correcting the Claude provider login configuration | **Passed:** two tool-free turns each produced one HTTP 201 user capture and one final-agent capture, with matching thread/content hashes and recall on the later turn |
 
 The model is never the routine capture gatekeeper. Where host hooks run, they
 send every conversational user turn and final agent turn; the AMT backend
@@ -132,8 +132,9 @@ Capture is best-effort when sign-in, networking, or host payloads are unavailabl
 
 The adapters declare startup and per-prompt recall for Claude Code and Codex.
 Codex's native legacy manifest exposes its plugin hooks for review with `/hooks`;
-the earlier portable manifest prevented their discovery. Claude's live path was
-blocked by account billing. Copilot recalls at
+the earlier portable manifest prevented their discovery. Claude's startup,
+per-prompt recall and final-answer capture were verified with its native hooks.
+Copilot recalls at
 startup and during prompt transformation, with post-tool fallback. Cursor
 declares startup and post-tool recall using the latest prompt; the tested CLI
 executes startup/post-tool hooks but does not deliver prompts to plugin hooks.
@@ -165,9 +166,15 @@ allows sending conversation text to your Memory House deployment.
   and retry. The plugin does not silently choose an unregistered port.
 - **Publisher configuration error:** contact the publisher rather than entering
   registration settings or credentials in chat.
-- **Claude “Credit balance is too low”:** check account billing and whether the
-  CLI is using API credits instead of the intended subscription. This is not a
-  Memory House gateway or plugin error; the plugin cannot change the billing plan.
+- **Claude “Credit balance is too low” with a Pro subscription:** check Claude's
+  login configuration before assuming insufficient funds. In this verification,
+  `"forceLoginMethod": "console"` in Claude settings forced Console/API-credit
+  auth instead of the intended Claude Pro identity. Correcting that pin with
+  user approval, then running `claude auth logout` and `claude auth login`,
+  restored the subscription. `claude auth status` should show the intended
+  `subscriptionType` (here, `"pro"`); `loggedIn: true` alone was misleading.
+  Respect managed login policy. This is separate from Memory House's Microsoft
+  sign-in and required no plugin, gateway, or billing-plan change.
 - **Cursor branch remains pinned:** the tested CLI retained an old marketplace
   commit across `add --git-ref` and `update`. Removing that specific Memory House
   marketplace registration and re-adding it with the intended ref, then

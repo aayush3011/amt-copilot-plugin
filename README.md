@@ -76,8 +76,10 @@ every plan. Team marketplace access and local-code policies apply; a public
 Cursor Marketplace listing requires separate review. This repository does not
 claim that approval or bypass the plan restriction.
 
-Approve the bundled MCP connection and hooks when the host asks, then start a
-new session or reload plugins. Install one copy; do not also configure a second
+Approve the bundled MCP connection and hooks when the host asks. **Restart the
+session after a plugin upgrade:** MCP server processes bind at session start;
+updating installed files or reloading skills alone may leave the old server
+and tool definitions running. Install one copy; do not also configure a second
 Memory House MCP server or duplicate hooks manually. Remote/cloud sessions run
 elsewhere and do not inherit your local sign-in.
 
@@ -114,8 +116,8 @@ the named skill.
 All four skills are discoverable; login/logout no longer carry metadata that
 hides them from model discovery. Their instructions still require an explicit
 user request, and the host's MCP tool approval remains in effect. After an
-update, restart the host or use its native skill reload; an existing session
-can retain the old skill inventory.
+update, restart the session so both the skills and MCP server are refreshed.
+Native skill reload alone does not necessarily replace an existing MCP process.
 
 Then ask:
 
@@ -128,18 +130,32 @@ The app exposes `get_memories`, `search_memories`, `add_memory`, `memory_login`,
 plugin namespace. Identity comes from your authenticated gateway session, never
 from a model-supplied user, tenant, or endpoint.
 
-`get_memories` lists recent records without a search query: default `recent_k`
-50, maximum 200, with optional `memory_types` (`fact`, `episodic`, `procedural`),
+`get_memories` normally returns the gateway's **recent-memory sample (currently
+50)** without a search query. The plugin omits `recent_k` when it is not supplied
+instead of imposing its own default. For "get my memories" or "show some memories", one default call
+and "Here are your N most recent memories" is a complete answer. The agent
+must not automatically fetch more or raise the limit to give a "fuller picture".
+Larger `recent_k` values (up to 200) are available when the user explicitly
+asks for more, a larger count, "all", "everything", a full list or export, or
+when the user's task genuinely requires exhaustive coverage.
+
+Optional `memory_types` (`fact`, `episodic`, `procedural`),
 repeatable `scopes`, and `include_superseded`. Scope keys are filters within the
 gateway's existing access checks, not a way to impersonate another identity.
 Use only known returned scope keys. `search_memories` remains query-based
 retrieval and is not an exhaustive listing.
 
-**A listing is not necessarily all memories.** `truncated` is true when the
-gateway reports truncation, the requested window is full, or local output limits
+**Limits are informational, not an error or a reason to fetch again.**
+`truncated` is true when the
+gateway reports truncation, an explicitly requested window is full, or local output limits
 omit records/content. `gatewayTruncated`, `limitReached`, `omittedItems`, and
-`contentTruncated` explain why. The gateway may cap results below the requested
-count; a higher `recent_k` is not a pagination cursor. This endpoint exposes no
+`contentTruncated` explain the sample's coverage or shortened content. These
+fields do not mean a casual request is incomplete. Simply label the answer
+as recent memories; explain the limits when the user asks or completeness
+matters. `requested: null` means the gateway chose the default; `limitReached`
+checks only an explicitly requested count and does not guess the backend's
+default. The gateway may cap results below the requested count; a higher
+`recent_k` is not a pagination cursor. This endpoint exposes no
 cursor/offset pagination or guaranteed complete export. The tool also bounds
 content to 8 KiB per record and 128 KiB per listing and reports those limits.
 
@@ -190,6 +206,12 @@ allows sending conversation text to your Memory House deployment.
   use `$memory-house:mh-login` or select it with `$`/`/skills`; for Copilot use
   `/memory-house:mh-login`. A host inventory listing and the model's currently
   loaded skill list can differ. Do not read credential files to work around it.
+- **New tool missing after upgrade:** restart the session, not just the
+  marketplace or skill list. A reported Codex session kept a 0.12.2 MCP server
+  alive after 0.13.0 was installed, even though the old cache directory had
+  been removed. That stale process lacked `get_memories`; a fresh session loads
+  the installed version. Do not compensate by reading bundles or credentials,
+  launching extra servers manually, or calling the gateway directly.
 - **Codex hooks need review:** run `/hooks`, review Memory House's session-start,
   user-prompt and stop hooks, and trust those definitions. Do not bypass hook
   trust or install duplicate user/project hooks.

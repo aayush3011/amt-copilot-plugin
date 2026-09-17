@@ -12,13 +12,23 @@ test('real stdio MCP initialization and discovery work before sign-in', async t 
   assert.equal(mcp.client.getServerVersion().name, 'memory-house');
   const { tools } = await mcp.client.listTools();
   assert.deepEqual(tools.map(tool => tool.name).sort(), ['add_memory', 'get_memories', 'memory_login', 'memory_logout', 'memory_status', 'search_memories']);
-  assert.equal(mcp.client.getServerVersion().version, '0.13.0');
+  assert.equal(mcp.client.getServerVersion().version, '0.13.1');
   assert.match(tools.find(tool => tool.name === 'memory_login').description, /Opens the Microsoft sign-in page directly in your browser/);
   assert.equal(tools.find(tool => tool.name === 'memory_login').annotations.readOnlyHint, false);
   assert.equal(tools.find(tool => tool.name === 'memory_logout').annotations.destructiveHint, true);
   assert.equal(tools.find(tool => tool.name === 'search_memories').annotations.readOnlyHint, true);
   assert.equal(tools.find(tool => tool.name === 'get_memories').annotations.readOnlyHint, true);
+  const listingTool = tools.find(tool => tool.name === 'get_memories');
+  assert.equal(listingTool.inputSchema.properties.recent_k.default, undefined);
+  assert.ok(!listingTool.inputSchema.required?.includes('recent_k'));
+  assert.equal(listingTool.inputSchema.properties.recent_k.maximum, 200);
+  assert.match(listingTool.description, /complete answer to that request/);
+  assert.match(listingTool.description, /Do not automatically re-query at a higher limit/);
+  assert.match(listingTool.description, /explicit request for more\/completeness/);
   assert.match(mcp.client.getInstructions(), /Use get_memories to list recent memories/);
+  assert.match(mcp.client.getInstructions(), /call it once without recent_k/);
+  assert.match(mcp.client.getInstructions(), /informational, not errors/);
+  assert.match(mcp.client.getInstructions(), /do not infer that need from limit metadata/);
   assert.match(mcp.client.getInstructions(), /do not inspect plugin internals/);
   assert.match(mcp.client.getInstructions(), /same OS user/);
   assert.equal(tools.find(tool => tool.name === 'add_memory').annotations.readOnlyHint, false);
@@ -98,7 +108,7 @@ test('MCP inputs reject identities, endpoints, credentials, and oversize text be
   assert.equal(gateway.state.requests.length, 0);
 });
 
-test('get_memories lists recent records with filters, metadata, and explicit truncation instead of searching', async t => {
+test('get_memories delegates the default count to the gateway and returns one sample with informational limits', async t => {
   const gateway = await mockGateway(t);
   const mcp = await memoryFixture(t, gateway);
   await createClient({ env: mcp.env, deployment: mcp.deployment }).redeem('fixture-enrollment');
@@ -108,15 +118,30 @@ test('get_memories lists recent records with filters, metadata, and explicit tru
     ...(index === 0 ? { superseded_by: 'memory-52' } : {}),
     access_token: 'fixture-forbidden-secret',
   }));
-  const recent = data(await mcp.call('get_memories'));
+  const response = await mcp.call('get_memories');
+  assert.equal(response.isError, undefined);
+  const recent = data(response);
   assert.equal(recent.count, 50);
-  assert.equal(recent.requested, 50);
+  assert.equal(recent.requested, null);
   assert.equal(recent.truncated, true);
   assert.equal(recent.gatewayTruncated, true);
+  assert.equal(recent.limitReached, false);
   assert.equal(recent.paginationSupported, false);
   assert.equal(recent.referenceOnly, true);
-  assert.match(recent.message, /not all memories/);
+  assert.match(recent.message, /bounded sample satisfies a casual listing request/);
+  assert.match(recent.message, /Coverage limits are informational, not an error/);
+  assert.match(recent.message, /Do not automatically re-query at a higher limit/);
+  assert.match(recent.message, /Do not describe this sample as all memories/);
+  assert.doesNotMatch(recent.message, /Increase recent_k|Partial recent listing|Possibly partial recent listing/);
+  const sampleRequests = gateway.state.requests.filter(req => req.path.endsWith('/memories'));
+  assert.equal(sampleRequests.length, 1);
+  assert.deepEqual(sampleRequests[0].query, []);
   assert.equal(gateway.state.requests.filter(req => req.path.endsWith('/search')).length, 0);
+  gateway.state.listingDefaultCount = 3;
+  const backendDefault = data(await mcp.call('get_memories'));
+  assert.equal(backendDefault.count, 3);
+  assert.equal(backendDefault.requested, null);
+  assert.deepEqual(gateway.state.requests.at(-1).query, []);
   const full = data(await mcp.call('get_memories', {
     recent_k: 200, memory_types: ['fact', 'procedural'], scopes: ['scope:team', 'scope:org'], include_superseded: true,
   }));
@@ -125,6 +150,7 @@ test('get_memories lists recent records with filters, metadata, and explicit tru
   assert.equal(full.items[0].type, 'fact');
   assert.equal(full.items[0].scope_key, 'scope:team');
   assert.equal(full.items[0].superseded, true);
+  assert.match(full.message, /Do not automatically re-query at a higher limit/);
   assert.doesNotMatch(JSON.stringify(full), /fixture-forbidden-secret|access_token/);
   const request = gateway.state.requests.at(-1);
   assert.equal(request.method, 'GET');
@@ -135,9 +161,37 @@ test('get_memories lists recent records with filters, metadata, and explicit tru
   const scoped = data(await mcp.call('get_memories', { scopes: ['scope:missing'], memory_types: ['episodic'] }));
   assert.equal(scoped.count, 0);
   assert.equal(scoped.truncated, false);
+  assert.match(scoped.message, /Here are 0 recent memories/);
   assert.equal(mcp.stderr(), '');
 });
 
+test('gateway and requested-window limits remain truthful information, not a request to escalate', async t => {
+  const gateway = await mockGateway(t);
+  const mcp = await memoryFixture(t, gateway);
+  await createClient({ env: mcp.env, deployment: mcp.deployment }).redeem('fixture-enrollment');
+  for (const [count, gatewayTruncated, recentK, limitReached] of [
+    [50, false, undefined, false], [50, false, 50, true], [3, true, undefined, false], [3, false, undefined, false],
+  ]) {
+    gateway.state.listingResponse = {
+      items: Array.from({ length: count }, (_, index) => ({ content: `Sample ${index}.` })),
+      count, truncated: gatewayTruncated,
+    };
+    const before = gateway.state.requests.length;
+    const response = await mcp.call('get_memories', recentK === undefined ? {} : { recent_k: recentK });
+    const sample = data(response);
+    assert.equal(response.isError, undefined);
+    assert.equal(sample.count, count);
+    assert.equal(sample.requested, recentK ?? null);
+    assert.equal(sample.gatewayTruncated, gatewayTruncated);
+    assert.equal(sample.limitReached, limitReached);
+    assert.equal(sample.truncated, gatewayTruncated || limitReached);
+    assert.equal(sample.paginationSupported, false);
+    assert.equal(gateway.state.requests.length, before + 1);
+    assert.match(sample.message, /bounded sample satisfies a casual listing request/);
+    assert.match(sample.message, /Retrieve more only for user-requested more\/completeness/);
+    assert.match(sample.message, /No cursor\/offset pagination or guaranteed complete export/);
+  }
+});
 test('get_memories discloses projection limits and strips secrets without silently claiming completeness', async t => {
   const gateway = await mockGateway(t);
   const mcp = await memoryFixture(t, gateway);

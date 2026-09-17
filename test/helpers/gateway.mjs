@@ -12,6 +12,7 @@ export async function mockGateway(t, options = {}) {
     revokeStatus: 204,
     listingStatus: 200,
     listingResponse: null,
+    listingDefaultCount: 50,
   };
   function grant(expiresIn = 3600) {
     const n = ++state.counter;
@@ -76,7 +77,7 @@ export async function mockGateway(t, options = {}) {
     if (path === "/inference/memory/memories" && req.method === "GET") {
       if (state.listingStatus !== 200) return send(state.listingStatus, { error: "fixture-provider-secret" });
       if (state.listingResponse !== null) return send(200, state.listingResponse);
-      const count = Number(url.searchParams.get("recent_k"));
+      const count = url.searchParams.has("recent_k") ? Number(url.searchParams.get("recent_k")) : state.listingDefaultCount;
       const types = url.searchParams.getAll("memory_types");
       const scopes = url.searchParams.getAll("scopes");
       const matching = state.memories.filter(item =>

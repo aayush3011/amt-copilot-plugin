@@ -237,7 +237,7 @@ test('memory listing uses the existing GET route with encoded repeated filters a
   await f.client.getMemories({
     recent_k: 200, memory_types: ['fact', 'procedural'], scopes: ['scope:team&recent_k=999', 'scope:org'], include_superseded: true,
   });
-  assert.equal(f.calls[0].url, `${f.config.gatewayBase}/memories?recent_k=50`);
+  assert.equal(f.calls[0].url, `${f.config.gatewayBase}/memories`);
   const filtered = new URL(f.calls[1].url);
   assert.equal(filtered.pathname, '/inference/memory/memories');
   assert.equal(filtered.searchParams.get('recent_k'), '200');
@@ -245,11 +245,17 @@ test('memory listing uses the existing GET route with encoded repeated filters a
   assert.deepEqual(filtered.searchParams.getAll('scopes'), ['scope:team&recent_k=999', 'scope:org']);
   assert.equal(filtered.searchParams.get('include_superseded'), 'true');
   assert.ok(f.calls.every(call => call.method === 'GET' && call.body === undefined && call.headers.Authorization === 'HookToken fake-access-1'));
+  await f.client.getMemories({ recent_k: 50 });
+  assert.equal(f.calls[2].url, `${f.config.gatewayBase}/memories?recent_k=50`);
+  await f.client.getMemories({ memory_types: ['fact'], scopes: ['scope:one'] });
+  const defaultWithFilters = new URL(f.calls[3].url);
+  assert.equal(defaultWithFilters.searchParams.has('recent_k'), false);
+  assert.deepEqual([...defaultWithFilters.searchParams], [['memory_types', 'fact'], ['scopes', 'scope:one']]);
 });
 
 test('memory listing validates filters and rejects identity or endpoint overrides before auth or network', async t => {
   const f = await fixture(t);
-  for (const options of [null, [], { recent_k: 0 }, { recent_k: 201 }, { recent_k: '50' }, { recent_k: 1.5 },
+  for (const options of [null, [], { recent_k: null }, { recent_k: 0 }, { recent_k: 201 }, { recent_k: '50' }, { recent_k: 1.5 },
     { memory_types: ['unknown'] }, { memory_types: 'fact' }, { memory_types: Array(4).fill('fact') },
     { scopes: 'scope:one' }, { scopes: [''] }, { scopes: ['two scopes'] }, { scopes: ['\u00e9'.repeat(129)] },
     { scopes: Array(21).fill('scope:one') }, { include_superseded: 'true' },

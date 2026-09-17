@@ -93,6 +93,9 @@ Version 0.12.6 records successful Claude verification and corrects the stale
 skill/documentation wording; no authentication or capture implementation changed.
 Version 0.13.0 adds the supported listing tool and corrects auth-skill
 discoverability and Codex plugin invocation names.
+Version 0.13.1 treats the backend's recent sample as the normal conversational
+result and omits unspecified `recent_k`, leaving the default to the gateway.
+Limit flags remain truthful information, not a prompt for automatic over-fetching.
 Hook discovery, native trust and real capture are distinct checks.
 
 **Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
@@ -271,29 +274,58 @@ Gateway APIs and AMT remain unchanged.
 
 `get_memories` uses the existing authenticated `GET {gatewayBase}/memories`
 route, not the semantic-search route or a new service. Its strict schema
-accepts only `recent_k` (default 50, maximum 200), `memory_types` (fact,
+accepts only optional `recent_k` (explicit values 1 to 200), `memory_types` (fact,
 episodic, procedural), `scopes`, and `include_superseded`. Arrays become
 repeatable URL-encoded query parameters. Identity comes from the same
 gateway-bound HookToken session as capture/search; no tool accepts credentials,
 tenant/user identity or endpoint overrides.
+When `recent_k` is omitted, the GET request omits it too; the gateway applies
+its own default, currently 50. The plugin does not hardcode a competing
+default or choose a smaller conversational count.
+
+For casual "get my memories", "show my memories" or "show some memories",
+one default call followed by "Here are your N most recent memories" completes
+the request. There is no need for a second trip to fill perceived gaps or
+surface every stored memory.
+Do not automatically re-query at a higher limit or change filters merely
+because limit metadata is set. Larger requests are appropriate only when the
+user asks for more, a specific larger count, completeness ("all", "everything",
+"full list", an export), or the task itself genuinely needs exhaustive coverage.
+The presence of truncation metadata does not establish that need.
 
 The response projects content and bounded record metadata, sanitizes common
 credentials/runtime envelopes, and preserves reference-only semantics.
 `count` is the number returned, not a total count. The tool reports
 `truncated`, `gatewayTruncated`, `limitReached`, `omittedItems` and
-`contentTruncated`. A full requested window is conservatively marked potentially
-partial even when the gateway reports `truncated: false`; it is not proof of an
-exhaustive listing. Content is bounded to 8 KiB per item and 128 KiB per listing.
+`contentTruncated`. These are informational coverage indicators, not errors,
+retry advice or evidence that a casual request is unfinished. A full requested
+window remains conservatively marked `truncated` when `recent_k` was explicit,
+even when the gateway reports `truncated: false`. `requested: null` means
+the backend selected the count; in that case `limitReached` is false rather
+than guessing the default, and the backend's truncation flag is still exposed.
+Neither an unset flag nor an unknown default proves an exhaustive listing. For a casual
+answer, label the bounded recent sample without dumping technical flags or
+trying to retrieve everything. Explain the flags if the user asks whether more
+exist or requests completeness. Content is bounded to 8 KiB per item and 128 KiB per listing.
 Malformed truncation metadata and failed responses produce errors, not empty
 success-shaped fallbacks.
 
 There is no verified cursor/offset pagination contract. A live probe requesting
 51 records returned 50 with gateway truncation set; requesting 50 returned 50
-without that gateway flag. Report the requested-window limit as well as the
-server flag. Higher counts or narrower filters can help, but no complete
-export or hidden pagination is promised. The skill/server instructions direct
+without that gateway flag. Both the requested-window and server flags remain
+exposed. If the user requests broader coverage, supported larger counts or
+narrower filters can help, but no complete export or hidden pagination is
+promised. The skill/server instructions direct
 unsupported requests back to the user rather than reading plugin internals,
 credential files, other service code or OpenAPI endpoints.
+
+The 0.13.1 conversational check used native Claude 2.1.274 with the packaged
+runtime and an isolated synthetic gateway. Both "get my memories" and "show
+some of my memories" made exactly one listing call with no `recent_k`, even
+when the response contained 50 records and `truncated: true`. "Show up to 100
+of my memories" sent one explicit `recent_k: 100` request. This verifies the
+instruction behavior without reading real memories; default regression tests
+remain model-free and also verify that the backend controls an omitted count.
 
 ## Skill commands
 
@@ -325,6 +357,16 @@ Invocation policy can separately hide skills from model discovery; removing
 these metadata restrictions keeps all four visible for user-requested use.
 Native regression checks include the actual Codex names, not just filesystem
 presence. Host inventories can still be cached until reload/restart.
+
+Plugin upgrades require a session restart because MCP server instances and
+their tool definitions bind at session start. Updating the cache or refreshing
+only the skills is insufficient if the old process is still running. A
+user-reported Codex session retained an orphaned 0.12.2 Memory House server
+after 0.13.0 was installed and the old cache directory removed. It naturally
+reported `get_memories` unavailable. The coordinating session terminated that
+identified old process with user context; a restarted session uses the current
+payload. This is not a reason to patch credentials, inspect bundles or fall
+back to REST/OpenAPI. Do not terminate unrelated MCP or host processes.
 
 A controlled Copilot model lookup confirmed the distinction: both variants
 listed four installed skills, but with `disable-model-invocation: true` the

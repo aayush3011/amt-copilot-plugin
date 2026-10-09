@@ -43,7 +43,7 @@ async function dependencyNotices(inputs) {
 async function generatedRuntime() {
   const target = join(PLUGIN_ROOT, 'runtime');
   const bundled = await build({
-    absWorkingDir: ROOT, entryPoints: { server: 'src/server.mjs', hook: 'src/hook.mjs', auth: 'src/auth.mjs' },
+    absWorkingDir: ROOT, entryPoints: { server: 'src/server.mjs', hook: 'src/hook.mjs', auth: 'src/auth.mjs', canvas: 'src/canvas/index.mjs' },
     bundle: true, splitting: true, format: 'esm', platform: 'node', target: 'node20',
     nodePaths: [join(ROOT, '.maintainer', 'node_modules')],
     outdir: target, outExtension: { '.js': '.mjs' }, chunkNames: 'shared-[hash]',

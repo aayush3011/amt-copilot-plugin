@@ -220,11 +220,14 @@ test('failed revoke still clears credentials and cannot claim immediate access-t
 test('capture and search expose only narrow request bodies and HookToken authentication', async t => {
   const f = await fixture(t);
   await f.signIn();
-  f.handler(url => json(url.endsWith('/capture') ? { accepted: true } : { items: [] }));
-  assert.deepEqual(await f.client.capture({ thread_id: 'test', role: 'agent', content: 'A note.', tenant_id: 'ignored' }), { accepted: true });
-  assert.deepEqual(await f.client.search('query', 3), { items: [] });
-  assert.deepEqual(JSON.parse(f.calls[0].body), { thread_id: 'test', role: 'agent', content: 'A note.' });
+  const inserted = { request_id: 'request-1', kind: 'insert', status: 'succeeded', result: { items: [{ index: 0, id: 'turn-1', status: 'stored' }] } };
+  f.handler(url => json(url.endsWith('/capture') ? inserted : { items: [], count: 0 }, url.endsWith('/capture') ? 201 : 200));
+  assert.deepEqual(await f.client.capture({ thread_id: 'test', role: 'agent', content: 'A note.', tenant_id: 'ignored' }), inserted);
+  assert.deepEqual(await f.client.search('query', 3), { items: [], count: 0 });
+  assert.deepEqual(JSON.parse(f.calls[0].body), { extract: true, thread_id: 'test', items: [{ role: 'agent', content: 'A note.' }] });
   assert.deepEqual(JSON.parse(f.calls[1].body), { query: 'query', top_k: 3 });
+  await f.client.search('query', 50);
+  assert.equal(JSON.parse(f.calls[2].body).top_k, 50);
   assert.ok(f.calls.every(call => call.headers.Authorization === 'HookToken fake-access-1'));
   assert.deepEqual(Object.keys(f.client).sort(), ['capture', 'config', 'getAccessToken', 'getMemories', 'logout', 'redeem', 'search', 'status']);
 });
@@ -232,33 +235,68 @@ test('capture and search expose only narrow request bodies and HookToken authent
 test('memory listing uses the existing GET route with encoded repeated filters and shared HookToken auth', async t => {
   const f = await fixture(t);
   await f.signIn();
-  f.handler(() => json({ items: [], count: 0, truncated: false }));
-  assert.deepEqual(await f.client.getMemories(), { items: [], count: 0, truncated: false });
-  await f.client.getMemories({
-    recent_k: 200, memory_types: ['fact', 'procedural'], scopes: ['scope:team&recent_k=999', 'scope:org'], include_superseded: true,
-  });
-  assert.equal(f.calls[0].url, `${f.config.gatewayBase}/memories`);
+  f.handler(() => json({ items: [], count: 0, next_cursor: null, has_more: false }));
+  assert.deepEqual(await f.client.getMemories(), { items: [], count: 0, has_more: false });
+  assert.equal(f.calls[0].url, `${f.config.gatewayBase}/memories?page_size=50`);
+  await f.client.getMemories({ recent_k: 200, memory_types: ['fact', 'procedural', 'fact'], include_superseded: true });
   const filtered = new URL(f.calls[1].url);
   assert.equal(filtered.pathname, '/inference/memory/memories');
-  assert.equal(filtered.searchParams.get('recent_k'), '200');
-  assert.deepEqual(filtered.searchParams.getAll('memory_types'), ['fact', 'procedural']);
-  assert.deepEqual(filtered.searchParams.getAll('scopes'), ['scope:team&recent_k=999', 'scope:org']);
-  assert.equal(filtered.searchParams.get('include_superseded'), 'true');
+  assert.deepEqual([...filtered.searchParams], [
+    ['page_size', '50'], ['memory_types', 'fact'], ['memory_types', 'procedural'], ['include_superseded', 'true'],
+  ]);
+  await f.client.getMemories({ recent_k: 20, memory_types: ['episodic'] });
+  assert.equal(f.calls[2].url, `${f.config.gatewayBase}/memories?page_size=20&memory_types=episodic`);
+  assert.equal(f.calls.length, 3);
   assert.ok(f.calls.every(call => call.method === 'GET' && call.body === undefined && call.headers.Authorization === 'HookToken fake-access-1'));
-  await f.client.getMemories({ recent_k: 50 });
-  assert.equal(f.calls[2].url, `${f.config.gatewayBase}/memories?recent_k=50`);
-  await f.client.getMemories({ memory_types: ['fact'], scopes: ['scope:one'] });
-  const defaultWithFilters = new URL(f.calls[3].url);
-  assert.equal(defaultWithFilters.searchParams.has('recent_k'), false);
-  assert.deepEqual([...defaultWithFilters.searchParams], [['memory_types', 'fact'], ['scopes', 'scope:one']]);
+});
+
+test('memory listing follows the gateway cursor with a fixed page size up to the requested count', async t => {
+  const f = await fixture(t);
+  await f.signIn();
+  const stored = Array.from({ length: 130 }, (_, index) => ({ id: `memory-${index}`, content: `Note ${index}.` }));
+  const pages = [];
+  f.handler(url => {
+    const query = new URL(url).searchParams;
+    pages.push([...query]);
+    const size = Number(query.get('page_size'));
+    const offset = query.has('cursor') ? Number(query.get('cursor').replace('position-', '')) : 0;
+    const items = stored.slice(offset, offset + size);
+    const more = offset + size < stored.length;
+    return json({ items, count: items.length, next_cursor: more ? `position-${offset + size}` : null, has_more: more });
+  });
+  const all = await f.client.getMemories({ recent_k: 200 });
+  assert.deepEqual(all, { items: stored, count: 130, has_more: false });
+  assert.deepEqual(pages.map(query => query.find(([key]) => key === 'cursor')?.[1] ?? null), [null, 'position-50', 'position-100']);
+  assert.ok(pages.every(query => query[0][0] === 'page_size' && query[0][1] === '50'));
+  pages.length = 0;
+  const window = await f.client.getMemories({ recent_k: 70 });
+  assert.equal(pages.length, 2);
+  assert.deepEqual(window.items, stored.slice(0, 70));
+  assert.equal(window.count, 70);
+  assert.equal(window.has_more, true);
+  pages.length = 0;
+  const sample = await f.client.getMemories();
+  assert.equal(pages.length, 1);
+  assert.equal(sample.count, 50);
+  assert.equal(sample.has_more, true);
+  pages.length = 0;
+  f.handler(url => {
+    pages.push(url);
+    return pages.length === 1
+      ? json({ items: [{ content: 'First page.' }], count: 1, next_cursor: 'position-1', has_more: true })
+      : json({ error: 'fake-server-secret' }, 503);
+  });
+  await assert.rejects(f.client.getMemories({ recent_k: 100, memory_types: ['fact'] }), error =>
+    error.status === 503 && !error.message.includes('fake-server-secret'));
+  assert.equal(pages.length, 2);
+  assert.deepEqual([...new URL(pages[1]).searchParams], [['page_size', '50'], ['memory_types', 'fact'], ['cursor', 'position-1']]);
 });
 
 test('memory listing validates filters and rejects identity or endpoint overrides before auth or network', async t => {
   const f = await fixture(t);
   for (const options of [null, [], { recent_k: null }, { recent_k: 0 }, { recent_k: 201 }, { recent_k: '50' }, { recent_k: 1.5 },
     { memory_types: ['unknown'] }, { memory_types: 'fact' }, { memory_types: Array(4).fill('fact') },
-    { scopes: 'scope:one' }, { scopes: [''] }, { scopes: ['two scopes'] }, { scopes: ['\u00e9'.repeat(129)] },
-    { scopes: Array(21).fill('scope:one') }, { include_superseded: 'true' },
+    { scopes: ['scope:one'] }, { include_superseded: 'true' }, { page_size: 10 }, { cursor: 'position-1' },
     { token: 'fake-secret' }, { user_id: 'other' }, { gatewayBase: 'https://other.example' }, { offset: 50 }]) {
     await assert.rejects(f.client.getMemories(options), { code: 'INVALID_PAYLOAD' });
   }
@@ -266,11 +304,14 @@ test('memory listing validates filters and rejects identity or endpoint override
   await absent(f.config.stateDir);
 });
 
-test('listing validates truncation metadata and preserves safe transport failures without retry', async t => {
+test('listing validates continuation metadata and preserves safe transport failures without retry', async t => {
   const f = await fixture(t);
   await f.signIn();
-  for (const bad of [{}, { items: [] }, { items: [], count: -1, truncated: false },
-    { items: [], count: 0, truncated: 'false' }, { items: 'fake-secret', count: 1, truncated: false }]) {
+  for (const bad of [{}, { items: [] }, { items: [], count: -1, has_more: false, next_cursor: null },
+    { items: [], count: 1, has_more: false, next_cursor: null }, { items: [], count: 0, has_more: 'false', next_cursor: null },
+    { items: 'fake-secret', count: 1, has_more: false, next_cursor: null }, { items: [], count: 0, truncated: false },
+    { items: [], count: 0, has_more: true, next_cursor: null }, { items: [], count: 0, has_more: true, next_cursor: '' },
+    { items: [], count: 0, has_more: true, next_cursor: 'x'.repeat(8193) }, { items: [], count: 0, has_more: false, next_cursor: 'stale' }]) {
     f.handler(() => json(bad));
     await assert.rejects(f.client.getMemories(), { code: 'INVALID_RESPONSE' });
   }
@@ -284,8 +325,13 @@ test('listing validates truncation metadata and preserves safe transport failure
 test('invalid conversational payloads fail before authentication or network', async t => {
   const f = await fixture(t);
   for (const turn of [null, {}, { thread_id: '', role: 'user', content: 'a' }, { thread_id: 'a', role: 'system', content: 'b' },
-    { thread_id: 'a', role: 'user', content: '' }]) await assert.rejects(f.client.capture(turn), { code: 'INVALID_PAYLOAD' });
-  for (const topK of [0, -1, 101, 0.5, '8']) await assert.rejects(f.client.search('query', topK), { code: 'INVALID_PAYLOAD' });
+    { thread_id: 'a', role: 'user', content: '' }, { thread_id: 'a', role: 'assistant', content: 'b' },
+    ...['a/b', 'a\\b', 'a?b', 'a#b', 'a\u0001b', 'x'.repeat(257), '\u00e9'.repeat(129)].map(thread_id => ({ thread_id, role: 'user', content: 'a' })),
+    { thread_id: 'a', role: 'user', content: 'x'.repeat(256 * 1024 - 50) }]) {
+    await assert.rejects(f.client.capture(turn), { code: 'INVALID_PAYLOAD' });
+  }
+  for (const topK of [0, -1, 51, 0.5, '8']) await assert.rejects(f.client.search('query', topK), { code: 'INVALID_PAYLOAD' });
+  await assert.rejects(f.client.search('x'.repeat(16 * 1024 + 1), 8), { code: 'INVALID_PAYLOAD' });
   assert.equal(f.calls.length, 0);
   await absent(f.config.stateDir);
 });

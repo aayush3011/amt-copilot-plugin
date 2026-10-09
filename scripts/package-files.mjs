@@ -15,8 +15,9 @@ export const PACKAGE_FILES = Object.freeze([
   '.codex/entry.mjs', '.codex/mcp.json', '.codex/plugin-hooks.json',
   '.cursor/entry.mjs', '.cursor/mcp.json', '.cursor/plugin-hooks.json',
   '.github/entry.mjs', '.github/plugin-hooks.json',
+  'com.github.copilot/extensions/memory-canvas/extension.mjs',
   'skills/mh-memory/SKILL.md', 'skills/mh-login/SKILL.md',
-  'skills/mh-logout/SKILL.md', 'skills/mh-status/SKILL.md',
+  'skills/mh-logout/SKILL.md', 'skills/mh-status/SKILL.md', 'skills/mh-show/SKILL.md',
 ]);
 
 export async function verifyPayload(runtimeFiles, root = PLUGIN_ROOT) {

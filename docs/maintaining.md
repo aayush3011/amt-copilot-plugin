@@ -28,7 +28,7 @@ Manifest/component paths below are relative to the installed payload root
 | Claude Code | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` explicitly selects `.claude/plugin-hooks.json` and `.claude/mcp.json`. There is no default `.mcp.json` or `hooks/hooks.json` to merge. |
 | Codex | `.agents/plugins/marketplace.json` | Native legacy `.codex-plugin/plugin.json` directly selects `skills/`, `.codex/mcp.json` and `.codex/plugin-hooks.json`. No root manifest opts into Agent Plugins 1.0. |
 | Cursor | `.cursor-plugin/marketplace.json` | Its native catalog resolves `.cursor-plugin/plugin.json`, whose explicit hooks/MCP paths select `.cursor/plugin-hooks.json` and `.cursor/mcp.json`. Native marketplace resolution, not the root portable-only format, supplies Cursor hooks. |
-| Copilot | `.github/plugin/marketplace.json` | Legacy `plugin.json` explicitly selects `skills/`, `mcp.json` and `.github/plugin-hooks.json`, invoking `.github/entry.mjs`. |
+| Copilot | `.github/plugin/marketplace.json` | Legacy `plugin.json` explicitly selects `skills/`, `mcp.json` and `.github/plugin-hooks.json`, invoking `.github/entry.mjs`. Its `extensions` field selects `com.github.copilot/extensions/`, which holds the app canvas (see [Copilot app canvas](#copilot-app-canvas)). |
 
 Each installed host has one named MCP connection, `memory-house`, and one hook
 set. The catalogs share a name and payload source, so a host's compatibility
@@ -96,6 +96,13 @@ discoverability and Codex plugin invocation names.
 Version 0.13.1 treats the backend's recent sample as the normal conversational
 result and omits unspecified `recent_k`, leaving the default to the gateway.
 Limit flags remain truthful information, not a prompt for automatic over-fetching.
+Version 0.14.0 follows the updated AMT request contract behind the unchanged
+gateway routes. Capture sends `{extract: true, thread_id, items: [{role,
+content}]}` (256 KiB per request; thread IDs of at most 256 bytes without `/`,
+`\`, `?`, `#` or control characters) and accepts the tracked insert response.
+Search allows `top_k` up to 50 and queries up to 16 KiB and reads `score`.
+Listing pages with `page_size` and `cursor` instead of `recent_k`, `scopes`
+and `truncated`; the plugin now applies the default of 50 itself.
 Hook discovery, native trust and real capture are distinct checks.
 
 **Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
@@ -275,13 +282,23 @@ Gateway APIs and AMT remain unchanged.
 `get_memories` uses the existing authenticated `GET {gatewayBase}/memories`
 route, not the semantic-search route or a new service. Its strict schema
 accepts only optional `recent_k` (explicit values 1 to 200), `memory_types` (fact,
-episodic, procedural), `scopes`, and `include_superseded`. Arrays become
+episodic, procedural), and `include_superseded`. Memory types become
 repeatable URL-encoded query parameters. Identity comes from the same
 gateway-bound HookToken session as capture/search; no tool accepts credentials,
 tenant/user identity or endpoint overrides.
-When `recent_k` is omitted, the GET request omits it too; the gateway applies
-its own default, currently 50. The plugin does not hardcode a competing
-default or choose a smaller conversational count.
+When `recent_k` is omitted, the plugin requests 50, the same count the gateway
+used as its default before it switched to cursor pages.
+
+The gateway returns `{items, count, next_cursor, has_more}` pages of at most
+50 records and rejects `recent_k` and `scopes`. Each cursor is bound to the
+page size, filters, caller authorization and reset generation, so one listing
+keeps a fixed `page_size` of `min(recent_k, 50)` and follows `next_cursor`
+with the same access token for at most `ceil(recent_k / page_size)` requests,
+stopping early when `has_more` is false. Records beyond the requested count
+are dropped and reported as more being available. A page may hold fewer
+records than its size while more remain; the plugin does not issue extra
+requests to compensate. Any failed page fails the whole listing; no partial
+result or automatic retry is returned.
 
 For casual "get my memories", "show my memories" or "show some memories",
 one default call followed by "Here are your N most recent memories" completes
@@ -298,24 +315,21 @@ credentials/runtime envelopes, and preserves reference-only semantics.
 `count` is the number returned, not a total count. The tool reports
 `truncated`, `gatewayTruncated`, `limitReached`, `omittedItems` and
 `contentTruncated`. These are informational coverage indicators, not errors,
-retry advice or evidence that a casual request is unfinished. A full requested
-window remains conservatively marked `truncated` when `recent_k` was explicit,
-even when the gateway reports `truncated: false`. `requested: null` means
-the backend selected the count; in that case `limitReached` is false rather
-than guessing the default, and the backend's truncation flag is still exposed.
-Neither an unset flag nor an unknown default proves an exhaustive listing. For a casual
+retry advice or evidence that a casual request is unfinished. `gatewayTruncated`
+carries the gateway's `has_more`, including records trimmed beyond the
+requested count. A full requested window, including the default of 50, remains
+conservatively marked `truncated` even when `has_more` is false. `requested`
+is the count asked for. An unset flag does not prove an exhaustive listing. For a casual
 answer, label the bounded recent sample without dumping technical flags or
 trying to retrieve everything. Explain the flags if the user asks whether more
 exist or requests completeness. Content is bounded to 8 KiB per item and 128 KiB per listing.
-Malformed truncation metadata and failed responses produce errors, not empty
-success-shaped fallbacks.
+Malformed continuation metadata (a `count` that differs from the page's
+items, a non-boolean `has_more`, or a cursor inconsistent with `has_more`) and
+failed responses produce errors, not empty success-shaped fallbacks.
 
-There is no verified cursor/offset pagination contract. A live probe requesting
-51 records returned 50 with gateway truncation set; requesting 50 returned 50
-without that gateway flag. Both the requested-window and server flags remain
-exposed. If the user requests broader coverage, supported larger counts or
-narrower filters can help, but no complete export or hidden pagination is
-promised. The skill/server instructions direct
+The tool exposes no cursor or offset of its own. If the user requests broader
+coverage, supported larger counts or narrower filters can help, but listing
+stops at 200 records and no complete export is promised. The skill/server instructions direct
 unsupported requests back to the user rather than reading plugin internals,
 credential files, other service code or OpenAPI endpoints.
 
@@ -324,26 +338,27 @@ runtime and an isolated synthetic gateway. Both "get my memories" and "show
 some of my memories" made exactly one listing call with no `recent_k`, even
 when the response contained 50 records and `truncated: true`. "Show up to 100
 of my memories" sent one explicit `recent_k: 100` request. This verifies the
-instruction behavior without reading real memories; default regression tests
-remain model-free and also verify that the backend controls an omitted count.
+instruction behavior without reading real memories; regression tests remain
+model-free. Version 0.14.0 replaced the omitted count with the default of 50
+and has not repeated this conversational check.
 
 ## Skill commands
 
-The payload skills are `mh-login`, `mh-logout`, `mh-status`, and `mh-memory`;
-each directory and frontmatter name matches. All are available for discovery.
+The payload skills are `mh-login`, `mh-logout`, `mh-status`, `mh-memory` and
+`mh-show`; each directory and frontmatter name matches. All are available for discovery.
 Login/logout descriptions and instructions require an explicit user request;
 the skill itself does not pre-approve its MCP tools. Neither the Claude-style
 `disable-model-invocation` flag nor Codex-only implicit-invocation metadata is
 shipped. Host MCP approval remains the executable-action gate.
 
 Claude Code invokes plugin skills as `/memory-house:mh-login` (and the same
-prefix for the other three names). The verified Copilot CLI registers the same
+prefix for the other names). The verified Copilot CLI registers the same
 `/memory-house:mh-login` command name; the app's picker is authoritative for its
 version. Cursor
 selects `mh-login` from its `/` picker. The tested Codex 0.154.0 plugin loader
 registers `memory-house:mh-login`; mention `$memory-house:mh-login`
 or select it through `$`/`/skills`. The same substitutions apply to logout,
-status and memory. ChatGPT desktop's skill picker uses `@`; exact Codex desktop
+status, memory and show. ChatGPT desktop's skill picker uses `@`; exact Codex desktop
 controls depend on the surface/version, so the user docs do not invent a
 universal bare slash alias there.
 
@@ -379,6 +394,85 @@ Invocation references:
 [Copilot skill invocation](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills#using-agent-skills),
 [Codex and ChatGPT skill invocation](https://learn.chatgpt.com/docs/build-skills),
 [Cursor skill picker](https://cursor.com/docs/skills).
+
+## Copilot app canvas
+
+The 0.14.0 payload adds the Memory House canvas for the GitHub Copilot app only.
+Other hosts ignore it; their `mh-show` skill falls back to one `get_memories`
+call grouped by scope.
+
+**Packaging.** `plugin/com.github.copilot/extensions/memory-canvas/extension.mjs`
+contains only the Copilot SDK wiring (`joinSession` and `createCanvas`, canvas
+`memory-house`, action `refresh`). The host resolves `@github/copilot-sdk`
+itself, so the payload has no `package.json` for it, and the file never writes
+to stdout, which carries the extension protocol. Everything else is in
+`src/canvas/` and is bundled as the `canvas` entry, `runtime/canvas.mjs`:
+
+- `data.mjs` loads `GET /memories` (paged by the shared client),
+  `GET /whoami` and `GET /v1/me/reach` through the gateway with the HookToken.
+- `importers.mjs` reads local history and sends it to AMT.
+- `panel.mjs` is the page.
+- `index.mjs` is the loopback server.
+
+The legacy root manifest selects the canvas with
+`"extensions": "./com.github.copilot/extensions/"`. In a legacy manifest that
+path is a parent directory whose immediate subdirectories are extensions. On the
+GitHub Copilot app's runtime 1.0.93-1, an isolated profile discovered
+`"./dir/"` and `{"paths": ["./dir/"]}`, but not a path to the extension directory
+itself. The extension ID is `plugin:memory-house:memory-canvas`. In the same
+isolated runtime, the real payload's extension ran, registered the
+`memory-house` canvas with its `refresh` action, served the panel, and returned
+`not_signed_in` without a sign-in. The root stays legacy (no `$schema`), for the
+Codex reasons above.
+
+**Data.** A failed listing, including a missing sign-in, is an error. Failed
+`whoami` or `reach` reads only add a warning, so memories still render; node
+memories then appear by node ID. The tree lists the personal scope, then the
+reach nodes depth-first by name (including nodes with no memories), then node
+scopes missing from reach. AMT hides promoted copies the caller cannot see, so
+listing pages may be sparse. The limit (default 200) bounds the newest memories
+loaded, not each node.
+
+**Import.**
+
+| Kind | Source | Request |
+| --- | --- | --- |
+| Sessions | The 100 newest Copilot `session-state/*/events.jsonl` files or Claude Code `projects/*/*.jsonl` transcripts, streamed. Copilot pairs each `user.message` with the interaction's last assistant text, preferring `final_answer`. Claude skips sidechain, meta and tool-result events. | `POST /memory` with `{extract: true, thread_id: "mh:import:<source>:<session>", items: [{role, content, source}]}` |
+| Memories | Successful Copilot `storeMemory` facts, or Claude `projects/*/memory/**/*.md` (front matter stripped, `MEMORY.md` skipped), de-duplicated. | `POST /memory` with `{extract: false, items: [{content, source}]}`, then one `POST /reconcile {}` |
+
+Import details:
+
+- Batches stay within AMT's limits: at most 50 items and 240 KiB, and 10 facts
+  per batch because facts are embedded while the request waits.
+- Each batch carries `Idempotency-Key: mh-import-<sha256 of the body>`, so an
+  unchanged re-import replays. The gateway forwards that header.
+- Text passes the same `sanitizeMessage` filtering as live capture: 32 KiB per
+  turn and 16 KiB per fact. Text that becomes empty is skipped.
+- AMT accepts no client timestamps or metadata, so the original times are lost.
+- An import stops at the first failed request and reports what it sent.
+- The source identifiers are `github-copilot`, `claude-code`,
+  `copilot-cli-memory` and `claude-code-memory`.
+- `COPILOT_HOME` and `CLAUDE_CONFIG_DIR` select the history roots.
+- Parsed sessions are cached by size and modification time. Listing 100 of 328
+  real Copilot sessions (5.9 GB) took about 3.5 s cold and 31 ms cached.
+
+**Server.** One loopback server runs per open panel, on `127.0.0.1:0`. The page
+embeds a per-server capability token and a per-response script nonce
+(`script-src 'nonce-...'`). Styles are left unrestricted so the app's theme
+injection works, and the page itself is embeddable. API routes check four things:
+
+- the `x-mh-canvas-token` header, compared in constant time;
+- a loopback `Host` header (against DNS rebinding);
+- `Sec-Fetch-Site` of `same-origin` or `none`;
+- a JSON body of at most 64 KiB.
+
+They also send no-store, nosniff and same-origin `Cross-Origin-Resource-Policy`
+headers. Only one import runs at a time. Sign-in failures return 401
+`not_signed_in`. Other plugin errors return their safe code and message, never
+gateway text.
+
+The 0.8.1 canvas's `complete_signin` action (replaced by `memory_login`) and its
+`forget_memory` action (0.14.0 has no forget tool) are not carried over.
 
 ## Developer-only build and checks
 

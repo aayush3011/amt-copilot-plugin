@@ -113,11 +113,13 @@ the host's picker rather than guessing a bare alias. Desktop/IDE surfaces can
 differ: ChatGPT's desktop skill picker uses `@`. In Cursor, type `/` and select
 the named skill.
 
-All four skills are discoverable; login/logout no longer carry metadata that
+All five skills are discoverable; login/logout no longer carry metadata that
 hides them from model discovery. Their instructions still require an explicit
 user request, and the host's MCP tool approval remains in effect. After an
 update, restart the session so both the skills and MCP server are refreshed.
 Native skill reload alone does not necessarily replace an existing MCP process.
+**`mh-show`** (`/memory-house:mh-show` in Copilot) opens the Memory House canvas
+in the GitHub Copilot app; other hosts get a text listing grouped by scope.
 
 Then ask:
 
@@ -130,33 +132,31 @@ The app exposes `get_memories`, `search_memories`, `add_memory`, `memory_login`,
 plugin namespace. Identity comes from your authenticated gateway session, never
 from a model-supplied user, tenant, or endpoint.
 
-`get_memories` normally returns the gateway's **recent-memory sample (currently
-50)** without a search query. The plugin omits `recent_k` when it is not supplied
-instead of imposing its own default. For "get my memories" or "show some memories", one default call
+`get_memories` normally returns your **50 most recent memories** without a
+search query; that is the default when `recent_k` is not supplied. For "get my memories" or "show some memories", one default call
 and "Here are your N most recent memories" is a complete answer. The agent
 must not automatically fetch more or raise the limit to give a "fuller picture".
 Larger `recent_k` values (up to 200) are available when the user explicitly
 asks for more, a larger count, "all", "everything", a full list or export, or
 when the user's task genuinely requires exhaustive coverage.
 
-Optional `memory_types` (`fact`, `episodic`, `procedural`),
-repeatable `scopes`, and `include_superseded`. Scope keys are filters within the
-gateway's existing access checks, not a way to impersonate another identity.
-Use only known returned scope keys. `search_memories` remains query-based
-retrieval and is not an exhaustive listing.
+Optional `memory_types` (`fact`, `episodic`, `procedural`) and
+`include_superseded` filter the listing within the gateway's existing access
+checks; they cannot select another identity. `search_memories` remains
+query-based retrieval and is not an exhaustive listing.
 
 **Limits are informational, not an error or a reason to fetch again.**
 `truncated` is true when the
-gateway reports truncation, an explicitly requested window is full, or local output limits
-omit records/content. `gatewayTruncated`, `limitReached`, `omittedItems`, and
+gateway reports more records, the requested window is full, or local output limits
+omit records/content. `gatewayTruncated` (the gateway's `has_more`), `limitReached`, `omittedItems`, and
 `contentTruncated` explain the sample's coverage or shortened content. These
 fields do not mean a casual request is incomplete. Simply label the answer
 as recent memories; explain the limits when the user asks or completeness
-matters. `requested: null` means the gateway chose the default; `limitReached`
-checks only an explicitly requested count and does not guess the backend's
-default. The gateway may cap results below the requested count; a higher
-`recent_k` is not a pagination cursor. This endpoint exposes no
-cursor/offset pagination or guaranteed complete export. The tool also bounds
+matters. `requested` is the count asked for (50 when `recent_k` is omitted).
+The gateway pages results with a cursor bound to a fixed page size; the plugin
+follows it internally, at most 50 records per request, until it has the
+requested count or the gateway reports no more. The tool exposes no cursor of
+its own, and no listing is a guaranteed complete export. The tool also bounds
 content to 8 KiB per record and 128 KiB per listing and reports those limits.
 
 If an exposed tool cannot complete a request, the agent must report that
@@ -172,6 +172,36 @@ call `add_memory` just because something seems important.
 Acceptance is not immediate publication of a durable fact or a promise that the
 note is already searchable. Capture is best-effort: no queue, automatic replay,
 or new deduplication contract is added.
+
+## Memory House canvas (GitHub Copilot app)
+
+In the GitHub Copilot app, run `/memory-house:mh-show` or ask to open the Memory
+House canvas. The side panel shows:
+
+- **Where your memories live:** your personal memories, then every hierarchy
+  node you can read as a curator or member, nested by path (for example
+  *Cosmos DB SDKs / Python SDK / your branch node*). A node lists both copies
+  promoted into it and memories a curator wrote there directly. Nodes with no
+  memories still appear. Memories in a node outside your current hierarchy view
+  are listed under **Other scopes**.
+- Search, memory-type, superseded and count filters (the newest 1 to 200
+  memories), plus auto-refresh (15 seconds by default), so promotions and
+  extraction results appear without reopening the panel.
+- **Import memory**, which reads local history without modifying it and sends it
+  to your personal memories:
+  - **Recent sessions** from GitHub Copilot or Claude Code (the 100 newest; pick
+    any). User turns and final agent turns go through Memory House extraction,
+    like live capture.
+  - **Saved memories**: Copilot's `storeMemory` facts or Claude Code project
+    memory files are published as facts, followed by one reconciliation.
+  - Text is filtered for credentials and runtime context first. Original
+    timestamps are not kept. Re-importing an unchanged session replays the
+    earlier request rather than duplicating it.
+
+The canvas uses the same Memory House sign-in as the hooks and MCP tools. If it
+reports that you are not signed in, run `mh-login`, then select **Refresh**. It
+runs only in the GitHub Copilot app, as a local panel served on `127.0.0.1`.
+Deleting and promoting memories are not available from the panel.
 
 ## Automatic memory
 
@@ -215,6 +245,11 @@ allows sending conversation text to your Memory House deployment.
 - **Codex hooks need review:** run `/hooks`, review Memory House's session-start,
   user-prompt and stop hooks, and trust those definitions. Do not bypass hook
   trust or install duplicate user/project hooks.
+- **Canvas missing in the Copilot app:** start a new session after installing
+  or updating, and check that the `plugin:memory-house:memory-canvas`
+  extension is not disabled in the app's extension settings. An earlier
+  Memory House canvas used the same extension ID, so disabling that one also
+  disables this one.
 - **Disable Codex capture:** use `/hooks` to turn off Memory House's three hooks
   while keeping its MCP tools. To remove the integration instead, run
   `codex plugin remove memory-house@memory-house-marketplace`, then optionally

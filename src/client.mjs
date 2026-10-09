@@ -6,7 +6,10 @@ export { MemoryHouseError } from './config.mjs';
 
 const credentialLimit = 32 * 1024;
 export const MEMORY_TYPES = Object.freeze(['fact', 'episodic', 'procedural']);
-export const MEMORY_LIST_LIMITS = Object.freeze({ maxCount: 200, maxScopes: 20, scopeBytes: 256 });
+export const MEMORY_LIST_LIMITS = Object.freeze({ maxCount: 200, defaultCount: 50, pageSize: 50 });
+const SEARCH_LIMITS = Object.freeze({ queryBytes: 16 * 1024, maxTopK: 50 });
+const CAPTURE_LIMITS = Object.freeze({ threadBytes: 256, requestBytes: 256 * 1024 });
+const CURSOR_CHARS = 8192;
 
 function fail(code, message, details) {
   return new MemoryHouseError(code, message, details);
@@ -28,6 +31,24 @@ function text(value, label, limit) {
     throw fail('INVALID_PAYLOAD', `${label} must be non-empty text within the supported size limit.`);
   }
   return value;
+}
+
+function threadId(value) {
+  if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value) > CAPTURE_LIMITS.threadBytes
+    || /[/\\?#\u0000-\u001f]/.test(value)) {
+    throw fail('INVALID_PAYLOAD', 'thread_id must be non-empty text of at most 256 bytes without /, \\, ?, # or control characters.');
+  }
+  return value;
+}
+
+function listingPage(data) {
+  if (!isObject(data) || !Array.isArray(data.items) || data.count !== data.items.length || typeof data.has_more !== 'boolean'
+    || (data.has_more
+      ? typeof data.next_cursor !== 'string' || !data.next_cursor || data.next_cursor.length > CURSOR_CHARS
+      : data.next_cursor != null)) {
+    throw fail('INVALID_RESPONSE', 'Memory House listing did not return valid items, count and continuation status.');
+  }
+  return data;
 }
 
 function checkedJson(value) {
@@ -346,19 +367,24 @@ export function createClient(options = {}) {
 
   async function capture(turn) {
     if (!isObject(turn)) throw fail('INVALID_PAYLOAD', 'Capture requires a conversational turn.');
+    if (!['user', 'agent'].includes(turn.role)) throw fail('INVALID_PAYLOAD', 'Capture role must be user or agent.');
     const body = {
-      thread_id: text(turn.thread_id, 'thread_id', 2048),
-      role: turn.role,
-      content: text(turn.content, 'content', 1024 * 1024 - 4096),
+      extract: true,
+      thread_id: threadId(turn.thread_id),
+      items: [{ role: turn.role, content: text(turn.content, 'content', CAPTURE_LIMITS.requestBytes) }],
     };
-    if (!['user', 'agent'].includes(body.role)) throw fail('INVALID_PAYLOAD', 'Capture role must be user or agent.');
+    if (Buffer.byteLength(JSON.stringify(body)) > CAPTURE_LIMITS.requestBytes) {
+      throw fail('INVALID_PAYLOAD', 'Capture request exceeds the 256 KiB Memory House limit.');
+    }
     const token = await getAccessToken();
     return (await request('capture', { body, token })).data;
   }
 
   async function search(query, topK = 8) {
-    text(query, 'query', 64 * 1024);
-    if (!Number.isSafeInteger(topK) || topK < 1 || topK > 100) throw fail('INVALID_PAYLOAD', 'topK must be an integer from 1 to 100.');
+    text(query, 'query', SEARCH_LIMITS.queryBytes);
+    if (!Number.isSafeInteger(topK) || topK < 1 || topK > SEARCH_LIMITS.maxTopK) {
+      throw fail('INVALID_PAYLOAD', 'topK must be an integer from 1 to 50.');
+    }
     const token = await getAccessToken();
     const { data } = await request('search', { body: { query, top_k: topK }, token });
     if (!isObject(data) || !Array.isArray(data.items)) {
@@ -368,29 +394,37 @@ export function createClient(options = {}) {
   }
 
   async function getMemories(options = {}) {
-    if (!isObject(options) || Object.keys(options).some(key => !['recent_k', 'memory_types', 'scopes', 'include_superseded'].includes(key))) {
-      throw fail('INVALID_PAYLOAD', 'Memory listing accepts only count, type/scope filters and superseded visibility.');
+    if (!isObject(options) || Object.keys(options).some(key => !['recent_k', 'memory_types', 'include_superseded'].includes(key))) {
+      throw fail('INVALID_PAYLOAD', 'Memory listing accepts only a count, memory types and superseded visibility.');
     }
-    const { recent_k, memory_types = [], scopes = [], include_superseded = false } = options;
+    const { recent_k, memory_types = [], include_superseded = false } = options;
     if ((recent_k !== undefined && (!Number.isSafeInteger(recent_k) || recent_k < 1 || recent_k > MEMORY_LIST_LIMITS.maxCount))
       || !Array.isArray(memory_types) || memory_types.length > MEMORY_TYPES.length || memory_types.some(value => !MEMORY_TYPES.includes(value))
-      || !Array.isArray(scopes) || scopes.length > MEMORY_LIST_LIMITS.maxScopes
-      || scopes.some(value => typeof value !== 'string' || !value || Buffer.byteLength(value) > MEMORY_LIST_LIMITS.scopeBytes || /[\s\u0000-\u001f\u007f-\u009f]/u.test(value))
       || typeof include_superseded !== 'boolean') {
-      throw fail('INVALID_PAYLOAD', 'Memory listing requires a count from 1 to 200, supported memory types, bounded scope keys and a boolean superseded filter.');
+      throw fail('INVALID_PAYLOAD', 'Memory listing requires a count from 1 to 200, supported memory types and a boolean superseded filter.');
     }
-    const query = new URLSearchParams();
-    if (recent_k !== undefined) query.set('recent_k', String(recent_k));
-    for (const type of new Set(memory_types)) query.append('memory_types', type);
-    for (const scope of new Set(scopes)) query.append('scopes', scope);
-    if (include_superseded) query.set('include_superseded', 'true');
+    const requested = recent_k ?? MEMORY_LIST_LIMITS.defaultCount;
+    // The gateway binds each cursor to page_size, so every page of one listing uses the same size.
+    const pageSize = Math.min(requested, MEMORY_LIST_LIMITS.pageSize);
+    const filters = new URLSearchParams({ page_size: String(pageSize) });
+    for (const type of new Set(memory_types)) filters.append('memory_types', type);
+    if (include_superseded) filters.set('include_superseded', 'true');
     const token = await getAccessToken();
-    const { data } = await requestUrl(`${config.gatewayBase}/memories${query.size ? `?${query}` : ''}`, { method: 'GET', token, operation: 'listing' });
-    if (!isObject(data) || !Array.isArray(data.items) || !Number.isSafeInteger(data.count) || data.count < 0
-      || typeof data.truncated !== 'boolean') {
-      throw fail('INVALID_RESPONSE', 'Memory House listing did not return valid items, count and truncation status.');
+    const items = [];
+    let cursor;
+    let hasMore = false;
+    for (let page = 0; page < Math.ceil(requested / pageSize); page++) {
+      const query = new URLSearchParams(filters);
+      if (cursor) query.set('cursor', cursor);
+      const { data } = await requestUrl(`${config.gatewayBase}/memories?${query}`, { method: 'GET', token, operation: 'listing' });
+      const current = listingPage(data);
+      items.push(...current.items);
+      hasMore = current.has_more;
+      cursor = current.next_cursor;
+      if (!hasMore) break;
     }
-    return data;
+    const listed = items.slice(0, requested);
+    return { items: listed, count: listed.length, has_more: hasMore || items.length > requested };
   }
 
   async function status() {

@@ -1,12 +1,13 @@
 {
   "name": "memory-house",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "description": "Shared Memory House listing, search, remembering, Microsoft sign-in, and host-specific capture hooks.",
   "author": { "name": "Aayush Kataria", "url": "https://github.com/aayush3011" },
   "repository": "https://github.com/aayush3011/amt-copilot-plugin",
   "license": "MIT",
   "keywords": ["memory", "memory-house", "mcp"],
   "skills": "./skills/",
+  "extensions": "./com.github.copilot/extensions/",
   "hooks": "./.github/plugin-hooks.json",
   "mcpServers": "./mcp.json"
 }

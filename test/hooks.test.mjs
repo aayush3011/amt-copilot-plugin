@@ -789,6 +789,26 @@ for (const [harness, call] of Object.entries(enrollmentCalls)) {
   });
 }
 
+test('copilot: sign-in reads the code when the app joins the text and structured result with a blank line', async t => {
+  // Copilot 1.0.95 hands post-tool hooks the MCP text, a blank line, then the structured-content JSON.
+  const s = await setup(t);
+  const serverText = `{"enrollment_code": "${enrollmentCode}", "expires_in": 300}`;
+  const payload = {
+    ...enrollmentCalls.copilot.payload,
+    toolResult: { textResultForLlm: `${serverText}\n\n${enrollmentText}`, binaryResultsForLlm: [], resultType: 'success' },
+  };
+  const output = await s.call({ harness: 'copilot', event: 'post-tool', payload });
+  assert.deepEqual(s.redeems, [enrollmentCode]);
+  assert.match(output.modifiedResult.textResultForLlm, /completed on this device/);
+  assert.doesNotMatch(JSON.stringify(output) + s.logs.join('\n'), /fixture-sensitive-code/);
+  const unreadable = await s.call({
+    harness: 'copilot', event: 'post-tool',
+    payload: { ...payload, toolResult: { textResultForLlm: '{"expires_in": 300}\n\nnot json', resultType: 'success' } },
+  });
+  assert.match(unreadable.modifiedResult.textResultForLlm, /could not read the enrollment code/);
+  assert.deepEqual(s.redeems, [enrollmentCode]);
+});
+
 test('sign-in still hides the code when redemption fails, the code is missing, or the call is a subagent', async t => {
   const failing = await setup(t, { client: { async redeem() { throw Object.assign(new Error('fixture-sensitive-code rejected'), { status: 401 }); } } });
   const failed = await failing.call({ harness: 'codex', event: 'post-tool', payload: enrollmentCalls.codex.payload });

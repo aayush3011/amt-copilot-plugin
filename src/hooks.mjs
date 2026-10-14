@@ -412,7 +412,16 @@ function enrollmentCode(value, depth = 0) {
   if (depth > 4) return null;
   if (typeof value === 'string') {
     if (Buffer.byteLength(value, 'utf8') > 64 * 1024) return null;
-    try { return enrollmentCode(JSON.parse(value), depth + 1); } catch { return null; }
+    // Copilot can join the MCP text and its structured-content JSON with a blank line, which is not
+    // one JSON document, so each block is also tried on its own.
+    const blocks = value.split(/\r?\n[ \t]*\r?\n/);
+    for (const block of blocks.length > 1 ? [value, ...blocks.slice(0, 16)] : [value]) {
+      let parsed;
+      try { parsed = JSON.parse(block); } catch { continue; }
+      const code = enrollmentCode(parsed, depth + 1);
+      if (code) return code;
+    }
+    return null;
   }
   if (Array.isArray(value)) {
     for (const item of value.slice(0, 16)) {

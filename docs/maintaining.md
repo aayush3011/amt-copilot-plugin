@@ -134,6 +134,10 @@ sees it:
 | Claude Code | `mcp__plugin_memory-house_memory-house__enroll_hook_capture` | `hookSpecificOutput.updatedMCPToolOutput`, in the result's own shape |
 | Codex | `mcp__memory-house__enroll_hook_capture` | `{"decision": "block", "reason": ...}`; Codex parses `updatedMCPToolOutput` but does not apply it yet, and a blocking post-tool hook replaces the result with its reason |
 
+Copilot 1.0.95 hands the hook the tool's text, a blank line, then a copy of its
+structured content, which is not one JSON document, so the hook reads the code
+from each JSON block on its own.
+
 A same-named tool from another server is never redeemed, because redeeming an
 attacker's code would send this user's conversations to the attacker's
 account. Claude Code and Codex can only use that path once they are signed in,

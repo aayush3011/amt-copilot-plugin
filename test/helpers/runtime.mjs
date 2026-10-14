@@ -10,6 +10,8 @@ export async function isolatedEnvironment(t) {
   return {
     PATH: process.env.PATH,
     ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+    // Unlike cmd.exe, PowerShell has no default PATHEXT; without it `node` never resolves to node.exe.
+    ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
     HOME: home, USERPROFILE: home,
     MEMORY_HOUSE_HOME: join(home, '.memory-house'),
     COPILOT_HOME: join(home, '.copilot'),

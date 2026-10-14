@@ -10,6 +10,10 @@ import { MemoryHouseError } from './errors.mjs';
 const noFollow = constants.O_NOFOLLOW ?? 0;
 const fail = (code, message) => new MemoryHouseError(code, message);
 export const owned = stat => typeof process.getuid !== 'function' || stat.uid === process.getuid();
+// On Windows only the file ID is compared: before libuv 1.51 (Node 22.17), Windows 11 24H2 reports a
+// path's 64-bit volume serial but an open handle's 32-bit one, so `dev` differs for the same file.
+export const sameFile = (a, b, platform = process.platform) =>
+  a.ino === b.ino && (platform === 'win32' || a.dev === b.dev);
 
 export async function inspect(path) {
   try {
@@ -55,7 +59,7 @@ export async function ensureDirectory(path) {
 
 function checkOpened(before, opened) {
   regularFile(opened);
-  if (opened.ino !== before.ino || opened.dev !== before.dev) {
+  if (!sameFile(opened, before)) {
     throw fail('UNSAFE_STATE', 'Memory House state changed while being read. Try again after other clients stop.');
   }
 }
@@ -165,7 +169,7 @@ export async function withLock(path, timeoutMs, work) {
   } finally {
     // Never age-evict an auth lock: the owner may still be writing a rotated token.
     const current = await inspect(path);
-    if (!current || current.ino !== identity.ino || current.dev !== identity.dev) {
+    if (!current || !sameFile(current, identity)) {
       throw fail('LOCK_OWNERSHIP_LOST', 'Memory House lock ownership changed; the replacement lock was not removed.');
     }
     const raw = await readState(ownerPath, 4096);

@@ -36,14 +36,14 @@ async function discover(root, host) {
   assert.equal(catalog.plugins.length, 1);
   const entry = catalog.plugins[0];
   assert.equal(entry.name, 'memory-house');
-  assert.equal(entry.version, '0.14.1');
+  assert.equal(entry.version, '0.14.2');
   const source = entry.source.path ?? entry.source;
   assert.equal(source, './plugin');
   const pluginRoot = resolve(dirname(root), source);
   assert.equal(pluginRoot, resolve(root));
   const manifest = await json(join(pluginRoot, spec.manifest));
   assert.equal(manifest.name, 'memory-house');
-  assert.equal(manifest.version, '0.14.1');
+  assert.equal(manifest.version, '0.14.2');
   if (host === 'codex' || host === 'copilot') {
     assert.equal(manifest.$schema, undefined, 'A portable root would shadow Codex native hook discovery.');
     // Copilot loads the app canvas from immediate subdirectories of this legacy extensions path.
@@ -262,7 +262,7 @@ test('the Claude and Codex header launchers find the plugin and send the shared 
   const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
   const server = (await json(join(root, 'mcp.json'))).mcpServers['memory-house'];
   // Codex runs its helper from the user's directory, so the launcher reads Codex's documented install cache.
-  await cp(root, join(env.CODEX_HOME, 'plugins/cache/memory-house-marketplace/memory-house/0.14.1'), { recursive: true });
+  await cp(root, join(env.CODEX_HOME, 'plugins/cache/memory-house-marketplace/memory-house/0.14.2'), { recursive: true });
   // Header helpers reach cmd.exe the same verbatim, quoted way as hook commands (see hook()).
   const launch = async (command, extraEnv) => {
     const [shell, args] = process.platform === 'win32'
@@ -461,9 +461,9 @@ test('available Copilot CLI registers the native catalog and installs exactly on
   await run('copilot', ['plugin', 'install', 'memory-house@memory-house-marketplace'], { env, cwd: env.HOME, timeout: 30_000 });
   const listed = await run('copilot', ['plugin', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   assert.match(listed.stdout, /memory-house/);
-  assert.match(listed.stdout, /0\.14\.1/);
+  assert.match(listed.stdout, /0\.14\.2/);
   assert.match(listed.stdout, /memory-house-marketplace/);
-  assert.equal((listed.stdout.match(/0\.14\.1/g) ?? []).length, 1, listed.stdout);
+  assert.equal((listed.stdout.match(/0\.14\.2/g) ?? []).length, 1, listed.stdout);
   const skills = await run('copilot', ['skill', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
   for (const name of ['mh-login', 'mh-logout', 'mh-status', 'mh-memory', 'mh-show', 'use-memory']) assert.match(skills.stdout, new RegExp(`\\b${name}\\b`));
   // Copilot ignores the Claude and Codex launcher fields and signs in to the remote server itself.

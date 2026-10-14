@@ -82,9 +82,9 @@ async function discover(root, host) {
   return { ...spec, catalog, manifest, hooks, mcp, root: pluginRoot };
 }
 
-async function execute(command, args, { env, cwd, input = '' }) {
+async function execute(command, args, { env, cwd, input = '', windowsVerbatimArguments = false }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(command, args, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments });
     let stdout = '', stderr = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error('Isolated hook process timed out.')); }, 15_000);
     child.stdout.on('data', chunk => { stdout += chunk.toString('utf8'); });
@@ -106,9 +106,12 @@ async function hook(host, event, payload, env, root, shell = process.platform ==
     response = await execute(command.exec ?? command.command,
       command.args.map(value => value.replaceAll(`\${${native.variable}}`, root)), options);
   } else {
+    // Like Codex (raw_arg) and Node's `shell` option, hand cmd.exe the whole command verbatim inside one
+    // pair of quotes; default argument quoting would turn its inner quotes into \", which cmd.exe keeps.
     const args = shell === 'pwsh' ? ['-NoProfile', '-NonInteractive', '-Command', command.command]
-      : shell === 'cmd' ? ['/d', '/v:off', '/s', '/c', command.command] : ['-c', command.command];
-    response = await execute(shell === 'sh' ? '/bin/sh' : shell === 'cmd' ? (env.ComSpec ?? 'cmd.exe') : 'pwsh', args, options);
+      : shell === 'cmd' ? ['/d', '/v:off', '/s', '/c', `"${command.command}"`] : ['-c', command.command];
+    response = await execute(shell === 'sh' ? '/bin/sh' : shell === 'cmd' ? (env.ComSpec ?? 'cmd.exe') : 'pwsh', args,
+      { ...options, windowsVerbatimArguments: shell === 'cmd' });
   }
   assert.equal(response.code, 0, response.stderr);
   const parsed = JSON.parse(response.stdout);
@@ -259,10 +262,11 @@ test('the Claude and Codex header launchers find the plugin and send the shared 
   const server = (await json(join(root, 'mcp.json'))).mcpServers['memory-house'];
   // Codex runs its helper from the user's directory, so the launcher reads Codex's documented install cache.
   await cp(root, join(env.CODEX_HOME, 'plugins/cache/memory-house-marketplace/memory-house/0.14.0'), { recursive: true });
+  // Header helpers reach cmd.exe the same verbatim, quoted way as hook commands (see hook()).
   const launch = async (command, extraEnv) => {
     const [shell, args] = process.platform === 'win32'
-      ? [env.ComSpec ?? 'cmd.exe', ['/d', '/v:off', '/s', '/c', command]] : ['/bin/sh', ['-c', command]];
-    const response = await execute(shell, args, { env: { ...env, ...extraEnv }, cwd: env.HOME });
+      ? [env.ComSpec ?? 'cmd.exe', ['/d', '/v:off', '/s', '/c', `"${command}"`]] : ['/bin/sh', ['-c', command]];
+    const response = await execute(shell, args, { env: { ...env, ...extraEnv }, cwd: env.HOME, windowsVerbatimArguments: true });
     assert.equal(response.code, 0, response.stderr);
     return JSON.parse(response.stdout);
   };
@@ -274,8 +278,8 @@ test('the Claude and Codex header launchers find the plugin and send the shared 
   };
   const codex = async () => {
     const [shell, args] = process.platform === 'win32'
-      ? [process.env.ComSpec ?? 'cmd.exe', ['/d', '/v:off', '/s', '/c', server.http_headers_helper]] : ['/bin/sh', ['-c', server.http_headers_helper]];
-    const response = await execute(shell, args, { env: codexEnv, cwd: env.HOME });
+      ? [process.env.ComSpec ?? 'cmd.exe', ['/d', '/v:off', '/s', '/c', `"${server.http_headers_helper}"`]] : ['/bin/sh', ['-c', server.http_headers_helper]];
+    const response = await execute(shell, args, { env: codexEnv, cwd: env.HOME, windowsVerbatimArguments: true });
     assert.equal(response.code, 0, response.stderr);
     return JSON.parse(response.stdout);
   };

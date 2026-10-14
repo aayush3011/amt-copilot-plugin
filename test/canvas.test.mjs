@@ -124,6 +124,32 @@ test('canvas filters search locally and pass type, superseded and limit to the l
   }
 });
 
+test('promoted copies show where they came from and why, from metadata or the older summary', () => {
+  const nodes = [{ id: BRANCH, name: 'hotfix-4.14.x', path: 'Cosmos DB SDKs/Python SDK/hotfix-4.14.x' }];
+  const metadata = {
+    promoted_from_scope: BRANCH,
+    promotion_origin_principal: 'user:origin',
+    topology_assessment: { rationale: 'Applies to every Python SDK branch.' },
+    promoted_at: '2026-10-09T00:00:00Z',
+  };
+  const legacy = { from_scope: BRANCH, origin: 'user:origin', rationale: 'Applies to every Python SDK branch.', promoted_at: '2026-10-09T00:00:00Z' };
+  for (const item of [{ metadata }, { promotion: legacy }]) {
+    const data = shapeCanvasData({
+      nodes,
+      listing: { items: [{ id: 'm1', scope_key: PYTHON, memory_type: 'fact', content: 'Use the approved feed.', ...item }] },
+    });
+    assert.deepEqual(Object.values(data.groups).flat()[0].promotion, {
+      from_scope: BRANCH,
+      from_label: 'Cosmos DB SDKs / Python SDK / hotfix-4.14.x',
+      origin: 'user:origin',
+      rationale: 'Applies to every Python SDK branch.',
+      promoted_at: '2026-10-09T00:00:00Z',
+    });
+  }
+  const plain = shapeCanvasData({ listing: { items: [{ id: 'm2', scope_key: 'user:me', memory_type: 'fact', content: 'x', metadata: {} }] } });
+  assert.equal(Object.values(plain.groups).flat()[0].promotion, null);
+});
+
 test('identity and hierarchy failures degrade to warnings; listing and sign-in failures are fatal', async t => {
   const gateway = await hierarchyGateway(t);
   const { gateway: client } = await signedIn(t, gateway);

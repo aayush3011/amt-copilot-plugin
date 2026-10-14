@@ -2,10 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { PACKAGE_FILES, PLUGIN_ROOT, MARKETPLACE_FILES } from '../../scripts/package-files.mjs';
-import { fixtureDeployment } from './deployment.mjs';
 
 export async function isolatedEnvironment(t) {
   const home = await mkdtemp(join(tmpdir(), 'memory-house-native-'));
@@ -40,28 +37,12 @@ export async function rootSnapshot(t, { deployment, name = 'installed plugin' } 
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, await readFile(join(source, name)));
   }
-  if (deployment) await writeFile(join(root, 'deployment.json'), JSON.stringify(deployment));
+  if (deployment) {
+    await writeFile(join(root, 'deployment.json'), JSON.stringify(deployment));
+    // Point the remote MCP entry at the fixture gateway too, so native apps never reach the real one.
+    const mcp = JSON.parse(await readFile(join(root, 'mcp.json'), 'utf8'));
+    mcp.mcpServers['memory-house'].url = `${deployment.gatewayBase.replace(/\/+$/, '')}/mcp/`;
+    await writeFile(join(root, 'mcp.json'), JSON.stringify(mcp));
+  }
   return root;
-}
-
-export async function memoryFixture(t, gateway, { loginFixture = false, browserBehavior = 'success' } = {}) {
-  const env = await isolatedEnvironment(t);
-  const deployment = fixtureDeployment(gateway.base);
-  const root = await rootSnapshot(t, { deployment });
-  const args = [
-    ...(loginFixture ? ['--import', fileURLToPath(new URL('./direct-login-bootstrap.mjs', import.meta.url))] : []),
-    join(root, 'runtime/server.mjs'),
-  ];
-  const mcp = await connectMcp(t, { args, cwd: env.HOME, env: { ...env, ...(loginFixture ? { MH_FIXTURE_BROWSER_BEHAVIOR: browserBehavior } : {}) } });
-  return { env, deployment, root, ...mcp };
-}
-
-export async function connectMcp(t, { command = process.execPath, args, cwd, env }) {
-  const transport = new StdioClientTransport({ command, args, env, cwd, stderr: 'pipe' });
-  let stderr = '';
-  transport.stderr.on('data', chunk => { stderr += chunk.toString('utf8'); });
-  const client = new Client({ name: 'memory-house-fixture', version: '1.0.0' });
-  t.after(() => client.close());
-  await client.connect(transport);
-  return { client, stderr: () => stderr, call: (name, input = {}) => client.callTool({ name, arguments: input }) };
 }

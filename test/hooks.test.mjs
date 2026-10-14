@@ -11,7 +11,7 @@ import {
 
 const fixtureRoot = new URL('./fixtures/harnesses/', import.meta.url);
 const native = Object.fromEntries(await Promise.all(
-  ['claude', 'codex', 'cursor', 'copilot', 'vscode'].map(async harness => [
+  ['claude', 'codex', 'copilot', 'vscode'].map(async harness => [
     harness, JSON.parse(await readFile(new URL(`${harness}.json`, fixtureRoot), 'utf8')),
   ]),
 ));
@@ -42,7 +42,7 @@ async function setup(t, options = {}) {
 }
 
 function contextOf(output) {
-  return output.hookSpecificOutput?.additionalContext ?? output.additional_context ?? output.additionalContext
+  return output.hookSpecificOutput?.additionalContext ?? output.additionalContext
     ?? output.modifiedTransformedPrompt ?? '';
 }
 
@@ -51,12 +51,11 @@ async function stateFiles(setup) {
   return (await readdir(root)).filter(name => name.endsWith('.json')).map(name => join(root, name));
 }
 
-for (const harness of ['claude', 'codex', 'cursor', 'copilot', 'vscode']) {
+for (const harness of ['claude', 'codex', 'copilot', 'vscode']) {
   test(`${harness}: startup emits only its native context contract without capture`, async t => {
     const s = await setup(t);
     const output = await s.call({ harness, event: 'session-start', payload: native[harness].sessionStart });
-    if (harness === 'cursor') assert.deepEqual(Object.keys(output), ['additional_context']);
-    else if (harness === 'copilot') assert.deepEqual(Object.keys(output), ['additionalContext']);
+    if (harness === 'copilot') assert.deepEqual(Object.keys(output), ['additionalContext']);
     else {
       assert.deepEqual(Object.keys(output), ['hookSpecificOutput']);
       assert.equal(output.hookSpecificOutput.hookEventName, 'SessionStart');
@@ -78,14 +77,14 @@ for (const harness of ['claude', 'codex', 'cursor', 'copilot', 'vscode']) {
       assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
       assert.equal(s.searches[0].query, prompt);
     } else {
-      assert.deepEqual(output, harness === 'cursor' ? { continue: true } : {});
+      assert.deepEqual(output, {});
       assert.equal(s.searches.length, 0);
     }
   });
 }
 
 test('normalization accepts native aliases, keeps stop distinct from session end, and namespaces IDs', () => {
-  for (const event of ['UserPromptSubmit', 'userPromptSubmitted', 'beforeSubmitPrompt', 'user_prompt']) {
+  for (const event of ['UserPromptSubmit', 'userPromptSubmitted', 'user_prompt']) {
     assert.equal(normalizeEvent(event), 'user-prompt');
   }
   assert.equal(normalizeEvent('Stop'), 'assistant-stop');
@@ -96,7 +95,7 @@ test('normalization accepts native aliases, keeps stop distinct from session end
   const get = harness => normalizeHook({ harness, event: 'session-start', payload: { session_id: 'a/b:😺' } });
   assert.equal(get('claude').threadId, 'mh:claude:a%2Fb%3A%F0%9F%98%BA');
   assert.notEqual(get('claude').threadId, get('codex').threadId);
-  assert.notEqual(get('cursor').threadId, get('copilot').threadId);
+  assert.equal(get('cursor').skipReason, 'unsupported-harness');
   assert.equal(get('vscode').threadId, get('copilot').threadId);
   assert.equal(get('copilot-cli').threadId, get('copilot').threadId);
 });
@@ -110,7 +109,7 @@ test('invalid or anonymous events fail open without transport or content diagnos
     assert.deepEqual(await s.call({ harness: 'claude', event: 'user-prompt', payload }), {});
   }
   for (const [harness, event] of [['unknown', 'user-prompt'], ['copilot', ''],
-    ['claude', 'Notification'], ['cursor', 'afterAgentThought']]) {
+    ['claude', 'Notification'], ['vscode', 'afterAgentThought'], ['cursor', 'user-prompt']]) {
     assert.deepEqual(await s.call({ harness, event, payload: { sessionId: 'a', prompt: secret } }), {});
   }
   assert.deepEqual(await s.call({
@@ -280,13 +279,12 @@ test('Copilot accepts an explicitly empty transformed prompt and can recall usin
   }), {});
 });
 
-for (const harness of ['cursor', 'vscode', 'copilot']) {
+for (const harness of ['vscode', 'copilot']) {
   test(`${harness}: post-tool recalls cached user prompt once per turn without capturing tool data`, async t => {
     const s = await setup(t);
     await s.call({ harness, event: 'user-prompt', payload: native[harness].userPrompt });
     const output = await s.call({ harness, event: 'post-tool', payload: native[harness].postTool });
-    if (harness === 'cursor') assert.deepEqual(Object.keys(output), ['additional_context']);
-    else if (harness === 'copilot') assert.deepEqual(Object.keys(output), ['additionalContext']);
+    if (harness === 'copilot') assert.deepEqual(Object.keys(output), ['additionalContext']);
     else assert.equal(output.hookSpecificOutput.hookEventName, 'PostToolUse');
     assert.match(contextOf(output), /small, focused tests/);
     assert.deepEqual(s.searches, [{ query: prompt, topK: 8 }]);
@@ -313,43 +311,44 @@ test('Copilot and VS Code aliases share state, so a CLI transformation prevents 
 
 test('simultaneous post-tool events emit context at most once', async t => {
   const s = await setup(t);
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
   const outputs = await Promise.all(Array.from({ length: 8 }, () =>
-    s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool })));
+    s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool })));
   assert.equal(outputs.filter(output => !!contextOf(output)).length, 1);
   assert.equal(s.searches.length, 1);
 });
 
-test('post-tool fallback requires a live prompt for the same gateway, session, harness, and turn', async t => {
+test('post-tool fallback requires a live prompt for the same gateway, session, and turn', async t => {
   let time = Date.now();
   const s = await setup(t, { now: () => time });
-  assert.deepEqual(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool }), {});
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
+  const prompted = { ...native.vscode.userPrompt, turn_id: 'turn-1' };
+  const tool = { ...native.vscode.postTool, turn_id: 'turn-1' };
+  assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload: tool }), {});
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: prompted });
   assert.deepEqual(await s.call({
-    harness: 'cursor', event: 'post-tool',
-    payload: { ...native.cursor.postTool, conversation_id: 'different-session' },
+    harness: 'vscode', event: 'post-tool',
+    payload: { ...tool, session_id: 'different-session' },
   }), {});
   assert.deepEqual(await s.call({
-    harness: 'cursor', event: 'post-tool',
-    payload: { ...native.cursor.postTool, generation_id: 'different-turn' },
+    harness: 'vscode', event: 'post-tool',
+    payload: { ...tool, turn_id: 'different-turn' },
   }), {});
-  assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool }), {});
   s.client.config.gatewayBase = 'https://other-memory.example.test';
-  assert.deepEqual(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool }), {});
+  assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload: tool }), {});
   s.client.config.gatewayBase = 'https://memory.example.test';
   time += HOOK_LIMITS.stateTtlMs + 1;
-  assert.deepEqual(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool }), {});
+  assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload: tool }), {});
   assert.equal(s.searches.length, 0);
 });
 
 test('notification-only prompts invalidate prior fallback state and never trigger capture or search', async t => {
   const s = await setup(t);
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
   await s.call({
-    harness: 'cursor', event: 'user-prompt',
-    payload: { ...native.cursor.userPrompt, prompt: '<system_notification>Runtime only</system_notification>' },
+    harness: 'vscode', event: 'user-prompt',
+    payload: { ...native.vscode.userPrompt, prompt: '<system_notification>Runtime only</system_notification>' },
   });
-  assert.deepEqual(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool }), {});
+  assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool }), {});
   assert.equal(s.searches.length, 0);
   assert.equal(s.captures.length, 1);
   assert.equal((await stateFiles(s)).length, 0);
@@ -358,9 +357,9 @@ test('notification-only prompts invalidate prior fallback state and never trigge
 test('state is minimal, redacted, bounded, permission-restricted, and uses no session ID in filenames', async t => {
   const s = await setup(t);
   await s.call({
-    harness: 'cursor', event: 'user-prompt',
+    harness: 'vscode', event: 'user-prompt',
     payload: {
-      conversation_id: '../../outside', generation_id: 'private-turn-id',
+      session_id: '../../outside', turn_id: 'private-turn-id',
       prompt: `A request.\nAuthorization: HookToken fixture-secret\n${'😺'.repeat(5000)}`,
     },
   });
@@ -382,8 +381,8 @@ test('state cap evicts old queries rather than accumulating capture records', as
   const s = await setup(t);
   for (let index = 0; index < HOOK_LIMITS.stateEntries + 3; index++) {
     await s.call({
-      harness: 'cursor', event: 'user-prompt',
-      payload: { conversation_id: `session-${index}`, prompt: `Request ${index}` },
+      harness: 'vscode', event: 'user-prompt',
+      payload: { session_id: `session-${index}`, prompt: `Request ${index}` },
     });
   }
   assert.ok((await stateFiles(s)).length <= HOOK_LIMITS.stateEntries);
@@ -396,24 +395,24 @@ test('cache serialization stays bounded even for backslash-heavy query text', as
   const s = await setup(t);
   const query = `A Windows path: ${'\\'.repeat(HOOK_LIMITS.queryBytes)}`;
   await s.call({
-    harness: 'cursor', event: 'user-prompt',
-    payload: { ...native.cursor.userPrompt, prompt: query },
+    harness: 'vscode', event: 'user-prompt',
+    payload: { ...native.vscode.userPrompt, prompt: query },
   });
   const [path] = await stateFiles(s);
   assert.ok(path);
   assert.ok(Buffer.byteLength(await readFile(path)) <= HOOK_LIMITS.stateBytes);
-  assert.match(contextOf(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool })), /reference data/);
+  assert.match(contextOf(await s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool })), /reference data/);
 });
 
 test('expired context locks are reclaimed without retaining historical prompt or capture data', async t => {
   const s = await setup(t);
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
   const [path] = await stateFiles(s);
   const lockPath = path.replace(/\.json$/, '.lock');
   await writeFile(lockPath, '');
   const expired = new Date(Date.now() - HOOK_LIMITS.lockTtlMs - 1000);
   await utimes(lockPath, expired, expired);
-  const output = await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool });
+  const output = await s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool });
   assert.match(contextOf(output), /reference data/);
   assert.equal((await readdir(join(s.client.config.stateDir, 'hook-context'))).length, 1);
   assert.equal(s.captures.length, 1);
@@ -423,8 +422,8 @@ test('unusable state does not prevent capture; post-tool never falls back to too
   const s = await setup(t);
   await mkdir(s.client.config.stateDir, { recursive: true, mode: 0o700 });
   await writeFile(join(s.client.config.stateDir, 'hook-context'), 'not-a-directory');
-  assert.deepEqual(await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt }), { continue: true });
-  assert.deepEqual(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool }), {});
+  assert.deepEqual(await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt }), {});
+  assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool }), {});
   assert.equal(s.captures.length, 1);
   assert.equal(s.searches.length, 0);
   assert.match(s.logs.join('\n'), /state:unavailable/);
@@ -432,18 +431,18 @@ test('unusable state does not prevent capture; post-tool never falls back to too
 
 test('malformed, oversized, or symlinked cache files are not trusted', async t => {
   const s = await setup(t);
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
   const [path] = await stateFiles(s);
   for (const data of ['not-json', 'x'.repeat(HOOK_LIMITS.stateBytes + 1), '{"version":1,"query":2}']) {
     await writeFile(path, data);
-    assert.deepEqual(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool }), {});
+    assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool }), {});
   }
   if (process.platform !== 'win32') {
     const other = join(s.dir, 'unrelated.json');
     await writeFile(other, '{"secret":"UNRELATED_FILE"}');
     await rm(path);
     await symlink(resolve(other), path);
-    await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
+    await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
     assert.equal(await readFile(other, 'utf8'), '{"secret":"UNRELATED_FILE"}');
   }
   assert.equal(s.searches.length, 0);
@@ -456,7 +455,7 @@ test('a symlinked context directory is not followed', async t => {
   await mkdir(other);
   await mkdir(s.client.config.stateDir);
   await symlink(resolve(other), join(s.client.config.stateDir, 'hook-context'));
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
   assert.deepEqual(await readdir(other), []);
   assert.equal(s.captures.length, 1);
   assert.equal(s.searches.length, 0);
@@ -468,7 +467,7 @@ test('a symlinked configured state root is not followed', async t => {
   const other = join(s.dir, 'unrelated-directory');
   await mkdir(other);
   await symlink(resolve(other), s.client.config.stateDir);
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
   assert.deepEqual(await readdir(other), []);
   assert.equal(s.captures.length, 1);
   assert.equal(s.searches.length, 0);
@@ -522,7 +521,7 @@ test('search response schema errors fail open and cannot suppress original captu
   assert.ok(s.logs.every(line => !line.includes('emitted')));
 });
 
-test('retrieval is sorted, topK-validated, byte-bounded, redacted, and delimiter-safe', async t => {
+test('retrieval keeps AMT ranking order, is topK-validated, byte-bounded, redacted, and delimiter-safe', async t => {
   const s = await setup(t);
   s.client.search = async (query, topK) => {
     s.searches.push({ query, topK });
@@ -535,6 +534,8 @@ test('retrieval is sorted, topK-validated, byte-bounded, redacted, and delimiter
   };
   const output = await s.call({ harness: 'claude', event: 'user-prompt', payload: native.claude.userPrompt, topK: 20 });
   const context = contextOf(output);
+  // AMT's order wins over the vector-only similarity_score.
+  assert.ok(context.indexOf('Lower score') < context.indexOf('Try to escape'));
   assert.ok(context.indexOf('Try to escape') < context.indexOf('A relevant fact'));
   assert.match(context, /&lt;not-a-role&gt;/);
   assert.match(context, /&lt;\|im_end\|&gt;/);
@@ -609,20 +610,16 @@ for (const harness of ['claude', 'codex', 'vscode']) {
   });
 }
 
-test('Cursor captures afterAgentResponse text and closes only its turn, without inventing a stop transcript schema', async t => {
+test('VS Code Stop captures the final text and closes only its turn', async t => {
   const s = await setup(t);
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
-  await s.call({ harness: 'cursor', event: 'assistant-response', payload: native.cursor.assistantResponse });
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
+  await s.call({ harness: 'vscode', event: 'assistant-stop', payload: native.vscode.stop });
   assert.equal(s.captures[1].role, 'agent');
   assert.equal(s.captures[1].content, answer);
-  assert.deepEqual(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool }), {});
-  await s.call({
-    harness: 'cursor', event: 'assistant-stop',
-    payload: { conversation_id: 'same-session', text: 'NOT_AN_AFTER_AGENT_RESPONSE' },
-  });
-  assert.equal(s.captures.length, 2);
-  await s.call({ harness: 'cursor', event: 'user-prompt', payload: native.cursor.userPrompt });
-  assert.match(contextOf(await s.call({ harness: 'cursor', event: 'post-tool', payload: native.cursor.postTool })), /reference data/);
+  assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool }), {});
+  assert.equal(s.searches.length, 0);
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: native.vscode.userPrompt });
+  assert.match(contextOf(await s.call({ harness: 'vscode', event: 'post-tool', payload: native.vscode.postTool })), /reference data/);
 });
 
 test('explicit analysis channels, empty final text, and schema-mismatched direct fields never trigger fallback capture', async t => {
@@ -747,17 +744,78 @@ test('session end clears only matching local context and never records lifecycle
   assert.equal(s.searches.length, 0);
 });
 
-test('native hooks never redeem model-visible credentials or forward tool results', async t => {
-  const s = await setup(t);
-  for (const harness of ['cursor', 'claude', 'codex', 'vscode', 'copilot']) {
-    const payload = {
-      session_id: 'a', conversation_id: 'a', hook_event_name: 'PostToolUse',
+const enrollmentCode = 'fixture-sensitive-code';
+const enrollmentText = JSON.stringify({ enrollment_code: enrollmentCode, expires_in: 300 });
+const enrollmentCalls = {
+  copilot: {
+    payload: { sessionId: 'a', toolName: 'memory-house-enroll_hook_capture', toolResult: { resultType: 'success', textResultForLlm: enrollmentText } },
+    replaced: message => ({ modifiedResult: { resultType: 'success', textResultForLlm: message } }),
+  },
+  claude: {
+    payload: {
+      session_id: 'a', hook_event_name: 'PostToolUse', tool_input: {},
+      tool_name: 'mcp__plugin_memory-house_memory-house__enroll_hook_capture', tool_response: [{ type: 'text', text: enrollmentText }],
+    },
+    replaced: message => ({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedMCPToolOutput: [{ type: 'text', text: message }] } }),
+  },
+  codex: {
+    payload: {
+      session_id: 'a', turn_id: 'turn-1', hook_event_name: 'PostToolUse', tool_input: {},
       tool_name: 'mcp__memory-house__enroll_hook_capture',
-      tool_response: { enrollment_code: 'fixture-sensitive-code' },
-    };
-    const result = await s.call({ harness, event: 'post-tool', payload });
-    assert.deepEqual(result, {});
-    assert.ok(!JSON.stringify(result).includes('fixture-sensitive-code'));
+      tool_response: { content: [{ type: 'text', text: enrollmentText }], structuredContent: JSON.parse(enrollmentText), isError: false },
+    },
+    replaced: message => ({ decision: 'block', reason: message }),
+  },
+  vscode: {
+    payload: {
+      session_id: 'a', hook_event_name: 'PostToolUse', tool_input: {},
+      tool_name: 'mcp__memory-house__enroll_hook_capture', tool_response: { content: [{ type: 'text', text: enrollmentText }] },
+    },
+    replaced: message => ({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedMCPToolOutput: { content: [{ type: 'text', text: message }] } } }),
+  },
+};
+const replacementText = output => JSON.stringify(output).match(/Memory House sign-in[^"]*/)?.[0] ?? '';
+
+for (const [harness, call] of Object.entries(enrollmentCalls)) {
+  test(`${harness}: the post-tool hook redeems the enrollment code and hides it from the model`, async t => {
+    const s = await setup(t);
+    const output = await s.call({ harness, event: 'post-tool', payload: call.payload });
+    assert.deepEqual(s.redeems, [enrollmentCode]);
+    assert.deepEqual(output, call.replaced(replacementText(output)));
+    assert.match(replacementText(output), /completed on this device/);
+    assert.doesNotMatch(JSON.stringify(output), /fixture-sensitive-code/);
+    assert.ok(s.logs.every(line => !line.includes(enrollmentCode)));
+    assert.equal(s.captures.length + s.searches.length, 0);
+  });
+}
+
+test('sign-in still hides the code when redemption fails, the code is missing, or the call is a subagent', async t => {
+  const failing = await setup(t, { client: { async redeem() { throw Object.assign(new Error('fixture-sensitive-code rejected'), { status: 401 }); } } });
+  const failed = await failing.call({ harness: 'codex', event: 'post-tool', payload: enrollmentCalls.codex.payload });
+  assert.match(failed.reason, /did not finish/);
+  assert.doesNotMatch(JSON.stringify(failed) + failing.logs.join('\n'), /fixture-sensitive-code/);
+  const s = await setup(t);
+  const missing = await s.call({
+    harness: 'claude', event: 'post-tool',
+    payload: { ...enrollmentCalls.claude.payload, tool_response: [{ type: 'text', text: '{"expires_in":300}' }] },
+  });
+  assert.match(replacementText(missing), /could not read the enrollment code/);
+  const subagent = await s.call({ harness: 'copilot', event: 'post-tool', payload: { ...enrollmentCalls.copilot.payload, agent_id: 'helper' } });
+  assert.match(subagent.modifiedResult.textResultForLlm, /completed on this device/);
+  assert.deepEqual(s.redeems, [enrollmentCode]);
+});
+
+test('native hooks never redeem a same-named tool from another server or forward tool results', async t => {
+  const s = await setup(t);
+  for (const harness of ['claude', 'codex', 'vscode', 'copilot']) {
+    for (const tool_name of ['enroll_hook_capture', 'mcp__other__enroll_hook_capture', 'mcp__plugin_other_memory-house__enroll_hook_capture']) {
+      const payload = {
+        session_id: 'a', hook_event_name: 'PostToolUse', tool_name,
+        tool_response: { enrollment_code: enrollmentCode },
+      };
+      const result = await s.call({ harness, event: 'post-tool', payload });
+      assert.deepEqual(result, {});
+    }
   }
   assert.equal(s.redeems.length + s.captures.length + s.searches.length, 0);
 });

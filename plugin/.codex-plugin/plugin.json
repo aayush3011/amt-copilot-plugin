@@ -8,7 +8,7 @@
   "keywords": ["memory", "memory-house", "mcp"],
   "skills": "./skills/",
   "hooks": "./.codex/plugin-hooks.json",
-  "mcpServers": "./.codex/mcp.json",
+  "mcpServers": "./mcp.json",
   "interface": {
     "displayName": "Memory House",
     "shortDescription": "Shared memory with Microsoft sign-in",

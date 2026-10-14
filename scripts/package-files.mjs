@@ -5,19 +5,19 @@ import { fileURLToPath } from 'node:url';
 export const PLUGIN_ROOT = fileURLToPath(new URL('../plugin/', import.meta.url));
 export const MARKETPLACE_FILES = Object.freeze([
   '.claude-plugin/marketplace.json', '.agents/plugins/marketplace.json',
-  '.cursor-plugin/marketplace.json', '.github/plugin/marketplace.json',
+  '.github/plugin/marketplace.json',
 ]);
 
 export const PACKAGE_FILES = Object.freeze([
   'plugin.json', 'mcp.json', 'deployment.json', 'LICENSE',
-  '.claude-plugin/plugin.json', '.codex-plugin/plugin.json', '.cursor-plugin/plugin.json',
-  '.claude/entry.mjs', '.claude/mcp.json', '.claude/plugin-hooks.json',
-  '.codex/entry.mjs', '.codex/mcp.json', '.codex/plugin-hooks.json',
-  '.cursor/entry.mjs', '.cursor/mcp.json', '.cursor/plugin-hooks.json',
+  '.claude-plugin/plugin.json', '.codex-plugin/plugin.json',
+  '.claude/entry.mjs', '.claude/plugin-hooks.json',
+  '.codex/entry.mjs', '.codex/plugin-hooks.json',
   '.github/entry.mjs', '.github/plugin-hooks.json',
   'com.github.copilot/extensions/memory-canvas/extension.mjs',
   'skills/mh-memory/SKILL.md', 'skills/mh-login/SKILL.md',
   'skills/mh-logout/SKILL.md', 'skills/mh-status/SKILL.md', 'skills/mh-show/SKILL.md',
+  'skills/use-memory/SKILL.md',
 ]);
 
 export async function verifyPayload(runtimeFiles, root = PLUGIN_ROOT) {

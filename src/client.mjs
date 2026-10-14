@@ -304,11 +304,11 @@ export function createClient(options = {}) {
       if (fresh(current)) return current.access_token;
       if (!current) {
         requirePublisherConfig(config);
-        throw fail('NOT_SIGNED_IN', 'Memory House is not signed in. Use memory_login in your app.');
+        throw fail('NOT_SIGNED_IN', 'Memory House is not signed in. Run mh-login in your app.');
       }
       if (!canRefresh(current)) {
         await clearCache();
-        throw fail('REFRESH_EXPIRED', 'Memory House sign-in has expired. Use memory_login in your app.');
+        throw fail('REFRESH_EXPIRED', 'Memory House sign-in has expired. Run mh-login in your app.');
       }
       const started = now();
       let data;

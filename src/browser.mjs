@@ -16,7 +16,7 @@ export async function openBrowserUrl(value, { signal } = {}) {
       : ['xdg-open', [url.href]];
   await new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: 'ignore', windowsHide: true, shell: false, signal });
-    const failed = () => reject(new MemoryHouseError('BROWSER_LAUNCH_FAILED', 'Unable to open the Microsoft sign-in browser. Check your default browser and retry memory_login.'));
+    const failed = () => reject(new MemoryHouseError('BROWSER_LAUNCH_FAILED', 'Unable to open the Microsoft sign-in browser. Check your default browser and retry mh-login.'));
     child.once('error', failed);
     child.once('exit', code => code === 0 ? resolve() : failed());
   });

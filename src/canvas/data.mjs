@@ -112,8 +112,24 @@ function shapeRecord(item, nodes, principal) {
     confidence: typeof item.confidence === 'number' ? item.confidence : null,
     source,
     superseded: typeof item.superseded_by === 'string' && item.superseded_by.length > 0,
-    promotion: shapePromotion(item.promotion, nodes),
+    promotion: shapePromotion(promotionDetails(item), nodes),
   };
+}
+
+// A promoted copy records where it came from and why in its metadata. AMT releases that
+// returned no metadata sent the same values as a separate `promotion` summary.
+function promotionDetails(item) {
+  const metadata = isObject(item.metadata) ? item.metadata : null;
+  if (metadata && typeof metadata.promoted_from_scope === 'string') {
+    const assessment = isObject(metadata.topology_assessment) ? metadata.topology_assessment : {};
+    return {
+      from_scope: metadata.promoted_from_scope,
+      origin: metadata.promotion_origin_principal,
+      rationale: metadata.assessment_rationale ?? assessment.rationale,
+      promoted_at: metadata.promoted_at,
+    };
+  }
+  return isObject(item.promotion) ? item.promotion : null;
 }
 
 function shapePromotion(value, nodes) {

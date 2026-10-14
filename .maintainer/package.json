@@ -3,14 +3,13 @@
   "version": "0.14.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20.6" },
+  "engines": {
+    "node": ">=20.6"
+  },
   "description": "Pinned development dependencies only; not installed or used by desktop plugin hosts.",
   "license": "MIT",
   "devDependencies": {
     "@azure/msal-node": "6.0.1",
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "ajv": "8.20.0",
-    "esbuild": "0.28.2",
-    "zod": "4.6.5"
+    "esbuild": "0.28.2"
   }
 }

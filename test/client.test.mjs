@@ -76,10 +76,10 @@ test('status is local-only and legacy environment credentials cannot create a si
   const f = await fixture(t);
   const client = createClient({ ...f.options, env: { AMT_ACCESS_TOKEN: 'fake-injected' } });
   assert.equal((await client.status()).signedIn, false);
-  assert.equal((await client.status()).publisherConfigReady, true);
+  assert.equal((await client.status()).needsLogin, true);
   assert.equal(f.calls.length, 0);
   await absent(f.config.stateDir);
-  await assert.rejects(client.getAccessToken(), { code: 'NOT_SIGNED_IN' });
+  await assert.rejects(client.getAccessToken(), { code: 'NOT_SIGNED_IN', message: /mh-login/ });
   assert.equal(f.calls.length, 0);
 });
 

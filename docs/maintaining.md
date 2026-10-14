@@ -1,18 +1,18 @@
 # Maintaining the Memory House plugin
 
 This repository publishes one marketplace and one curated installable payload.
-All four catalogs stay at the repository root and select `./plugin`; no
-per-host package or ZIP selection is part of the product.
+All three catalogs stay at the repository root and select `./plugin`; no
+per-host package or ZIP selection is part of the product. The supported hosts
+are Claude Code, Codex and GitHub Copilot.
 
 ```text
 .claude-plugin/marketplace.json
 .agents/plugins/marketplace.json
-.cursor-plugin/marketplace.json
 .github/plugin/marketplace.json
 plugin/
   plugin.json, mcp.json, deployment.json, LICENSE
-  .claude-plugin/, .codex-plugin/, .cursor-plugin/
-  .claude/, .codex/, .cursor/, .github/
+  .claude-plugin/, .codex-plugin/
+  .claude/, .codex/, .github/
   skills/
   runtime/
 src/, test/, scripts/, .maintainer/, docs/  (publisher-only)
@@ -25,27 +25,21 @@ Manifest/component paths below are relative to the installed payload root
 
 | Host | Catalog | Manifest and component selection |
 | --- | --- | --- |
-| Claude Code | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` explicitly selects `.claude/plugin-hooks.json` and `.claude/mcp.json`. There is no default `.mcp.json` or `hooks/hooks.json` to merge. |
-| Codex | `.agents/plugins/marketplace.json` | Native legacy `.codex-plugin/plugin.json` directly selects `skills/`, `.codex/mcp.json` and `.codex/plugin-hooks.json`. No root manifest opts into Agent Plugins 1.0. |
-| Cursor | `.cursor-plugin/marketplace.json` | Its native catalog resolves `.cursor-plugin/plugin.json`, whose explicit hooks/MCP paths select `.cursor/plugin-hooks.json` and `.cursor/mcp.json`. Native marketplace resolution, not the root portable-only format, supplies Cursor hooks. |
+| Claude Code | `.claude-plugin/marketplace.json` | `.claude-plugin/plugin.json` explicitly selects `.claude/plugin-hooks.json` and the shared `mcp.json`. There is no default `.mcp.json` or `hooks/hooks.json` to merge. |
+| Codex | `.agents/plugins/marketplace.json` | Native legacy `.codex-plugin/plugin.json` directly selects `skills/`, the shared `mcp.json` and `.codex/plugin-hooks.json`. No root manifest opts into Agent Plugins 1.0. |
 | Copilot | `.github/plugin/marketplace.json` | Legacy `plugin.json` explicitly selects `skills/`, `mcp.json` and `.github/plugin-hooks.json`, invoking `.github/entry.mjs`. Its `extensions` field selects `com.github.copilot/extensions/`, which holds the app canvas (see [Copilot app canvas](#copilot-app-canvas)). |
 
 Each installed host has one named MCP connection, `memory-house`, and one hook
-set. The catalogs share a name and payload source, so a host's compatibility
+set. All three manifests select the same `mcp.json`, which names only the
+remote server's URL (see
+[Remote MCP server and sign-in](#remote-mcp-server-and-sign-in)); no host starts
+a local MCP process. The catalogs share a name and payload source, so a host's compatibility
 catalog fallback does not point to a different product. The root manifest is
 deliberately legacy, with direct `hooks`, `skills`, and `mcpServers` fields.
 Do not add the canonical Agent Plugins 1.0 `$schema`: that opts into a different
 Codex loading path, shadows the native manifest, and loses hook discovery in
 the tested CLI. Adding a compatibility overlay while retaining that portable
 root does not fix it.
-
-Codex's legacy MCP loader does not expand `${PLUGIN_ROOT}` in `args`/`cwd`,
-and it does not export `PLUGIN_ROOT` or `CODEX_PLUGIN_ROOT` to that MCP
-subprocess. This differs from its hook environment. Its dedicated
-`.codex/mcp.json` uses `cwd: "./"` (anchored by the native loader to the plugin
-root) and `args: ["runtime/server.mjs"]`. No environment fallback or cache
-glob is required. Copilot, Claude and Cursor retain their independently
-verified MCP configurations.
 
 Where a host admits and dispatches them, hooks capture every conversational user
 turn and final agent turn in the main conversation. Their capture calls do not ask the model to choose
@@ -56,19 +50,14 @@ credential/runtime filtering and best-effort delivery still apply.
 
 Claude uses its native manifest rather than `plugin.json` for components.
 Codex selects `.codex-plugin/plugin.json` beside the nonportable Copilot root.
-Cursor's documented **native marketplace** resolution checks
-`.cursor-plugin/plugin.json`, with manifest values overriding catalog values;
-the explicit `mcpServers` field replaces root `mcp.json` discovery. Do not use a
-portable-only Cursor import path: that format supports only MCP/skills and does
-not expand `${PLUGIN_ROOT}`. Its native MCP file uses `${CURSOR_PLUGIN_ROOT}`.
 
-The `.claude/`, `.codex/`, `.cursor/`, and `.github/` config files are named
+The `.claude/`, `.codex/` and `.github/` config files are named
 `plugin-hooks.json` deliberately: they are selected by the plugin manifest,
 not automatically enabled as workspace hooks just by checking out this repo.
-The four `entry.mjs` files import the same `runtime/hook.mjs`; there is no
+The three `entry.mjs` files import the same `runtime/hook.mjs`; there is no
 separate auth/capture implementation per host. Native root variables are
 checked against the installed package before running. Claude and Copilot use
-direct executable/argv hooks. Codex and Cursor use a fixed Node launcher that
+direct executable/argv hooks. Codex uses a fixed Node launcher that
 reads the host-exported root variable without interpolating paths into shell
 code, including on Windows.
 
@@ -77,11 +66,96 @@ Official contracts:
 [Claude root-relative marketplaces](https://code.claude.com/docs/en/plugin-marketplaces),
 [Codex native manifests](https://developers.openai.com/plugins/build/plugins),
 [Codex manifest selector](https://github.com/openai/codex/blob/main/codex-rs/utils/plugins/src/plugin_namespace.rs),
-[Cursor native marketplace resolution](https://cursor.com/docs/reference/plugins#how-resolution-works),
-[Cursor distribution policies](https://cursor.com/docs/plugins),
 [Copilot legacy manifests and catalogs](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference#legacy-manifest-fields).
 
+## Remote MCP server and sign-in
+
+`mcp.json` points every app at the deployed gateway's MCP endpoint,
+`{"type": "http", "url": "<gatewayBase>/mcp/"}`, plus two launcher commands:
+`headersHelper` (Claude Code) and `http_headers_helper` (Codex). Each app ignores
+the other's field, and Copilot ignores both (`copilot mcp get memory-house`
+shows the server). Claude requires `type` (`http`). The file deliberately does
+not follow the Agent Plugins schema, which spells the type `streamable-http`.
+`npm run check:publisher` confirms that the URL matches `deployment.json`.
+
+**Copilot signs in to the MCP server itself.** The InferencePlatform gateway
+answers an unauthenticated MCP request with `401` and
+`WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/inference/memory/mcp"`.
+That public document names Microsoft Entra
+(`https://login.microsoftonline.com/<tenant>/v2.0`) and the scope
+`api://45cdeed7-4e4e-481d-9f00-6708c0631565/Inference.Execute`. Copilot on macOS
+signs in with the Visual Studio Code client (`aebc6443…`); on Windows it uses
+the Work IQ clients (`fdcc1f02…`, `ba081686…`). All three are pre-authorized on
+the API. The plugin never sees that token.
+
+**Claude Code and Codex use the plugin's token instead.** Entra has no dynamic
+client registration. The gateway can advertise itself as the authorization
+server with a stand-in `/oauth/register`
+(`McpDiscoveryConfigs.ActAsAuthorizationServer`), but that only gets Claude
+past registration: on 2026-08-29, with the setting on, Entra rejected Claude's
+sign-in with `AADSTS9010010: The resource parameter provided in the request
+doesn't match with the requested scopes`, because Claude sends the gateway URL
+as the RFC 8707 `resource`. The setting is global, so leave it off; the
+deployed `McpDiscoveryConfigs__ActAsAuthorizationServer=false` overrides the
+Development configuration. (Codex has an `oauth_resource` override that has not
+been tried.)
+
+Instead, both apps run a plugin command before connecting and send its
+`Authorization` header; the gateway accepts the plugin's hook token on the MCP
+route (`HookTokenConfigs__Enabled=true`). The command is
+`runtime/auth.mjs headers`, which prints `{"Authorization": "HookToken …"}`,
+refreshing the token within 7 seconds (Claude allows 10), or `{}` when signed
+out.
+
+- **Claude** runs `headersHelper` from the plugin root with `CLAUDE_PLUGIN_ROOT`
+  set, and stops using OAuth for the server once the helper supplies
+  `Authorization`. When it prints `{}`, Claude offers its own sign-in, which
+  fails as above; users run `mh-login` instead.
+- **Codex** runs `http_headers_helper` from the user's home directory with only
+  `HOME` and `PATH`. The launcher therefore reads Codex's documented install
+  location, `~/.codex/plugins/cache/memory-house-marketplace/memory-house/<version>/`
+  (falling back to `local`); tests keep the version in step with the manifest.
+  A custom `CODEX_HOME` or `MEMORY_HOUSE_HOME` doesn't reach this connection.
+
+Both launchers are `node -e` commands that read no shell variables, so they
+behave the same in POSIX shells, `cmd` and PowerShell.
+
+**The plugin's sign-in.** In Copilot, `mh-login` makes the agent call the remote
+`enroll_hook_capture` tool, which returns a single-use
+`{enrollment_code, expires_in}`. The post-tool hook recognizes only this
+plugin's tool by its exact name in each app, redeems the code at
+`<gatewayBase>/hook/redeem`, stores the hook token in
+`~/.memory-house/token.json`, and replaces the tool result before the model
+sees it:
+
+| App | Tool name | Replacement |
+| --- | --- | --- |
+| Copilot | `memory-house-enroll_hook_capture` | `{"modifiedResult": {"resultType": "success", "textResultForLlm": ...}}` |
+| Claude Code | `mcp__plugin_memory-house_memory-house__enroll_hook_capture` | `hookSpecificOutput.updatedMCPToolOutput`, in the result's own shape |
+| Codex | `mcp__memory-house__enroll_hook_capture` | `{"decision": "block", "reason": ...}`; Codex parses `updatedMCPToolOutput` but does not apply it yet, and a blocking post-tool hook replaces the result with its reason |
+
+A same-named tool from another server is never redeemed, because redeeming an
+attacker's code would send this user's conversations to the attacker's
+account. Claude Code and Codex can only use that path once they are signed in,
+so their `mh-login` runs `runtime/auth.mjs login`: a Microsoft PKCE sign-in in
+the browser with the plugin's registered public client and fixed callback
+`http://127.0.0.1:33418`, then `enroll_hook_capture` with that Entra token and
+redemption, all outside the model. `runtime/auth.mjs status|logout` backs
+`mh-status` and `mh-logout`; the skills locate the helper two folders above
+their own `SKILL.md`.
+
+References:
+[Claude headersHelper](https://code.claude.com/docs/en/mcp#use-dynamic-headers-for-custom-authentication),
+[Claude PostToolUse output](https://code.claude.com/docs/en/hooks#posttooluse-decision-control),
+[Codex MCP servers](https://developers.openai.com/codex/mcp),
+[Codex hooks](https://developers.openai.com/codex/hooks),
+[Codex plugin install location](https://developers.openai.com/plugins/build/plugins).
+
 ## Live CLI limitations
+
+These checks predate the switch to the remote MCP server: the MCP operations
+below ran against the plugin's earlier local server and its own Microsoft
+sign-in. Hook capture and recall are unchanged.
 
 The 2026-09-16 live checks initially used plugin 0.12.1 and the vendor builds
 below. Version 0.12.3 corrected the Codex manifest format and the earlier
@@ -100,7 +174,8 @@ Version 0.14.0 follows the updated AMT request contract behind the unchanged
 gateway routes. Capture sends `{extract: true, thread_id, items: [{role,
 content}]}` (256 KiB per request; thread IDs of at most 256 bytes without `/`,
 `\`, `?`, `#` or control characters) and accepts the tracked insert response.
-Search allows `top_k` up to 50 and queries up to 16 KiB and reads `score`.
+Search allows `top_k` up to 50 and queries up to 16 KiB. The agent gets only
+each memory's content, in AMT's order, without scores.
 Listing pages with `page_size` and `cursor` instead of `recent_k`, `scopes`
 and `truncated`; the plugin now applies the default of 50 itself.
 Hook discovery, native trust and real capture are distinct checks.
@@ -164,25 +239,6 @@ did not record an HTTP receipt for those failures; neither a gateway failure
 nor an observation contribution was established. No speculative adapter fix,
 deduplication or replay was added.
 
-**Cursor CLI 2026.09.10-fd3934a and 2026.09.15-d2fe57e:** the earlier build
-passed MCP operations after replacing a stale marketplace pin. The newer
-build passed login/search/add/status/logout/restore against the 0.12.4 payload;
-its native MCP child-process path was verified against the installed Git-SHA
-cache, independently of the model's answer.
-Startup, post-tool and session-end plugin hooks ran. Ordinary prompts and final
-responses did not, in both print and interactive checks. The installed CLI's
-`beforeSubmitPrompt` guard checks only
-`hooksConfig.userHooks`/`hooksConfig.projectHooks`; its `afterAgentResponse`
-helper has the same user/project-only gate. Plugin hooks are excluded before
-dispatch. Startup recall is therefore available, but the per-turn query cache
-cannot be populated for post-tool recall. `--approve-mcps` approves connections,
-not tool calls; print-mode MCP operations also needed `--force` for this
-explicitly authorized verification.
-Both gates were re-read in the newer build's `7470.index.js`. Its generic
-dispatch helper reads only `userHooks`/`projectHooks`, and `afterAgentResponse`
-calls that helper; `pluginHooks` is not included. File SHA-256:
-`d8806b0a21da0b9b84e02cbcf949d6e4da39094789b04472515aa43aa145c30f`.
-
 **Claude Code 2.1.273:** the complete native plugin flow passed against the
 pushed 0.12.5 payload after a provider-auth configuration correction. Real
 Microsoft login, search (two results), one explicit accepted write, status,
@@ -216,17 +272,16 @@ the real verification turns already submitted to Memory House.
 The product conclusion is explicit: plugin MCP tools are deliverable where the
 host can run them; automatic plugin-delivered capture is verified on Claude
 Code, Copilot, and Codex with its corrected legacy manifest and normal hook trust.
-Cursor needs a separately user-approved user/project-hook configuration for
-automatic capture. A future
-`mh-enable-capture`/matching-disable workflow could provide that opt-in after
-consent; it is **not implemented**, and no such files were silently installed
-in a real profile during this work. Do not substitute model-selected
-`add_memory` calls for the missing automatic stream.
+Do not substitute model-selected `add_memory` calls for a missing automatic
+stream.
 
 ## Publisher configuration
 
-`plugin/deployment.json` contains only public deployment settings. The shipped values
-were verified on 2026-09-16:
+`plugin/deployment.json` contains only public settings: the gateway, and the
+Entra registration that the local sign-in helper (`runtime/auth.mjs login`, used
+by Claude Code and Codex) signs in with. The hooks, canvas and helper read it;
+`mcp.json` repeats the gateway with `/mcp/`. The shipped values were verified on
+2026-09-16:
 
 | Setting | Verified value |
 | --- | --- |
@@ -236,126 +291,54 @@ were verified on 2026-09-16:
 | Delegated API scope | `api://45cdeed7-4e4e-481d-9f00-6708c0631565/Inference.Execute` |
 | Registered public-client callback | `http://127.0.0.1:33418` |
 
-Tenant/scope were confirmed by public gateway discovery at
-`/.well-known/oauth-protected-resource/inference/memory/mcp` and
-`/.well-known/oauth-authorization-server`. Existing gateway source confirmed its
-fixed registration client ID. Read-only Entra application metadata confirmed
-the same application ID, `isFallbackPublicClient=true`, and that exact
-public-client loopback callback (as well as `http://localhost`). No registration
-was changed and no user access token was issued by that verification.
+The tenant and scope match the gateway's public
+`/.well-known/oauth-protected-resource/inference/memory/mcp` document. Gateway
+and token environment variables, legacy token files and per-user configuration
+cannot override these settings. Changing deployments is a publisher operation:
+update `deployment.json` and `mcp.json` together and publish an updated package.
+Preserve the exact registered callback; an occupied port fails explicitly
+instead of falling back to another one. PKCE, callback-state validation and
+fixed-port binding live in `src/entra.mjs`.
 
-`memory_login` invokes the Entra helper directly and opens Microsoft's HTTPS
-authorization URL in the browser after the host's tool approval. It waits for
-sign-in and returns only safe outcome text. `memory_status` checks local state
-without a network request or deployment URL, and `memory_logout` revokes/clears
-the shared sign-in without a browser. No model tool accepts identity, endpoints
-or credentials. The shipped
-application registration is read from `deployment.json`, not arbitrary host
-OAuth caches, legacy token files, per-user public configuration, or
-gateway/token environment overrides.
-
-Changing deployments is a publisher operation: set verified public values in
-this file and publish an updated package. Do not infer a public-client ID from
-an API audience without verifying the registration. Preserve the exact callback
-and registered port/path. An occupied fixed port fails explicitly instead of
-falling back to an arbitrary port. Tenant policy, account entitlement, network
-reachability and user consent still govern actual live sign-in.
-
-The only local HTTP listener is the registered OAuth callback during sign-in;
-there is no landing page, configuration server, or ephemeral-port management UI.
-PKCE, callback-state validation and fixed-port binding remain in `src/entra.mjs`.
-Auth tool calls are serialized per MCP connection so an overlapping sign-out
-cannot race an in-progress sign-in; status remains readable during sign-in.
-MCP cancellation/shutdown aborts the active auth helper.
-
-Shared credentials live in `~/.memory-house/token.json` (or an explicitly
-operator-selected `MEMORY_HOUSE_HOME`). Auth writes use private files and
-cross-process locks. Tokens are gateway-bound and never copied into the repo.
-One sign-in through any host is sufficient for all hosts using that same state
-directory as the same OS user on the same machine. Sign-out clears it for all
-of them. Different users, remote machines and explicit state-directory
-overrides are separate; host-provider authentication is also independent.
-Gateway APIs and AMT remain unchanged.
+Shared plugin credentials (the hook token) live in `~/.memory-house/token.json`
+(or an explicitly operator-selected `MEMORY_HOUSE_HOME`). Writes use private
+files and cross-process locks. Tokens are gateway-bound and never copied into
+the repo. One plugin sign-in through any host is sufficient for all hosts
+using that state directory as the same OS user on the same machine. Sign-out
+clears it for all of them. Different users, remote machines and explicit
+state-directory overrides are separate; each app's MCP sign-in is independent.
 
 ## Supported listing
 
-`get_memories` uses the existing authenticated `GET {gatewayBase}/memories`
-route, not the semantic-search route or a new service. Its strict schema
-accepts only optional `recent_k` (explicit values 1 to 200), `memory_types` (fact,
-episodic, procedural), and `include_superseded`. Memory types become
-repeatable URL-encoded query parameters. Identity comes from the same
-gateway-bound HookToken session as capture/search; no tool accepts credentials,
-tenant/user identity or endpoint overrides.
-When `recent_k` is omitted, the plugin requests 50, the same count the gateway
-used as its default before it switched to cursor pages.
-
-The gateway returns `{items, count, next_cursor, has_more}` pages of at most
-50 records and rejects `recent_k` and `scopes`. Each cursor is bound to the
-page size, filters, caller authorization and reset generation, so one listing
-keeps a fixed `page_size` of `min(recent_k, 50)` and follows `next_cursor`
-with the same access token for at most `ceil(recent_k / page_size)` requests,
-stopping early when `has_more` is false. Records beyond the requested count
-are dropped and reported as more being available. A page may hold fewer
-records than its size while more remain; the plugin does not issue extra
-requests to compensate. Any failed page fails the whole listing; no partial
-result or automatic retry is returned.
-
-For casual "get my memories", "show my memories" or "show some memories",
-one default call followed by "Here are your N most recent memories" completes
-the request. There is no need for a second trip to fill perceived gaps or
-surface every stored memory.
-Do not automatically re-query at a higher limit or change filters merely
-because limit metadata is set. Larger requests are appropriate only when the
-user asks for more, a specific larger count, completeness ("all", "everything",
-"full list", an export), or the task itself genuinely needs exhaustive coverage.
-The presence of truncation metadata does not establish that need.
-
-The response projects content and bounded record metadata, sanitizes common
-credentials/runtime envelopes, and preserves reference-only semantics.
-`count` is the number returned, not a total count. The tool reports
-`truncated`, `gatewayTruncated`, `limitReached`, `omittedItems` and
-`contentTruncated`. These are informational coverage indicators, not errors,
-retry advice or evidence that a casual request is unfinished. `gatewayTruncated`
-carries the gateway's `has_more`, including records trimmed beyond the
-requested count. A full requested window, including the default of 50, remains
-conservatively marked `truncated` even when `has_more` is false. `requested`
-is the count asked for. An unset flag does not prove an exhaustive listing. For a casual
-answer, label the bounded recent sample without dumping technical flags or
-trying to retrieve everything. Explain the flags if the user asks whether more
-exist or requests completeness. Content is bounded to 8 KiB per item and 128 KiB per listing.
-Malformed continuation metadata (a `count` that differs from the page's
-items, a non-boolean `has_more`, or a cursor inconsistent with `has_more`) and
-failed responses produce errors, not empty success-shaped fallbacks.
-
-The tool exposes no cursor or offset of its own. If the user requests broader
-coverage, supported larger counts or narrower filters can help, but listing
-stops at 200 records and no complete export is promised. The skill/server instructions direct
-unsupported requests back to the user rather than reading plugin internals,
-credential files, other service code or OpenAPI endpoints.
-
-The 0.13.1 conversational check used native Claude 2.1.274 with the packaged
-runtime and an isolated synthetic gateway. Both "get my memories" and "show
-some of my memories" made exactly one listing call with no `recent_k`, even
-when the response contained 50 records and `truncated: true`. "Show up to 100
-of my memories" sent one explicit `recent_k: 100` request. This verifies the
-instruction behavior without reading real memories; regression tests remain
-model-free. Version 0.14.0 replaced the omitted count with the default of 50
-and has not repeated this conversational check.
+Agents list memories with the remote `get_memories` tool (`page_size` up to
+50, `cursor`, `memory_types`); the skills say when to follow `next_cursor`.
+The plugin lists memories itself only for the Copilot app canvas, through its
+hook-token client: `GET {gatewayBase}/memories` with optional `memory_types`
+and `include_superseded`, a fixed `page_size` of `min(count, 50)`, following
+`next_cursor` for at most `ceil(count / page_size)` requests (count 1 to 200,
+default 50) and stopping when `has_more` is false. Each cursor is bound to the
+page size, filters, caller authorization and reset generation. Any failed page
+fails the whole listing, and malformed continuation metadata produces an
+error rather than an empty result.
 
 ## Skill commands
 
-The payload skills are `mh-login`, `mh-logout`, `mh-status`, `mh-memory` and
-`mh-show`; each directory and frontmatter name matches. All are available for discovery.
+The payload skills are `mh-login`, `mh-logout`, `mh-status`, `mh-memory`,
+`mh-show` and `use-memory`; each directory and frontmatter name matches.
+`use-memory` asks the agent to call `search_memories` before starting a task, as
+`main` did, so recall is visible as a tool call besides the hooks' injected context. All are available for discovery.
 Login/logout descriptions and instructions require an explicit user request;
-the skill itself does not pre-approve its MCP tools. Neither the Claude-style
+the skill itself does not pre-approve its MCP tools. `mh-login` calls the remote
+`enroll_hook_capture` tool in Copilot and runs `runtime/auth.mjs login` in Claude
+Code and Codex; `mh-logout` and `mh-status` run `runtime/auth.mjs`, so the host's
+shell approval applies to them. Neither the Claude-style
 `disable-model-invocation` flag nor Codex-only implicit-invocation metadata is
 shipped. Host MCP approval remains the executable-action gate.
 
 Claude Code invokes plugin skills as `/memory-house:mh-login` (and the same
 prefix for the other names). The verified Copilot CLI registers the same
 `/memory-house:mh-login` command name; the app's picker is authoritative for its
-version. Cursor
-selects `mh-login` from its `/` picker. The tested Codex 0.154.0 plugin loader
+version. The tested Codex 0.154.0 plugin loader
 registers `memory-house:mh-login`; mention `$memory-house:mh-login`
 or select it through `$`/`/skills`. The same substitutions apply to logout,
 status, memory and show. ChatGPT desktop's skill picker uses `@`; exact Codex desktop
@@ -392,8 +375,7 @@ Memory House tools, sign-in or sign-out.
 Invocation references:
 [Claude plugin namespace](https://code.claude.com/docs/en/plugin-marketplaces),
 [Copilot skill invocation](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills#using-agent-skills),
-[Codex and ChatGPT skill invocation](https://learn.chatgpt.com/docs/build-skills),
-[Cursor skill picker](https://cursor.com/docs/skills).
+[Codex and ChatGPT skill invocation](https://learn.chatgpt.com/docs/build-skills).
 
 ## Copilot app canvas
 
@@ -431,7 +413,10 @@ memories then appear by node ID. The tree lists the personal scope, then the
 reach nodes depth-first by name (including nodes with no memories), then node
 scopes missing from reach. AMT hides promoted copies the caller cannot see, so
 listing pages may be sparse. The limit (default 200) bounds the newest memories
-loaded, not each node.
+loaded, not each node. A promoted copy's card shows where it came from, the user
+whose memory started the promotion, and why it was promoted, read from the
+memory's `metadata` (or from the separate `promotion` summary that AMT sent before
+REST returned whole records).
 
 **Import.**
 
@@ -471,7 +456,7 @@ headers. Only one import runs at a time. Sign-in failures return 401
 `not_signed_in`. Other plugin errors return their safe code and message, never
 gateway text.
 
-The 0.8.1 canvas's `complete_signin` action (replaced by `memory_login`) and its
+The 0.8.1 canvas's `complete_signin` action (replaced by `mh-login`) and its
 `forget_memory` action (0.14.0 has no forget tool) are not carried over.
 
 ## Developer-only build and checks
@@ -489,11 +474,13 @@ npm run check:publisher
 
 `plugin/runtime/` is intentionally **not gitignored**. Publish its generated
 JavaScript, `THIRD_PARTY_NOTICES.txt`, and `manifest.json` together with the
-native payload and the four root catalogs.
-The runtime contains bundled MSAL and the official MCP SDK, so a fresh cached
-installation needs no `node_modules`, unpublished npm package, lifecycle script,
-network dependency installer, or files outside the installed root. A local
-Node.js 20+ executable is still required by the host.
+native payload and the three root catalogs.
+The runtime holds the hooks, the canvas and the sign-in helper. It bundles
+MSAL for the helper's Microsoft sign-in, but no MCP SDK, because the MCP server
+is remote. A fresh cached installation needs no `node_modules`, unpublished npm
+package, lifecycle script, network dependency installer, or files outside the
+installed root. A local Node.js 20+ executable is still required for the hooks
+and helper.
 
 Dependencies and the npm lockfile live only in the repository's `.maintainer/`,
 outside the payload. The installed plugin contains no `package.json`,
@@ -507,18 +494,24 @@ preserves dependency license texts, records source/package/lock hashes, and
 refuses to overwrite unknown or modified runtime files. There are no binary
 Node runtimes or platform-specific native npm modules in the package.
 
-Tests reconstruct fresh repository-shaped snapshots with four root catalogs
-and the exact payload inventory under `plugin/`. They exercise actual SDK
-initialize/list/call flows, search/insertion, synthetic MSAL PKCE + authenticated
-enrollment, shared credentials/recall, hook discovery/isolation, and command
-execution without source `node_modules`. The available Claude CLI strictly validates and installs the payload and root catalog
-in an isolated fake profile. The available Copilot CLI also registers the native
-catalog and installs its payload in an isolated profile. The available
-Codex CLI installs the same snapshot and asserts that all three hooks are
-discovered as plugin-scoped and untrusted beside the legacy Copilot root, and
-that native MCP startup returns all six tools rather than an initialization error.
-These tests do not sign in, grant hook trust or start a model session. Native
-discovery and protocol fixtures are not substitutes for live capture testing.
+Tests reconstruct fresh repository-shaped snapshots with three root catalogs
+and the exact payload inventory under `plugin/`. They exercise the native
+hook commands for each app, including sign-in through the enrollment hook
+(the code never appears in hook output), the bundled Microsoft sign-in helper
+against synthetic Entra endpoints, both header launchers (Codex's with only
+`HOME` and `PATH`), shared credentials, recall and capture, and command
+execution without source `node_modules`, all against a loopback gateway
+fixture. The available Claude CLI strictly validates and installs the payload
+and root catalog in an isolated fake profile, then connects the remote server
+with the hook token through its header helper. The available Copilot CLI
+registers the native catalog, installs its payload and loads the remote server.
+The available Codex CLI installs the same snapshot and asserts that all four
+hooks are discovered as plugin-scoped and untrusted beside the legacy Copilot
+root, and that it registers the remote server; its helper can't authenticate
+against the plain-HTTP fixture because Codex withholds the fixture's loopback
+allowance. These tests do not complete Copilot's MCP sign-in, grant hook trust
+or start a model session. Native discovery and protocol fixtures are not
+substitutes for live capture testing.
 
 `scripts/package-files.mjs` defines the **enforced payload inventory**.
 Build and bundle checks reject extra files, empty directories, and links inside
@@ -532,14 +525,9 @@ tracked repository before pushing and must never publish credentials.
 The 0.13.0 payload contains 32 publisher files after removing the two
 host-specific auth-skill metadata files. The pre-fix 0.12.4 native Git
 installations verified 33 publisher files and
-their hashes on all four hosts. Claude adds an `.in_use/` bookkeeping
-directory; Cursor adds a `.cache-complete` marker. Neither is shipped by this
+their hashes on each host. Claude adds an `.in_use/` bookkeeping
+directory, which is not shipped by this
 repository. Claude, Codex and Copilot were checked in throwaway profiles.
-Cursor's `CURSOR_CONFIG_DIR`/`CURSOR_DATA_DIR` isolate CLI configuration and
-chat data, but its plugin manager still uses the real HOME plugin registry/cache.
-A fully fake HOME lacked marketplace authentication, so that installation used
-the existing native provider credentials and real plugin cache without copying
-tokens. This is not claimed to be a fully isolated Cursor profile installation.
 
 Copilot's event log can still be flushing when its stop hook fires. The adapter
 waits up to one second for the final transcript text, then makes at most one
@@ -559,7 +547,3 @@ not local changes. Publish this branch only when separately authorized; do not
 claim that adding the live URL installs uncommitted code. Branch-pinned testing
 can use the host's supported ref selector after the branch is pushed (for
 example Copilot's `owner/repo#ref` or Codex's `--ref`).
-
-The Cursor native catalog is for an approved Git-backed team marketplace.
-Teams/Enterprise policies and public marketplace review remain platform
-requirements, not code features this repository can grant.

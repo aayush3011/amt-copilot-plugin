@@ -6,5 +6,5 @@
   "repository": "https://github.com/aayush3011/amt-copilot-plugin",
   "license": "MIT",
   "hooks": "./.claude/plugin-hooks.json",
-  "mcpServers": "./.claude/mcp.json"
+  "mcpServers": "./mcp.json"
 }

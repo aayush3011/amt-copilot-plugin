@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "memory-house": {
-      "command": "node",
-      "args": ["${CURSOR_PLUGIN_ROOT}/runtime/server.mjs"]
-    }
-  }
-}

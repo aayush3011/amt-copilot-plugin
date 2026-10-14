@@ -98,12 +98,18 @@ export async function mockGateway(t, options = {}) {
       return send(204);
     }
     if (path === "/inference/memory/mcp/") {
-      if (req.headers.authorization !== "Bearer fixture-entra") return send(401, { error: "unauthorized" });
+      // Like the gateway: an Entra token, or the plugin's hook token sent by Claude and Codex header helpers.
+      const hookToken = req.headers.authorization?.replace(/^HookToken /, "");
+      if (req.headers.authorization !== "Bearer fixture-entra" && !state.accessTokens.has(hookToken)) {
+        return send(401, { error: "unauthorized" });
+      }
       if (body?.method === "notifications/initialized") return send(202);
       let result;
       if (body?.method === "initialize") {
         result = { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } };
         res.setHeader("Mcp-Session-Id", "fixture-session");
+      } else if (body?.method === "tools/list") {
+        result = { tools: ["search_memories", "enroll_hook_capture"].map(name => ({ name, inputSchema: { type: "object" } })) };
       } else if (body?.method === "tools/call" && body?.params?.name === "enroll_hook_capture") {
         result = { content: [{ type: "text", text: JSON.stringify({ enrollment_code: "fixture-enrollment" }) }] };
       } else return send(400, { error: "unsupported_rpc" });

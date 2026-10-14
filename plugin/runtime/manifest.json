@@ -3,54 +3,47 @@
   "version": 1,
   "esbuildVersion": "0.28.2",
   "sources": {
-    ".maintainer/package-lock.json": "2c862686c30cba62a64307f06dacc40333248d712ebea5b85241a498e7716da9",
-    ".maintainer/package.json": "b210e9981c9c2c34a7b36934ea6f52fb6114319ee729f700349523aaefba6c10",
+    ".maintainer/package-lock.json": "a2fffd688f482c22cc7875d7cae8b46cdad2c130a54097cd4745672f3cc72080",
+    ".maintainer/package.json": "094af98d5ee2b6167b44c357819ffbf6c38933ad00c75920c16abfb7428c96b3",
     ".maintainer/register.mjs": "56f7d079e26c54dc99798b521158cf109d8e40a73ad134a520af65abc901f6b5",
     ".maintainer/resolve.mjs": "b05b0bc024da1a7a9bbdf899305dafc98e54120f7d6ac8eb725aa0e7a209cdd5",
-    "package.json": "a56d3d642e4c8bdaa5d3b7181959891aa220c15b3a2c71010cd245a18e7651b4",
-    "scripts/build.mjs": "84d1e1cccc914b0a15453579c60521e3ddaf0e578a3a84ccf18bf58634be8d0a",
-    "scripts/package-files.mjs": "4ec0f3942b4d9945fa61cb7773394f1fc938139bf0040ab8bb1798d9fcf3873d",
-    "src/auth.mjs": "6555749ad67d832909c26e72023560d01c77c2c2d52af4bd26f72915198fab31",
-    "src/browser.mjs": "d643225224deaa106a17b646d4edce8cedd21d1883f64a417a6cde93f5ef2b03",
-    "src/canvas/data.mjs": "f5a4e7ae3aa573d5e8dc5a083e0fdc7c5ce04835ac0a88dbf4a69a9ce85ba85c",
+    "package.json": "04e9946e441d39e0b22106189faf96f9d32e2a2f3b1a3094121a5e950b741988",
+    "scripts/build.mjs": "e6bae71133933645313f5f5e719781f876ed1152e6c5946b748718ba85e16a76",
+    "scripts/package-files.mjs": "88ac7e6593c72e791ecb72d0b35a5973eeb53beb8f3411f291dc75a6522800ae",
+    "src/auth.mjs": "c04f75dcf57fb4cf521902a683d513af3502ce576f5e6aa06fbf54dea18b23b4",
+    "src/browser.mjs": "45ef8b301a816e05454d6dcee2f8f9ed92c7fc3c3515b0f5a26fb683c0e220ed",
+    "src/canvas/data.mjs": "95d8ca7521aae03807c3c23e7e9f28ab029da2120a4480694ff7accd47010a6a",
     "src/canvas/importers.mjs": "fc1395b1d8f296ce669aac6dfb5eaffbe5090a6757a5f08b4d0d63655d23c086",
     "src/canvas/index.mjs": "5d75115bb3d20d4e4b31183f34fb241aafe457978579699899ff7bb5bb0e5673",
     "src/canvas/panel.mjs": "537cb8f93da88e8c44006b4ce47267487df08579e49141e202ced3b4831c85a4",
-    "src/client.mjs": "ce2d205017ff5c43d1cc8574343dccbe5a625e32f3322d4c8caa471b1c07b4eb",
+    "src/client.mjs": "c3a056625253beb32d5cdabfe5754b84cf498c9e97f3aac2960d0f55dc9e4931",
     "src/config.mjs": "4f99f426741139e62b70e91e7db3924f4ed9403f9ab9f442eb63bff173c005f6",
     "src/entra.mjs": "85d446d7ac96b7ae7ea0cb34dfc282bb894de3ba809ceac9a96ec981619488df",
     "src/errors.mjs": "3c5bb091ce0f32ff4efb2a79a0519a1c24665a8fa3afad00ba8549bc43cabec3",
-    "src/hook.mjs": "535501546379de0d411e94cc90138429fe835fb23a62f249028af9d294a9f143",
-    "src/hooks.mjs": "8375812bfe6843e9cafee085ae6cb5eef50ef06242b9e367fde60e727906d326",
-    "src/mcp.mjs": "411f0822d6ba59e81bbdf4e83121487561d00289b52bbb3a85ab1e8a6657ea4d",
-    "src/server.mjs": "e55899cd76017f79ed0f546409f7524fdcd14f0549cd30b232f41a6c25200f1f",
+    "src/hook.mjs": "3afb24382e5cf6b3d325d220553353ff42a604786bdf7aab7734644c816747c3",
+    "src/hooks.mjs": "23bdaeaeb7f5fc48f1d5eab3e953dc47eccbbe2feb3797d504c308991164f09b",
     "src/state.mjs": "d29df3de8168c92d42427d7983786337f06d1771c6015794b103cfb4ade672bb"
   },
   "packageFiles": {
     "plugin.json": "590bb6c2a4c8a2d0dc3a8e63ebe2e8dcd9795bd0a0a9b0ce088c222a43583e13",
-    "mcp.json": "1b949eff49a40a51a18a676be1b847904e098b0fabfafb081331dfad44d3647b",
+    "mcp.json": "237364200267c7cbbbd632855891e0af0588d034767fc944a01f41f15fa26b25",
     "deployment.json": "07bb9170357aaa3dabad47428d6c6639c2a74cc57628930cc4afe1b55a172f3a",
     "LICENSE": "8154681626f8e050b1daf064ac21aca14202046fb653c24c143a14103ca42d7d",
-    ".claude-plugin/plugin.json": "3efa31790bb3f0b05512bab741e8e4108a86f2555abe623ffd850e80831f360f",
-    ".codex-plugin/plugin.json": "996b056e6e7883fe1ceccdd9b4a0709d2d662d274f8b74912db9d9ac7983edf7",
-    ".cursor-plugin/plugin.json": "6901268677e4e40e1cab6395d31d4ac70214b45d2a9a609d58403e388ba79f9e",
+    ".claude-plugin/plugin.json": "33908b444187d81a9d9ae2cdede79c7dfb60d2033d8f66f3dd358e80b5adc254",
+    ".codex-plugin/plugin.json": "2ceb2830c2b4b79f89a16a46d11a7ea04b869967c99e53af5f92056a07942219",
     ".claude/entry.mjs": "f3743751460879c70e323a3247d3d3000e5b2725440f77db68f9867b83bdeb05",
-    ".claude/mcp.json": "ee1b6d09c1e646b08f47cde9969c286e15afca18cea029b6e2628cd1c74a36d7",
-    ".claude/plugin-hooks.json": "9429f2533c27264dc2a2bafa85d4d8b084416b97b0521f8af889d1e07eb97a83",
+    ".claude/plugin-hooks.json": "52091a3c54d4060b323a4d3b3c99cd7bf1e543c2514b8a0224eb7516f46ed74f",
     ".codex/entry.mjs": "d17800bd2adbf18f3323404a107b10f8c0fd5093b241be02f0391bb74dff526d",
-    ".codex/mcp.json": "4d86eb2165d593916e124f034891661f25b835f7a049c1698678656352c6f5fc",
-    ".codex/plugin-hooks.json": "e4fd119cda425af7c54ce69d7370b8846afc4c04c8c741df5a01730d5d90f118",
-    ".cursor/entry.mjs": "c289cd060356250ef83336cae7eee436a730fb0e8817379e553b84fb6049d4dc",
-    ".cursor/mcp.json": "3c8a19af478d9c15e7269ef168063a96cd3947e91988ff0e873e3e265a7fb5f5",
-    ".cursor/plugin-hooks.json": "a2df62d99ba6894654ca52aed8090d97c112b0ed77d925f1f5505ebef8e3d5a6",
+    ".codex/plugin-hooks.json": "352bec0d5199f7941f9649dc71433cfbba6850de293c363b3a21c39c7a127b20",
     ".github/entry.mjs": "13d0d8563e5305038be18cfb276883c1d5e2ddbdf8177ec25c777a897ba005fa",
     ".github/plugin-hooks.json": "12288dc1c211ae91aaf4dcfc8a5cc250f3333993add9c48819ff7091844ebe93",
     "com.github.copilot/extensions/memory-canvas/extension.mjs": "2dee19e651438bb64cf0168a3982701d7693017b6c5d7ecd70dd646a18600ece",
-    "skills/mh-memory/SKILL.md": "60b911e124935b3d6ea281bbde662913b32eeb6ca9e31f13ef202d5dbbaba688",
-    "skills/mh-login/SKILL.md": "fe60c322af598c7cc4a62d463464d34ea4594cf5cdf868c3c1e8c61c8e3b9ebf",
-    "skills/mh-logout/SKILL.md": "db6d972475f23e101d5e97c008879c5567df952d8a266cfe83d9cda4a28b1419",
-    "skills/mh-status/SKILL.md": "b388c82dfe5d70287ebf583b17ea6863b0414a3cfdd02f12e2828bc49c4d0205",
-    "skills/mh-show/SKILL.md": "94b74b8a113e8f0a0bdcc9d036972de31ccdfc1a70da70cd1870c898550eaa9a"
+    "skills/mh-memory/SKILL.md": "48bcdaf026d1e50ad273de671107b69e2b8121a061975c4d4a063c0c426742fa",
+    "skills/mh-login/SKILL.md": "097ca926f0295449f97b5eafbfc146dd24c645669669318d477764a49fd8965d",
+    "skills/mh-logout/SKILL.md": "5c11a91ed18a621ceccf8c931d0a47fbb6a541f707f62561f9f1835bbbe1dd95",
+    "skills/mh-status/SKILL.md": "822850b0d5b001ba3225df151223272ba856d2abf62d611f2522f3dd9fe424c9",
+    "skills/mh-show/SKILL.md": "a553a8210f0fcc38e0f2fd69b057c95a5145da9bbbca57fc093ce92618224dd3",
+    "skills/use-memory/SKILL.md": "c49a734200c3f894b177aa7aabf9f9cefd2aff220217796eba5d49c46aa38506"
   },
   "dependencies": [
     {
@@ -64,21 +57,6 @@
       "license": "MIT"
     },
     {
-      "name": "@modelcontextprotocol/sdk",
-      "version": "1.30.0",
-      "license": "MIT"
-    },
-    {
-      "name": "ajv",
-      "version": "8.20.0",
-      "license": "MIT"
-    },
-    {
-      "name": "ajv-formats",
-      "version": "3.0.1",
-      "license": "MIT"
-    },
-    {
       "name": "buffer-equal-constant-time",
       "version": "1.0.1",
       "license": "BSD-3-Clause"
@@ -87,21 +65,6 @@
       "name": "ecdsa-sig-formatter",
       "version": "1.0.11",
       "license": "Apache-2.0"
-    },
-    {
-      "name": "fast-deep-equal",
-      "version": "3.1.3",
-      "license": "MIT"
-    },
-    {
-      "name": "fast-uri",
-      "version": "3.1.8",
-      "license": "BSD-3-Clause"
-    },
-    {
-      "name": "json-schema-traverse",
-      "version": "1.0.0",
-      "license": "MIT"
     },
     {
       "name": "jsonwebtoken",
@@ -167,28 +130,16 @@
       "name": "semver",
       "version": "7.8.5",
       "license": "ISC"
-    },
-    {
-      "name": "zod",
-      "version": "4.6.5",
-      "license": "MIT"
-    },
-    {
-      "name": "zod-to-json-schema",
-      "version": "3.25.2",
-      "license": "ISC"
     }
   ],
   "outputs": {
-    "THIRD_PARTY_NOTICES.txt": "bc56776c954d8cd5f59bb89fb67386d70a7854bc9be0958430924fc81721f053",
-    "auth.mjs": "d9f377eefa7c21318c6a31f695f796a3355d60953c0e3abbda921554bd1121b3",
-    "canvas.mjs": "38089d4e591e9a348a48a37a2af134d07118509ab2f9853ecf4b1a2d0598b484",
-    "hook.mjs": "3ba31fac891d0d89a43abedc0fbb47dab7e3fc2c3f033a71ee62c1ad3766fbbe",
-    "server.mjs": "b0d6f400a86c1326d3aace071e54552f1e9d00e6343ec26172820d2b2f1e0fd3",
+    "THIRD_PARTY_NOTICES.txt": "989aa83ec39e7318810a3d624a0dbad5c646c7f557fb6138d3f224913a821fd0",
+    "auth.mjs": "0899e7861a940c74a23bde0fcf884a3f29d077d647dfe1bf51078cf530a54439",
+    "canvas.mjs": "719ad2ee8b6237e96bad3ac09737e0f1116d1c0b1011c05b9a8acae5f8b19f02",
+    "hook.mjs": "c58798f58fc0a2fc449f222fbb7001cc8bf7912f02f7bbcac3bd3b2f03c1820a",
     "shared-6K7TCUKU.mjs": "588c17ff28b30f2447c8a1cedeec5cda4b43e34ee96bd0c8a7c2e38effc7581d",
-    "shared-DHT4ZWFY.mjs": "07eb2b78e3e67b7a8e4eaffdc088ff29e2fd5383927151e8e3a8628785c1e5d7",
-    "shared-NCUF5LPZ.mjs": "342ba212605ef7d9ad5cdd8eb70634b49bbac7eb3904fc444f7bc047dd2ca074",
-    "shared-NXRBCL7V.mjs": "e9c99ca2205ce137882ab715f12f7d7b7ff6bb4bb460933280afda323523e43b",
-    "shared-Y5ZLQF6P.mjs": "4f30a6c10a865fae614c72a67a26bf1a179ebf9257fd9ce4c02a9ce78e78ed55"
+    "shared-HLZQZ6AD.mjs": "fa1969e8d8081b327de93e437a7dfae01cf33743466081864260fed1a419e9d7",
+    "shared-N734DJOE.mjs": "c84fd336951fba0d89547705b36d153a086751b08472f6e878210acbc54f27f7",
+    "shared-NCUF5LPZ.mjs": "342ba212605ef7d9ad5cdd8eb70634b49bbac7eb3904fc444f7bc047dd2ca074"
   }
 }

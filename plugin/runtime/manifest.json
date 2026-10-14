@@ -3,11 +3,11 @@
   "version": 1,
   "esbuildVersion": "0.28.2",
   "sources": {
-    ".maintainer/package-lock.json": "ee945e9538c167174349bdbd526278c8fa5d2eaf865ada06057d635ca0c49ac5",
-    ".maintainer/package.json": "fac039917b820af02b028261a8684e8fabf5b27351c3dd8801cd8bf81e4d7f52",
+    ".maintainer/package-lock.json": "7f6497664c95581a204167043cff0adefe71c1b9f2e04298ecbd1f693a2cf186",
+    ".maintainer/package.json": "99aee10253a402ff86ebc79e3bc4b33b3ac7e166a9782b0678c11b495eff3eba",
     ".maintainer/register.mjs": "56f7d079e26c54dc99798b521158cf109d8e40a73ad134a520af65abc901f6b5",
     ".maintainer/resolve.mjs": "b05b0bc024da1a7a9bbdf899305dafc98e54120f7d6ac8eb725aa0e7a209cdd5",
-    "package.json": "2f6051d5f14aed820d4107dedcd413d0443edc884dc79bef389426ea49207bda",
+    "package.json": "1d2e1705937d079ed2a4e2b9d5c071529784a029e90e9a9e301cd0e096311fc3",
     "scripts/build.mjs": "e6bae71133933645313f5f5e719781f876ed1152e6c5946b748718ba85e16a76",
     "scripts/package-files.mjs": "88ac7e6593c72e791ecb72d0b35a5973eeb53beb8f3411f291dc75a6522800ae",
     "src/auth.mjs": "c04f75dcf57fb4cf521902a683d513af3502ce576f5e6aa06fbf54dea18b23b4",
@@ -21,16 +21,16 @@
     "src/entra.mjs": "85d446d7ac96b7ae7ea0cb34dfc282bb894de3ba809ceac9a96ec981619488df",
     "src/errors.mjs": "3c5bb091ce0f32ff4efb2a79a0519a1c24665a8fa3afad00ba8549bc43cabec3",
     "src/hook.mjs": "3afb24382e5cf6b3d325d220553353ff42a604786bdf7aab7734644c816747c3",
-    "src/hooks.mjs": "1c341e019e44dda9126286232744454f26530cdfac9fd41545cde18e40bdc4ed",
-    "src/state.mjs": "d29df3de8168c92d42427d7983786337f06d1771c6015794b103cfb4ade672bb"
+    "src/hooks.mjs": "f6bb8d2abf24bdd642dd5e58d09bfcf0025d2ad0bd5585ea68b07a29c486e97c",
+    "src/state.mjs": "eafeb14829ac7e4654b4175428dc1a523520031bb9637fd40c0d86c5f5c929c9"
   },
   "packageFiles": {
-    "plugin.json": "d75ec0ce1f229847c05e79fe6d082a5e3c70d4c558d58ba015be35ab9f751436",
-    "mcp.json": "3a43cded37610a675a4862a8423c2dc63c07771b36ec446d382457fc4a780249",
+    "plugin.json": "ef5caef7b85f3b3dd41cccfcc8f0d51b78899f5b686df25027cf7c3adf4aaa54",
+    "mcp.json": "ad49782f78293cb6e1043bb61a445723b9430fb98981b1ddb6dd39f6e5e37257",
     "deployment.json": "07bb9170357aaa3dabad47428d6c6639c2a74cc57628930cc4afe1b55a172f3a",
     "LICENSE": "8154681626f8e050b1daf064ac21aca14202046fb653c24c143a14103ca42d7d",
-    ".claude-plugin/plugin.json": "c12e04569a4848c0b4d95b67b36be9c6f08871356e337fd1afb1e9649fd49e1e",
-    ".codex-plugin/plugin.json": "808bae334fcc23d653cf46e6d0629b3fb71aae3ff16e289dd89d6982bb144c34",
+    ".claude-plugin/plugin.json": "f609eb688344670e19296898c59a28945645f52e6d9f9334f865c3dd6696f181",
+    ".codex-plugin/plugin.json": "0fdd8ffda1e16134fb2ac34f8c88faac2620ff3f6a3612e8fe420a5eb2971635",
     ".claude/entry.mjs": "f3743751460879c70e323a3247d3d3000e5b2725440f77db68f9867b83bdeb05",
     ".claude/plugin-hooks.json": "52091a3c54d4060b323a4d3b3c99cd7bf1e543c2514b8a0224eb7516f46ed74f",
     ".codex/entry.mjs": "d17800bd2adbf18f3323404a107b10f8c0fd5093b241be02f0391bb74dff526d",
@@ -134,12 +134,12 @@
   ],
   "outputs": {
     "THIRD_PARTY_NOTICES.txt": "989aa83ec39e7318810a3d624a0dbad5c646c7f557fb6138d3f224913a821fd0",
-    "auth.mjs": "0899e7861a940c74a23bde0fcf884a3f29d077d647dfe1bf51078cf530a54439",
-    "canvas.mjs": "eca1f0a8c18f4864ea3fa608f83b01f9caac639fefd514d708448fadf80c0a4a",
-    "hook.mjs": "9e98c0355a2b2b41e5df43c18deb72c171aaf76c20894d20cdec778c36bda5ca",
+    "auth.mjs": "d4a45cad1eaec59a946ca33bc5ebf211c6b2dc8c41cbbacd8fc4a339ff43b261",
+    "canvas.mjs": "2d68e330e2ac2d08c5c838a91f6cb2b0aa38d4d8313c124cda3f77ce22b21497",
+    "hook.mjs": "b4c655933d62544e5f1419480dbd738193edc8d3a45238719df8c2d8c174fbc3",
     "shared-6K7TCUKU.mjs": "588c17ff28b30f2447c8a1cedeec5cda4b43e34ee96bd0c8a7c2e38effc7581d",
-    "shared-AOZ6S7PH.mjs": "e60c796734c92973f71d233f20d7c2cc1a1af7e272cda40a8468c9d80a6f7fde",
-    "shared-N734DJOE.mjs": "c84fd336951fba0d89547705b36d153a086751b08472f6e878210acbc54f27f7",
+    "shared-BAUMEJ2Z.mjs": "66da94b38fe2b64fda8330702ccba530f79e12c1aba1b4d837a8d0909c13e269",
+    "shared-HS26EMRW.mjs": "728030dc2cc5ef4eb56e07f0c0f109cc1dd1a45a5dc3c78ebc527b1fb444c742",
     "shared-NCUF5LPZ.mjs": "342ba212605ef7d9ad5cdd8eb70634b49bbac7eb3904fc444f7bc047dd2ca074"
   }
 }

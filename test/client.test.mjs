@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
 import { createClient } from '../src/client.mjs';
+import { sameFile } from '../src/state.mjs';
 import { fixtureDeployment } from './helpers/deployment.mjs';
 
 const epoch = 1_800_000_000_000;
@@ -410,6 +411,16 @@ test('a replaced lock owner is not removed during cleanup', async t => {
   });
   await assert.rejects(f.client.redeem('fake-enrollment'), { code: 'LOCK_OWNERSHIP_LOST' });
   assert.equal(JSON.parse(await readFile(join(f.config.lockPath, 'owner.json'), 'utf8')).nonce, 'replacement');
+});
+
+test('file identity ignores the volume serial only on Windows', () => {
+  // Node before 22.17 on Windows 11 24H2: a path reports the 64-bit volume serial, an open handle the 32-bit one.
+  const byPath = { ino: 42, dev: 0x1a2b3c4d5e6f };
+  const byHandle = { ino: 42, dev: 0x3c4d5e6f };
+  assert.equal(sameFile(byPath, byHandle, 'win32'), true);
+  assert.equal(sameFile(byPath, byHandle, 'linux'), false);
+  assert.equal(sameFile(byPath, { ...byHandle, ino: 43 }, 'win32'), false);
+  assert.equal(sameFile(byPath, { ...byPath }, 'darwin'), true);
 });
 
 test('malformed credential caches never echo cached secrets', async t => {

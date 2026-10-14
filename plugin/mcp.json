@@ -4,7 +4,7 @@
       "type": "http",
       "url": "https://reranker-api-h2b5czhkfkcphnf4.westus3-01.azurewebsites.net/inference/memory/mcp/",
       "headersHelper": "node -e \"const p=require('node:path').join(process.env.CLAUDE_PLUGIN_ROOT,'runtime/auth.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" -- headers",
-      "http_headers_helper": "node -e \"const path=require('node:path');const home=process.env.CODEX_HOME||path.join(require('node:os').homedir(),'.codex');const p=['0.14.1','local'].map(v=>path.join(home,'plugins','cache','memory-house-marketplace','memory-house',v,'runtime','auth.mjs')).find(f=>require('node:fs').existsSync(f));if(!p){process.stdout.write('{}')}else{process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)}\" -- headers"
+      "http_headers_helper": "node -e \"const path=require('node:path');const home=process.env.CODEX_HOME||path.join(require('node:os').homedir(),'.codex');const p=['0.14.2','local'].map(v=>path.join(home,'plugins','cache','memory-house-marketplace','memory-house',v,'runtime','auth.mjs')).find(f=>require('node:fs').existsSync(f));if(!p){process.stdout.write('{}')}else{process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)}\" -- headers"
     }
   }
 }

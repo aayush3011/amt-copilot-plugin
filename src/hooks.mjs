@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, opendir, unlink } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { sameFile } from './state.mjs';
 
 export const HOOK_LIMITS = Object.freeze({
   captureBytes: 32 * 1024,
@@ -320,7 +321,7 @@ async function safeOpenFile(path, flags, mode) {
     const stat = await handle.stat();
     const current = await lstat(path);
     if (!stat.isFile() || stat.nlink !== 1 || current.isSymbolicLink()
-      || current.ino !== stat.ino || current.dev !== stat.dev) throw new Error('unsafe-file');
+      || !sameFile(current, stat)) throw new Error('unsafe-file');
     return { handle, stat };
   } catch (error) {
     await handle.close();
@@ -557,7 +558,7 @@ async function acquireLock(path, now) {
     await handle.close().catch(() => {});
     try {
       const current = await lstat(path);
-      if (current.ino === stat.ino && current.dev === stat.dev) await unlink(path);
+      if (sameFile(current, stat)) await unlink(path);
     } catch {}
   };
   try {

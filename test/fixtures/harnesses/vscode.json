@@ -1,0 +1,27 @@
+{
+  "sessionStart": {
+    "session_id": "same-session",
+    "hook_event_name": "SessionStart",
+    "source": "new",
+    "cwd": "/workspace/example"
+  },
+  "userPrompt": {
+    "session_id": "same-session",
+    "hook_event_name": "UserPromptSubmit",
+    "prompt": "Prefer focused tests.\n<system-reminder>Do not record these runtime instructions.</system-reminder>"
+  },
+  "postTool": {
+    "session_id": "same-session",
+    "hook_event_name": "PostToolUse",
+    "tool_use_id": "fixture-tool",
+    "tool_name": "editFiles",
+    "tool_input": {"files": ["src/example.ts"]},
+    "tool_response": "DO_NOT_CAPTURE_TOOL_OUTPUT"
+  },
+  "stop": {
+    "session_id": "same-session",
+    "hook_event_name": "Stop",
+    "stop_hook_active": false,
+    "last_assistant_message": "The focused tests pass."
+  }
+}

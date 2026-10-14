@@ -1,0 +1,19 @@
+{
+  "sessionStart": {
+    "session_id": "same-session",
+    "hook_event_name": "SessionStart",
+    "source": "startup"
+  },
+  "userPrompt": {
+    "session_id": "same-session",
+    "hook_event_name": "UserPromptSubmit",
+    "turn_id": "turn-1",
+    "prompt": "Prefer focused tests.\n<system_reminder>Runtime-only instructions.</system_reminder>"
+  },
+  "stop": {
+    "session_id": "same-session",
+    "hook_event_name": "Stop",
+    "turn_id": "turn-1",
+    "last_assistant_message": "The focused tests pass."
+  }
+}

@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"Previous user turn."}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Previous assistant response."}]}}
+{"type":"user","message":{"role":"user","content":"Run the focused tests."}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"PRIVATE_REASONING","text":"PRIVATE_REASONING"},{"type":"tool_use","id":"fixture-tool","name":"Bash","input":{"command":"DO_NOT_CAPTURE_TOOL_ARGUMENTS"}},{"type":"text","text":"The focused tests pass."}]}}

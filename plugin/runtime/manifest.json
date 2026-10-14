@@ -1,0 +1,145 @@
+{
+  "producer": "memory-house-root",
+  "version": 1,
+  "esbuildVersion": "0.28.2",
+  "sources": {
+    ".maintainer/package-lock.json": "a2fffd688f482c22cc7875d7cae8b46cdad2c130a54097cd4745672f3cc72080",
+    ".maintainer/package.json": "094af98d5ee2b6167b44c357819ffbf6c38933ad00c75920c16abfb7428c96b3",
+    ".maintainer/register.mjs": "56f7d079e26c54dc99798b521158cf109d8e40a73ad134a520af65abc901f6b5",
+    ".maintainer/resolve.mjs": "b05b0bc024da1a7a9bbdf899305dafc98e54120f7d6ac8eb725aa0e7a209cdd5",
+    "package.json": "04e9946e441d39e0b22106189faf96f9d32e2a2f3b1a3094121a5e950b741988",
+    "scripts/build.mjs": "e6bae71133933645313f5f5e719781f876ed1152e6c5946b748718ba85e16a76",
+    "scripts/package-files.mjs": "88ac7e6593c72e791ecb72d0b35a5973eeb53beb8f3411f291dc75a6522800ae",
+    "src/auth.mjs": "c04f75dcf57fb4cf521902a683d513af3502ce576f5e6aa06fbf54dea18b23b4",
+    "src/browser.mjs": "45ef8b301a816e05454d6dcee2f8f9ed92c7fc3c3515b0f5a26fb683c0e220ed",
+    "src/canvas/data.mjs": "95d8ca7521aae03807c3c23e7e9f28ab029da2120a4480694ff7accd47010a6a",
+    "src/canvas/importers.mjs": "fc1395b1d8f296ce669aac6dfb5eaffbe5090a6757a5f08b4d0d63655d23c086",
+    "src/canvas/index.mjs": "5d75115bb3d20d4e4b31183f34fb241aafe457978579699899ff7bb5bb0e5673",
+    "src/canvas/panel.mjs": "537cb8f93da88e8c44006b4ce47267487df08579e49141e202ced3b4831c85a4",
+    "src/client.mjs": "c3a056625253beb32d5cdabfe5754b84cf498c9e97f3aac2960d0f55dc9e4931",
+    "src/config.mjs": "4f99f426741139e62b70e91e7db3924f4ed9403f9ab9f442eb63bff173c005f6",
+    "src/entra.mjs": "85d446d7ac96b7ae7ea0cb34dfc282bb894de3ba809ceac9a96ec981619488df",
+    "src/errors.mjs": "3c5bb091ce0f32ff4efb2a79a0519a1c24665a8fa3afad00ba8549bc43cabec3",
+    "src/hook.mjs": "3afb24382e5cf6b3d325d220553353ff42a604786bdf7aab7734644c816747c3",
+    "src/hooks.mjs": "23bdaeaeb7f5fc48f1d5eab3e953dc47eccbbe2feb3797d504c308991164f09b",
+    "src/state.mjs": "d29df3de8168c92d42427d7983786337f06d1771c6015794b103cfb4ade672bb"
+  },
+  "packageFiles": {
+    "plugin.json": "590bb6c2a4c8a2d0dc3a8e63ebe2e8dcd9795bd0a0a9b0ce088c222a43583e13",
+    "mcp.json": "237364200267c7cbbbd632855891e0af0588d034767fc944a01f41f15fa26b25",
+    "deployment.json": "07bb9170357aaa3dabad47428d6c6639c2a74cc57628930cc4afe1b55a172f3a",
+    "LICENSE": "8154681626f8e050b1daf064ac21aca14202046fb653c24c143a14103ca42d7d",
+    ".claude-plugin/plugin.json": "33908b444187d81a9d9ae2cdede79c7dfb60d2033d8f66f3dd358e80b5adc254",
+    ".codex-plugin/plugin.json": "2ceb2830c2b4b79f89a16a46d11a7ea04b869967c99e53af5f92056a07942219",
+    ".claude/entry.mjs": "f3743751460879c70e323a3247d3d3000e5b2725440f77db68f9867b83bdeb05",
+    ".claude/plugin-hooks.json": "52091a3c54d4060b323a4d3b3c99cd7bf1e543c2514b8a0224eb7516f46ed74f",
+    ".codex/entry.mjs": "d17800bd2adbf18f3323404a107b10f8c0fd5093b241be02f0391bb74dff526d",
+    ".codex/plugin-hooks.json": "352bec0d5199f7941f9649dc71433cfbba6850de293c363b3a21c39c7a127b20",
+    ".github/entry.mjs": "13d0d8563e5305038be18cfb276883c1d5e2ddbdf8177ec25c777a897ba005fa",
+    ".github/plugin-hooks.json": "12288dc1c211ae91aaf4dcfc8a5cc250f3333993add9c48819ff7091844ebe93",
+    "com.github.copilot/extensions/memory-canvas/extension.mjs": "2dee19e651438bb64cf0168a3982701d7693017b6c5d7ecd70dd646a18600ece",
+    "skills/mh-memory/SKILL.md": "48bcdaf026d1e50ad273de671107b69e2b8121a061975c4d4a063c0c426742fa",
+    "skills/mh-login/SKILL.md": "097ca926f0295449f97b5eafbfc146dd24c645669669318d477764a49fd8965d",
+    "skills/mh-logout/SKILL.md": "5c11a91ed18a621ceccf8c931d0a47fbb6a541f707f62561f9f1835bbbe1dd95",
+    "skills/mh-status/SKILL.md": "822850b0d5b001ba3225df151223272ba856d2abf62d611f2522f3dd9fe424c9",
+    "skills/mh-show/SKILL.md": "a553a8210f0fcc38e0f2fd69b057c95a5145da9bbbca57fc093ce92618224dd3",
+    "skills/use-memory/SKILL.md": "c49a734200c3f894b177aa7aabf9f9cefd2aff220217796eba5d49c46aa38506"
+  },
+  "dependencies": [
+    {
+      "name": "@azure/msal-common",
+      "version": "16.14.1",
+      "license": "MIT"
+    },
+    {
+      "name": "@azure/msal-node",
+      "version": "6.0.1",
+      "license": "MIT"
+    },
+    {
+      "name": "buffer-equal-constant-time",
+      "version": "1.0.1",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "ecdsa-sig-formatter",
+      "version": "1.0.11",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "jsonwebtoken",
+      "version": "9.0.3",
+      "license": "MIT"
+    },
+    {
+      "name": "jwa",
+      "version": "2.0.1",
+      "license": "MIT"
+    },
+    {
+      "name": "jws",
+      "version": "4.0.1",
+      "license": "MIT"
+    },
+    {
+      "name": "lodash.includes",
+      "version": "4.3.0",
+      "license": "MIT"
+    },
+    {
+      "name": "lodash.isboolean",
+      "version": "3.0.3",
+      "license": "MIT"
+    },
+    {
+      "name": "lodash.isinteger",
+      "version": "4.0.4",
+      "license": "MIT"
+    },
+    {
+      "name": "lodash.isnumber",
+      "version": "3.0.3",
+      "license": "MIT"
+    },
+    {
+      "name": "lodash.isplainobject",
+      "version": "4.0.6",
+      "license": "MIT"
+    },
+    {
+      "name": "lodash.isstring",
+      "version": "4.0.1",
+      "license": "MIT"
+    },
+    {
+      "name": "lodash.once",
+      "version": "4.1.1",
+      "license": "MIT"
+    },
+    {
+      "name": "ms",
+      "version": "2.1.3",
+      "license": "MIT"
+    },
+    {
+      "name": "safe-buffer",
+      "version": "5.2.1",
+      "license": "MIT"
+    },
+    {
+      "name": "semver",
+      "version": "7.8.5",
+      "license": "ISC"
+    }
+  ],
+  "outputs": {
+    "THIRD_PARTY_NOTICES.txt": "989aa83ec39e7318810a3d624a0dbad5c646c7f557fb6138d3f224913a821fd0",
+    "auth.mjs": "0899e7861a940c74a23bde0fcf884a3f29d077d647dfe1bf51078cf530a54439",
+    "canvas.mjs": "719ad2ee8b6237e96bad3ac09737e0f1116d1c0b1011c05b9a8acae5f8b19f02",
+    "hook.mjs": "c58798f58fc0a2fc449f222fbb7001cc8bf7912f02f7bbcac3bd3b2f03c1820a",
+    "shared-6K7TCUKU.mjs": "588c17ff28b30f2447c8a1cedeec5cda4b43e34ee96bd0c8a7c2e38effc7581d",
+    "shared-HLZQZ6AD.mjs": "fa1969e8d8081b327de93e437a7dfae01cf33743466081864260fed1a419e9d7",
+    "shared-N734DJOE.mjs": "c84fd336951fba0d89547705b36d153a086751b08472f6e878210acbc54f27f7",
+    "shared-NCUF5LPZ.mjs": "342ba212605ef7d9ad5cdd8eb70634b49bbac7eb3904fc444f7bc047dd2ca074"
+  }
+}

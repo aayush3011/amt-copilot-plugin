@@ -1,0 +1,6 @@
+{"type":"user.message","data":{"content":"Previous user turn."}}
+{"type":"assistant.message","data":{"content":"Previous assistant response."}}
+{"type":"user.message","data":{"content":"Run the focused tests."}}
+{"type":"assistant.reasoning","data":{"content":"PRIVATE_REASONING"}}
+{"type":"tool.execution_complete","data":{"content":"DO_NOT_CAPTURE_TOOL_OUTPUT","role":"tool"}}
+{"type":"assistant.message","data":{"content":[{"type":"thinking","text":"PRIVATE_REASONING"},{"type":"tool_use","text":"DO_NOT_CAPTURE_TOOL_ARGUMENTS"},{"type":"text","text":"The focused tests pass."}]}}

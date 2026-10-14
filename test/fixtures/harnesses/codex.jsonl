@@ -1,0 +1,7 @@
+{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Run the focused tests."}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","channel":"analysis","content":[{"type":"output_text","text":"PRIVATE_REASONING"}]}}
+{"type":"event_msg","payload":{"type":"agent_reasoning","text":"PRIVATE_REASONING"}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"The focused tests pass."}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"reasoning","text":"PRIVATE_REASONING"},{"type":"output_text","text":"The focused tests pass."}]}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"The focused tests pass."}}

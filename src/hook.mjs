@@ -28,10 +28,11 @@ export async function runHookProcess(harness, { pluginRoot, rootVariable, env = 
     const configured = loadConfig({ env, pluginRoot });
     const config = {
       ...configured, timeoutMs: Math.min(configured.timeoutMs, 5000),
+      authTimeoutMs: Math.min(configured.authTimeoutMs, 5000),
       lockTimeoutMs: Math.min(configured.lockTimeoutMs, 3000),
     };
     output = await runHook({
-      harness, event, payload, env, client: createClient({ config }),
+      harness, event, payload, env, client: createClient({ config, env }),
       logger: message => stderr.write(`${message}\n`),
     });
   } catch {

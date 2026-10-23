@@ -1,23 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { setTimeout as delay } from 'node:timers/promises';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
 import { createClient } from '../src/client.mjs';
 import { sameFile } from '../src/state.mjs';
 import { fixtureDeployment } from './helpers/deployment.mjs';
 
 const epoch = 1_800_000_000_000;
-const pair = (suffix = '1', extra = {}) => ({
-  access_token: `fake-access-${suffix}`, refresh_token: `fake-refresh-${suffix}`,
-  token_type: 'HookToken', expires_in: 3600, refresh_expires_in: 86400, ...extra,
-});
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const absent = path => assert.rejects(access(path), { code: 'ENOENT' });
 
@@ -28,7 +20,7 @@ async function fixture(t, overrides = {}) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const config = loadConfig({ home, deployment: fixtureDeployment(), env: {}, ...overrides });
   const calls = [];
-  let handle = () => json(pair());
+  let handle = () => json({});
   let clock = epoch;
   const fetch = async (url, options) => {
     calls.push({ url, ...options });
@@ -36,13 +28,13 @@ async function fixture(t, overrides = {}) {
     assert.ok(options.signal instanceof AbortSignal);
     return handle(url, options);
   };
-  const options = { config, fetch, clock: () => clock };
+  const options = { config, fetch, clock: () => clock, acquireToken: async () => ({ accessToken: 'fake-access-1', expiresAt: Math.floor(clock / 1000) + 3600 }) };
   const client = createClient(options);
   return {
     root, home, config, calls, options, client,
     handler(value) { handle = value; },
     time(value) { clock = value; },
-    async signIn() { await client.redeem('fake-enrollment'); calls.length = 0; },
+    async signIn() { await client.login(); calls.length = 0; },
   };
 }
 
@@ -53,172 +45,7 @@ async function listen(t, handler) {
   return `http://127.0.0.1:${server.address().port}/inference/memory`;
 }
 
-test('redemption creates an atomic gateway-bound 0600 cache and returns only safe status', async t => {
-  const f = await fixture(t);
-  const result = await f.client.redeem('fake-enrollment');
-  assert.equal(result.signedIn, true);
-  assert.doesNotMatch(JSON.stringify(result), /fake-access|fake-refresh|fake-enrollment/);
-  const cache = JSON.parse(await readFile(f.config.tokenPath, 'utf8'));
-  assert.equal(cache.gateway_base, f.config.gatewayBase);
-  assert.equal(cache.expires_at, epoch / 1000 + 3600);
-  assert.equal(cache.refresh_expires_at, epoch / 1000 + 86400);
-  assert.equal(cache.token_type, 'HookToken');
-  assert.deepEqual(JSON.parse(f.calls[0].body), { enrollment_code: 'fake-enrollment' });
-  if (process.platform !== 'win32') {
-    assert.equal((await stat(f.config.stateDir)).mode & 0o777, 0o700);
-    assert.equal((await stat(f.config.tokenPath)).mode & 0o777, 0o600);
-  }
-  await absent(f.config.lockPath);
-  assert.equal(await f.client.getAccessToken(), 'fake-access-1');
-  assert.equal(f.calls.length, 1);
-});
-
-test('status is local-only and legacy environment credentials cannot create a sign-in', async t => {
-  const f = await fixture(t);
-  const client = createClient({ ...f.options, env: { AMT_ACCESS_TOKEN: 'fake-injected' } });
-  assert.equal((await client.status()).signedIn, false);
-  assert.equal((await client.status()).needsLogin, true);
-  assert.equal(f.calls.length, 0);
-  await absent(f.config.stateDir);
-  await assert.rejects(client.getAccessToken(), { code: 'NOT_SIGNED_IN', message: /mh-login/ });
-  assert.equal(f.calls.length, 0);
-});
-
-test('invalid token responses never replace usable credentials or report default success', async t => {
-  const f = await fixture(t);
-  await f.signIn();
-  const original = await readFile(f.config.tokenPath, 'utf8');
-  for (const bad of [{}, pair('2', { access_token: '' }), pair('2', { refresh_token: undefined }),
-    pair('2', { token_type: 'Bearer' }), pair('2', { expires_in: undefined }),
-    pair('2', { refresh_expires_in: undefined }), pair('2', { expires_in: '3600' }),
-    pair('2', { expires_in: -1 }), pair('2', { access_token: 'fake-access\ninjected' })]) {
-    f.handler(() => json(bad));
-    await assert.rejects(f.client.redeem('fake-enrollment'), { code: 'INVALID_TOKEN_RESPONSE' });
-    assert.equal(await readFile(f.config.tokenPath, 'utf8'), original);
-    await absent(f.config.lockPath);
-  }
-});
-
-test('concurrent refreshes reread the winning rotated pair within the lock', async t => {
-  const f = await fixture(t);
-  await f.signIn();
-  f.time(epoch + 3_500_000);
-  let refreshes = 0;
-  f.handler(async (url, options) => {
-    assert.equal(url, `${f.config.hookBase}/refresh`);
-    assert.deepEqual(JSON.parse(options.body), { refresh_token: 'fake-refresh-1' });
-    refreshes++;
-    await delay(35);
-    return json(pair('2'));
-  });
-  assert.deepEqual(await Promise.all(Array.from({ length: 8 }, () => f.client.getAccessToken())), Array(8).fill('fake-access-2'));
-  assert.equal(refreshes, 1);
-});
-
-test('independent Node processes coordinate rotating credentials through the same private cache', async t => {
-  let refreshes = 0;
-  const gateway = await listen(t, async (request, response) => {
-    let raw = '';
-    for await (const chunk of request) raw += chunk;
-    response.setHeader('Content-Type', 'application/json');
-    if (request.url.endsWith('/redeem')) response.end(JSON.stringify(pair('1', { expires_in: 1 })));
-    else if (request.url.endsWith('/refresh')) {
-      assert.deepEqual(JSON.parse(raw), { refresh_token: 'fake-refresh-1' });
-      refreshes++;
-      await delay(70);
-      response.end(JSON.stringify(pair('2')));
-    } else { response.writeHead(404); response.end('{}'); }
-  });
-  const deployment = fixtureDeployment(gateway);
-  const f = await fixture(t, { deployment, env: { MH_ALLOW_INSECURE_LOCALHOST: '1' } });
-  await createClient({ config: f.config, clock: () => Date.now() - 10_000 }).redeem('fake-enrollment');
-  const module = pathToFileURL(resolve('src/client.mjs')).href;
-  const options = { deployment, stateDir: f.config.stateDir, home: f.home, env: { MH_ALLOW_INSECURE_LOCALHOST: '1' }, timeoutMs: 3000, lockTimeoutMs: 5000 };
-  const source = `import {createClient} from ${JSON.stringify(module)}; const token=await createClient(${JSON.stringify(options)}).getAccessToken(); if(token!=='fake-access-2')process.exit(2); process.stdout.write('ok');`;
-  const run = promisify(execFile);
-  const results = await Promise.all(Array.from({ length: 4 }, () => run(process.execPath, ['--input-type=module', '-e', source], {
-    cwd: f.root, timeout: 10_000, env: { PATH: process.env.PATH, HOME: f.home, USERPROFILE: f.home },
-  })));
-  assert.ok(results.every(result => result.stdout === 'ok' && !result.stderr));
-  assert.equal(refreshes, 1);
-});
-
-test('only rejected refresh clears state; transient errors preserve it without revealing response contents', async t => {
-  const f = await fixture(t);
-  await f.signIn();
-  f.time(epoch + 3_600_000);
-  const original = await readFile(f.config.tokenPath, 'utf8');
-  for (const status of [400, 404, 429, 500, 503]) {
-    f.handler(() => json({ error: 'fake-server-secret' }, status));
-    await assert.rejects(f.client.getAccessToken(), error => error.status === status && !error.message.includes('fake-server-secret'));
-    assert.equal(await readFile(f.config.tokenPath, 'utf8'), original);
-  }
-  f.handler(() => { throw new Error('fake-refresh-secret'); });
-  await assert.rejects(f.client.getAccessToken(), error => error.code === 'NETWORK_ERROR' && !error.message.includes('fake-refresh-secret'));
-  f.handler(() => json({ error: 'fake-server-secret' }, 401));
-  await assert.rejects(f.client.getAccessToken(), { code: 'REFRESH_REJECTED' });
-  await absent(f.config.tokenPath);
-});
-
-test('unrotated and locally expired refresh credentials fail honestly', async t => {
-  const f = await fixture(t);
-  await f.signIn();
-  f.time(epoch + 3_600_000);
-  await assert.rejects(f.client.getAccessToken(), { code: 'INVALID_TOKEN_RESPONSE' });
-  f.time(epoch + 86_401_000);
-  const count = f.calls.length;
-  await assert.rejects(f.client.getAccessToken(), { code: 'REFRESH_EXPIRED' });
-  assert.equal(f.calls.length, count);
-  await absent(f.config.tokenPath);
-});
-
-test('cached tokens cannot be sent to a different publisher gateway', async t => {
-  const f = await fixture(t);
-  await f.signIn();
-  const config = loadConfig({ home: f.home, env: {}, deployment: fixtureDeployment('https://other.example/memory') });
-  const client = createClient({ ...f.options, config });
-  assert.equal((await client.status()).reason, 'gateway_mismatch');
-  await assert.rejects(client.getAccessToken(), { code: 'GATEWAY_MISMATCH' });
-  assert.equal(f.calls.length, 0);
-  await assert.rejects(client.logout(), error => error.code === 'REVOCATION_FAILED' && error.localCleared === true);
-  await absent(config.tokenPath);
-});
-
-test('logout waits for refresh and revokes the newest pair', async t => {
-  const f = await fixture(t);
-  await f.signIn();
-  f.time(epoch + 3_600_000);
-  let release, entered;
-  const waiting = new Promise(resolve => { release = resolve; });
-  const started = new Promise(resolve => { entered = resolve; });
-  const revoked = [];
-  f.handler(async (url, options) => {
-    if (url.endsWith('/refresh')) { entered(); await waiting; return json(pair('2')); }
-    revoked.push(JSON.parse(options.body).refresh_token);
-    return new Response(null, { status: 204 });
-  });
-  const refresh = f.client.getAccessToken();
-  await started;
-  const logout = f.client.logout();
-  await delay(30);
-  release();
-  assert.equal(await refresh, 'fake-access-2');
-  assert.equal((await logout).revoked, true);
-  assert.deepEqual(revoked, ['fake-refresh-2']);
-  await absent(f.config.tokenPath);
-});
-
-test('failed revoke still clears credentials and cannot claim immediate access-token invalidation', async t => {
-  const f = await fixture(t);
-  await f.signIn();
-  f.handler(() => json({ error: 'fake-refresh-1' }, 503));
-  await assert.rejects(f.client.logout(), error =>
-    error.code === 'REVOCATION_FAILED' && error.localCleared && /may remain valid/.test(error.message) && !error.message.includes('fake-refresh-1'));
-  await absent(f.config.tokenPath);
-  assert.equal((await f.client.status()).signedIn, false);
-});
-
-test('capture and search expose only narrow request bodies and HookToken authentication', async t => {
+test('capture and search expose only narrow request bodies and Bearer authentication', async t => {
   const f = await fixture(t);
   await f.signIn();
   const inserted = { request_id: 'request-1', kind: 'insert', status: 'succeeded', result: { items: [{ index: 0, id: 'turn-1', status: 'stored' }] } };
@@ -229,11 +56,11 @@ test('capture and search expose only narrow request bodies and HookToken authent
   assert.deepEqual(JSON.parse(f.calls[1].body), { query: 'query', top_k: 3 });
   await f.client.search('query', 50);
   assert.equal(JSON.parse(f.calls[2].body).top_k, 50);
-  assert.ok(f.calls.every(call => call.headers.Authorization === 'HookToken fake-access-1'));
-  assert.deepEqual(Object.keys(f.client).sort(), ['capture', 'config', 'getAccessToken', 'getMemories', 'logout', 'redeem', 'search', 'status']);
+  assert.ok(f.calls.every(call => call.headers.Authorization === 'Bearer fake-access-1'));
+  assert.deepEqual(Object.keys(f.client).sort(), ['capture', 'config', 'getAccessToken', 'getMemories', 'login', 'logout', 'search', 'status']);
 });
 
-test('memory listing uses the existing GET route with encoded repeated filters and shared HookToken auth', async t => {
+test('memory listing uses the existing GET route with encoded repeated filters and shared Bearer auth', async t => {
   const f = await fixture(t);
   await f.signIn();
   f.handler(() => json({ items: [], count: 0, next_cursor: null, has_more: false }));
@@ -248,7 +75,7 @@ test('memory listing uses the existing GET route with encoded repeated filters a
   await f.client.getMemories({ recent_k: 20, memory_types: ['episodic'] });
   assert.equal(f.calls[2].url, `${f.config.gatewayBase}/memories?page_size=20&memory_types=episodic`);
   assert.equal(f.calls.length, 3);
-  assert.ok(f.calls.every(call => call.method === 'GET' && call.body === undefined && call.headers.Authorization === 'HookToken fake-access-1'));
+  assert.ok(f.calls.every(call => call.method === 'GET' && call.body === undefined && call.headers.Authorization === 'Bearer fake-access-1'));
 });
 
 test('memory listing follows the gateway cursor with a fixed page size up to the requested count', async t => {
@@ -370,25 +197,24 @@ test('oversized and malformed responses fail without disclosing their bodies', a
 test('credential-bearing redirects are never followed', async t => {
   let redirected = 0;
   const gateway = await listen(t, async (request, response) => {
-    if (request.url.endsWith('/redeem')) { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(pair())); }
-    else if (request.url === '/evil') { redirected++; response.end('{}'); }
+    if (request.url === '/evil') { redirected++; response.end('{}'); }
     else { response.writeHead(302, { Location: '/evil' }); response.end(); }
   });
   const f = await fixture(t, { deployment: fixtureDeployment(gateway), env: { MH_ALLOW_INSECURE_LOCALHOST: '1' }, timeoutMs: 1000 });
-  const client = createClient({ config: f.config });
-  await client.redeem('fake-enrollment');
+  const client = createClient({ config: f.config, acquireToken: f.options.acquireToken });
+  await client.login();
   await assert.rejects(client.capture({ thread_id: 'test', role: 'user', content: 'A note.' }), { code: 'NETWORK_ERROR' });
   assert.equal(redirected, 0);
 });
 
-test('symlink credentials and state directories are not followed', { skip: process.platform === 'win32' }, async t => {
+test('symlink authentication state is not followed', { skip: process.platform === 'win32' }, async t => {
   const f = await fixture(t);
   await mkdir(f.config.stateDir, { recursive: true });
   const target = join(f.root, 'untouched.json');
   await writeFile(target, 'untouched');
-  await symlink(target, f.config.tokenPath);
+  await symlink(target, f.config.authStatePath);
   await assert.rejects(f.client.getAccessToken(), { code: 'UNSAFE_STATE' });
-  await assert.rejects(f.client.redeem('fake-enrollment'), { code: 'UNSAFE_STATE' });
+  await assert.rejects(f.client.login(), { code: 'UNSAFE_STATE' });
   assert.equal(await readFile(target, 'utf8'), 'untouched');
   assert.equal(f.calls.length, 0);
 });
@@ -398,18 +224,18 @@ test('unknown locks time out without eviction or deleting another writer state',
   await mkdir(f.config.lockPath, { recursive: true });
   const path = join(f.config.lockPath, 'unrelated.txt');
   await writeFile(path, 'untouched');
-  await assert.rejects(f.client.redeem('fake-enrollment'), { code: 'LOCK_TIMEOUT' });
+  await assert.rejects(f.client.login(), { code: 'LOCK_TIMEOUT' });
   assert.equal(await readFile(path, 'utf8'), 'untouched');
   assert.equal(f.calls.length, 0);
 });
 
 test('a replaced lock owner is not removed during cleanup', async t => {
   const f = await fixture(t);
-  f.handler(async () => {
+  f.options.acquireToken = async () => {
     await writeFile(join(f.config.lockPath, 'owner.json'), '{"nonce":"replacement","pid":1,"host":"other"}');
-    return json(pair());
-  });
-  await assert.rejects(f.client.redeem('fake-enrollment'), { code: 'LOCK_OWNERSHIP_LOST' });
+    return { accessToken: 'fake-access-1', expiresAt: epoch / 1000 + 3600 };
+  };
+  await assert.rejects(createClient(f.options).login(), { code: 'LOCK_OWNERSHIP_LOST' });
   assert.equal(JSON.parse(await readFile(join(f.config.lockPath, 'owner.json'), 'utf8')).nonce, 'replacement');
 });
 
@@ -423,10 +249,10 @@ test('file identity ignores the volume serial only on Windows', () => {
   assert.equal(sameFile(byPath, { ...byPath }, 'darwin'), true);
 });
 
-test('malformed credential caches never echo cached secrets', async t => {
+test('malformed authentication state never echoes its contents', async t => {
   const f = await fixture(t);
   await mkdir(f.config.stateDir, { recursive: true });
-  await writeFile(f.config.tokenPath, '{fake-access-secret');
-  await assert.rejects(f.client.getAccessToken(), error => error.code === 'INVALID_CACHE' && !error.message.includes('fake-access-secret'));
+  await writeFile(f.config.authStatePath, '{fake-access-secret');
+  await assert.rejects(f.client.getAccessToken(), error => error.code === 'INVALID_AUTH_STATE' && !error.message.includes('fake-access-secret'));
   assert.equal(f.calls.length, 0);
 });

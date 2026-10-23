@@ -78,75 +78,79 @@ shows the server). Claude requires `type` (`http`). The file deliberately does
 not follow the Agent Plugins schema, which spells the type `streamable-http`.
 `npm run check:publisher` confirms that the URL matches `deployment.json`.
 
-**Copilot signs in to the MCP server itself.** The InferencePlatform gateway
-answers an unauthenticated MCP request with `401` and
-`WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/inference/memory/mcp"`.
-That public document names Microsoft Entra
-(`https://login.microsoftonline.com/<tenant>/v2.0`) and the scope
-`api://45cdeed7-4e4e-481d-9f00-6708c0631565/Inference.Execute`. Copilot on macOS
-signs in with the Visual Studio Code client (`aebc6443…`); on Windows it uses
-the Work IQ clients (`fdcc1f02…`, `ba081686…`). All three are pre-authorized on
-the API. The plugin never sees that token.
+**Copilot manages MCP OAuth independently.** The plugin neither reads its
+token nor enrolls hooks through MCP. Configure gateway OAuth discovery for
+the required API and permitted clients; do not assume a previous registration
+or preauthorization covers the Azure CLI client or the new resource.
 
-**Claude Code and Codex use the plugin's token instead.** Entra has no dynamic
-client registration. The gateway can advertise itself as the authorization
-server with a stand-in `/oauth/register`
-(`McpDiscoveryConfigs.ActAsAuthorizationServer`), but that only gets Claude
-past registration: on 2026-08-29, with the setting on, Entra rejected Claude's
-sign-in with `AADSTS9010010: The resource parameter provided in the request
-doesn't match with the requested scopes`, because Claude sends the gateway URL
-as the RFC 8707 `resource`. The setting is global, so leave it off; the
-deployed `McpDiscoveryConfigs__ActAsAuthorizationServer=false` overrides the
-Development configuration. (Codex has an `oauth_resource` override that has not
-been tried.)
+**Hooks, canvas, Claude Code and Codex use Azure CLI.** First run in a terminal:
 
-Instead, both apps run a plugin command before connecting and send its
-`Authorization` header; the gateway accepts the plugin's hook token on the MCP
-route (`HookTokenConfigs__Enabled=true`). The command is
-`runtime/auth.mjs headers`, which prints `{"Authorization": "HookToken …"}`,
-refreshing the token within 7 seconds (Claude allows 10), or `{}` when signed
-out.
+```text
+az login --tenant 72f988bf-86f1-41af-91ab-2d7cd011db47 --scope https://dbinference.azure.com/.default --allow-no-subscriptions --output none
+```
+
+`--use-device-code` is optional, tenant-policy permitting. This still yields
+a delegated user token, not device identity or durable app-only credentials.
+The agent must not run interactive login or expose device codes.
+
+`runtime/auth.mjs login` verifies the existing session and enables the plugin.
+`src/azure-cli.mjs` executes:
+
+```text
+az account get-access-token --tenant <tenant> --scope https://dbinference.azure.com/.default --output json --only-show-errors
+```
+
+The CLI owns refresh and persistent caching. The plugin checks the response
+type, configured tenant and Unix `expires_on` (CLI 2.54+), holds a token in
+memory until its expiry skew and deduplicates acquisition within one client.
+It never persists access/refresh tokens. CLI failures are sanitized: raw
+stdout/stderr are not diagnostics. Commands have timeout/output bounds, use
+no interactive input and never retry a rejected gateway request. On Windows
+the batch launcher is invoked with validated literal arguments; timeout cleanup
+also terminates its child process tree.
+
+`runtime/auth.mjs headers` emits `{"Authorization": "Bearer <token>"}` or `{}`;
+safe failure diagnostics go to stderr. Acquisition is capped at 7 seconds
+(Claude permits 10); hook acquisition is capped at 5 seconds.
 
 - **Claude** runs `headersHelper` from the plugin root with `CLAUDE_PLUGIN_ROOT`
-  set, and stops using OAuth for the server once the helper supplies
-  `Authorization`. When it prints `{}`, Claude offers its own sign-in, which
-  fails as above; users run `mh-login` instead.
+  set. Run `mh-login` and reconnect MCP rather than relying on host OAuth when
+  the helper cannot supply a token.
 - **Codex** runs `http_headers_helper` from the user's home directory with only
   `HOME` and `PATH`. The launcher therefore reads Codex's documented install
   location, `~/.codex/plugins/cache/memory-house-marketplace/memory-house/<version>/`
   (falling back to `local`); tests keep the version in step with the manifest.
-  A custom `CODEX_HOME` or `MEMORY_HOUSE_HOME` doesn't reach this connection.
+  Custom `CODEX_HOME`, `MEMORY_HOUSE_HOME` or `AZURE_CONFIG_DIR` may not reach
+  this connection. Use the default CLI profile or host-supported forwarding;
+  never copy credentials into the plugin to bypass host isolation.
 
 Both launchers are `node -e` commands that read no shell variables, so they
 behave the same in POSIX shells, `cmd` and PowerShell.
 
-**The plugin's sign-in.** In Copilot, `mh-login` makes the agent call the remote
-`enroll_hook_capture` tool, which returns a single-use
-`{enrollment_code, expires_in}`. The post-tool hook recognizes only this
-plugin's tool by its exact name in each app, redeems the code at
-`<gatewayBase>/hook/redeem`, stores the hook token in
-`~/.memory-house/token.json`, and replaces the tool result before the model
-sees it:
+**Status and logout.** `runtime/auth.mjs status` checks acquisition, which can
+refresh over the network, without exposing credentials. `logout` writes
+`~/.memory-house/auth.json` with a disabled boolean and random login generation;
+long-lived clients discard cached tokens when that generation changes. It does not run `az logout`
+or revoke Entra tokens. Other CLI users and Copilot's MCP OAuth remain signed
+in. In-flight tokens/host-cached headers remain valid until expiry; reconnect
+MCP to drop cached headers. Explicit `login` re-enables plugin access.
+Before any logout preference, an existing CLI login is sufficient for hooks.
 
-| App | Tool name | Replacement |
-| --- | --- | --- |
-| Copilot | `memory-house-enroll_hook_capture` | `{"modifiedResult": {"resultType": "success", "textResultForLlm": ...}}` |
-| Claude Code | `mcp__plugin_memory-house_memory-house__enroll_hook_capture` | `hookSpecificOutput.updatedMCPToolOutput`, in the result's own shape |
-| Codex | `mcp__memory-house__enroll_hook_capture` | `{"decision": "block", "reason": ...}`; Codex parses `updatedMCPToolOutput` but does not apply it yet, and a blocking post-tool hook replaces the result with its reason |
+**Migration.** Old `token.json` credentials are ignored, never read for auth,
+and removed on explicit login/logout. There is no HookToken fallback,
+enrollment redemption, plugin refresh/revoke endpoint or MSAL dependency.
+Claude/Codex enrollment-only post-tool hooks are removed; Copilot retains its
+post-tool recall fallback and discards obsolete enrollment results safely.
 
-Copilot 1.0.95 hands the hook the tool's text, a blank line, then a copy of its
-structured content, which is not one JSON document, so the hook reads the code
-from each JSON block on its own.
-
-A same-named tool from another server is never redeemed, because redeeming an
-attacker's code would send this user's conversations to the attacker's
-account. Claude Code and Codex can only use that path once they are signed in,
-so their `mh-login` runs `runtime/auth.mjs login`: a Microsoft PKCE sign-in in
-the browser with the plugin's registered public client and fixed callback
-`http://127.0.0.1:33418`, then `enroll_hook_capture` with that Entra token and
-redemption, all outside the model. `runtime/auth.mjs status|logout` backs
-`mh-status` and `mh-logout`; the skills locate the helper two folders above
-their own `SKILL.md`.
+**Gateway prerequisite (not changed by this repository).** MISE must validate
+Entra Bearer user tokens on MCP, `/hook/capture`, `/hook/search`, `/memories`
+and all canvas routes. Configure issuer/tenant, API audience (according to
+the API's token version), token lifetime and delegated `scp`/authorization
+checks. Grant/consent the Azure CLI public client for the API's exposed
+delegated permissions. `.default` selects statically configured permissions;
+it is not an authorization claim. Do not merely change header schemes or
+trust a plugin-supplied identity. Validate the deployed gateway separately
+before release; fixture tests do not prove consent or production acceptance.
 
 References:
 [Claude headersHelper](https://code.claude.com/docs/en/mcp#use-dynamic-headers-for-custom-authentication),
@@ -154,6 +158,11 @@ References:
 [Codex MCP servers](https://developers.openai.com/codex/mcp),
 [Codex hooks](https://developers.openai.com/codex/hooks),
 [Codex plugin install location](https://developers.openai.com/plugins/build/plugins).
+
+Azure CLI references:
+[login](https://learn.microsoft.com/cli/azure/authenticate-azure-cli-interactively),
+[token acquisition](https://learn.microsoft.com/cli/azure/account#az-account-get-access-token),
+[.default scopes](https://learn.microsoft.com/entra/identity-platform/scopes-oidc#the-default-scope).
 
 ## Live CLI limitations
 
@@ -281,43 +290,35 @@ stream.
 
 ## Publisher configuration
 
-`plugin/deployment.json` contains only public settings: the gateway, and the
-Entra registration that the local sign-in helper (`runtime/auth.mjs login`, used
-by Claude Code and Codex) signs in with. The hooks, canvas and helper read it;
-`mcp.json` repeats the gateway with `/mcp/`. The shipped values were verified on
-2026-09-16:
+`plugin/deployment.json` contains only the public gateway, tenant and scope.
+Hooks, canvas and auth helpers read it; `mcp.json` repeats the gateway with
+`/mcp/`. The Azure CLI scope is configured below; live gateway compatibility
+for this authentication path must still be verified:
 
 | Setting | Verified value |
 | --- | --- |
 | Gateway | `https://reranker-api-h2b5czhkfkcphnf4.westus3-01.azurewebsites.net/inference/memory` |
 | Entra tenant | `72f988bf-86f1-41af-91ab-2d7cd011db47` |
-| Public-client ID | `45cdeed7-4e4e-481d-9f00-6708c0631565` |
-| Delegated API scope | `api://45cdeed7-4e4e-481d-9f00-6708c0631565/Inference.Execute` |
-| Registered public-client callback | `http://127.0.0.1:33418` |
+| API scope | `https://dbinference.azure.com/.default` |
 
-The tenant and scope match the gateway's public
-`/.well-known/oauth-protected-resource/inference/memory/mcp` document. Gateway
-and token environment variables, legacy token files and per-user configuration
+Gateway and token environment variables, legacy token files and per-user configuration
 cannot override these settings. Changing deployments is a publisher operation:
 update `deployment.json` and `mcp.json` together and publish an updated package.
-Preserve the exact registered callback; an occupied port fails explicitly
-instead of falling back to another one. PKCE, callback-state validation and
-fixed-port binding live in `src/entra.mjs`.
-
-Shared plugin credentials (the hook token) live in `~/.memory-house/token.json`
-(or an explicitly operator-selected `MEMORY_HOUSE_HOME`). Writes use private
-files and cross-process locks. Tokens are gateway-bound and never copied into
-the repo. One plugin sign-in through any host is sufficient for all hosts
-using that state directory as the same OS user on the same machine. Sign-out
-clears it for all of them. Different users, remote machines and explicit
-state-directory overrides are separate; each app's MCP sign-in is independent.
+There is no plugin-specific client registration, callback port or credential
+store. Azure CLI manages its own account selection and protected cache where
+supported by its platform. Plugin state contains only the disabled preference
+and hook context, using the existing safe atomic writes and locks.
+Hosts need the same OS user, CLI profile and plugin state to share access;
+different users, remote machines and explicit profile overrides are separate.
+`MEMORY_HOUSE_AUTH_TIMEOUT_MS` bounds acquisition (default 10000, max 30000);
+hook/header entry points impose their own shorter caps.
 
 ## Supported listing
 
 Agents list memories with the remote `get_memories` tool (`page_size` up to
 50, `cursor`, `memory_types`); the skills say when to follow `next_cursor`.
 The plugin lists memories itself only for the Copilot app canvas, through its
-hook-token client: `GET {gatewayBase}/memories` with optional `memory_types`
+Azure CLI Bearer client: `GET {gatewayBase}/memories` with optional `memory_types`
 and `include_superseded`, a fixed `page_size` of `min(count, 50)`, following
 `next_cursor` for at most `ceil(count / page_size)` requests (count 1 to 200,
 default 50) and stopping when `has_more` is false. Each cursor is bound to the
@@ -332,9 +333,8 @@ The payload skills are `mh-login`, `mh-logout`, `mh-status`, `mh-memory`,
 `use-memory` asks the agent to call `search_memories` before starting a task, as
 `main` did, so recall is visible as a tool call besides the hooks' injected context. All are available for discovery.
 Login/logout descriptions and instructions require an explicit user request;
-the skill itself does not pre-approve its MCP tools. `mh-login` calls the remote
-`enroll_hook_capture` tool in Copilot and runs `runtime/auth.mjs login` in Claude
-Code and Codex; `mh-logout` and `mh-status` run `runtime/auth.mjs`, so the host's
+the skill itself does not pre-approve its tools. `mh-login`, `mh-logout`
+and `mh-status` all run `runtime/auth.mjs`, so the host's
 shell approval applies to them. Neither the Claude-style
 `disable-model-invocation` flag nor Codex-only implicit-invocation metadata is
 shipped. Host MCP approval remains the executable-action gate.
@@ -395,7 +395,7 @@ to stdout, which carries the extension protocol. Everything else is in
 `src/canvas/` and is bundled as the `canvas` entry, `runtime/canvas.mjs`:
 
 - `data.mjs` loads `GET /memories` (paged by the shared client),
-  `GET /whoami` and `GET /v1/me/reach` through the gateway with the HookToken.
+  `GET /whoami` and `GET /v1/me/reach` through the gateway with an Azure CLI Bearer token.
 - `importers.mjs` reads local history and sends it to AMT.
 - `panel.mjs` is the page.
 - `index.mjs` is the loopback server.
@@ -483,8 +483,8 @@ The runtime holds the hooks, the canvas and the sign-in helper. It bundles
 MSAL for the helper's Microsoft sign-in, but no MCP SDK, because the MCP server
 is remote. A fresh cached installation needs no `node_modules`, unpublished npm
 package, lifecycle script, network dependency installer, or files outside the
-installed root. A local Node.js 20+ executable is still required for the hooks
-and helper.
+installed root. Local Node.js 20+ and Azure CLI 2.54+ executables are required
+for the hooks and helper.
 
 Dependencies and the npm lockfile live only in the repository's `.maintainer/`,
 outside the payload. The installed plugin contains no `package.json`,
@@ -500,16 +500,16 @@ Node runtimes or platform-specific native npm modules in the package.
 
 Tests reconstruct fresh repository-shaped snapshots with three root catalogs
 and the exact payload inventory under `plugin/`. They exercise the native
-hook commands for each app, including sign-in through the enrollment hook
-(the code never appears in hook output), the bundled Microsoft sign-in helper
-against synthetic Entra endpoints, both header launchers (Codex's with only
-`HOME` and `PATH`), shared credentials, recall and capture, and command
+hook commands for each app, the bundled auth helper against an isolated fake
+Azure CLI (including Windows batch launch), both header launchers (Codex's
+with minimal environment plus the fake CLI's isolated configuration),
+shared CLI authentication, plugin-only logout, recall and capture, and command
 execution without source `node_modules`, all against a loopback gateway
 fixture. The available Claude CLI strictly validates and installs the payload
 and root catalog in an isolated fake profile, then connects the remote server
-with the hook token through its header helper. The available Copilot CLI
+with a fixture Bearer token through its header helper. The available Copilot CLI
 registers the native catalog, installs its payload and loads the remote server.
-The available Codex CLI installs the same snapshot and asserts that all four
+The available Codex CLI installs the same snapshot and asserts that all three
 hooks are discovered as plugin-scoped and untrusted beside the legacy Copilot
 root, and that it registers the remote server; its helper can't authenticate
 against the plain-HTTP fixture because Codex withholds the fixture's loopback

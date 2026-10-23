@@ -9,6 +9,8 @@ Setup takes about five minutes and is a one-time thing per machine.
 ## Before you start
 
 - The **GitHub Copilot app** (desktop).
+- Node.js 20+ and Azure CLI 2.54+ on the plugin host PATH. Hooks use the CLI's
+  Microsoft Entra session; Copilot's MCP OAuth session is separate.
 - No Azure subscription, no local database, and no config files. The plugin talks to a hosted
   gateway; nothing memory-related runs on your machine except the small recall and capture hooks.
 
@@ -304,19 +306,29 @@ the troubleshooting entry if you want the details.
    listed. You should not be asked to sign in again.
 
 
-## Step 5: Enroll this device
+## Step 5: Enable Azure CLI authentication for hooks and canvas
 
-Open a **new** chat and run:
-
-```text
-/mh-login
-```
-
-The agent fetches a short-lived enrollment code and redeems it for you. It should finish by saying it is signed in, without showing you a code or asking you to run anything.
+In your own terminal on this machine, sign in for the gateway:
 
 ```text
-Signed in to Memory House. Capture and recall are now active on this device.
+az login --tenant 72f988bf-86f1-41af-91ab-2d7cd011db47 --scope https://dbinference.azure.com/.default --allow-no-subscriptions --output none
 ```
+
+Add `--use-device-code` if needed and permitted by your organization. Do not
+paste device codes or tokens into chat. Then open a **new** chat and run:
+
+```text
+/memory-house:mh-login
+```
+
+The helper verifies the existing CLI session without opening a browser. Hooks
+obtain Bearer tokens through Azure CLI when needed; the plugin never stores
+access/refresh tokens or redeems enrollment codes. `mh-status` checks CLI
+acquisition and may refresh over the network. `mh-logout` disables the plugin,
+but leaves Azure CLI and Copilot's MCP sign-in unchanged.
+
+The gateway must accept Azure CLI delegated tokens for this API and the tenant
+must grant the required permissions. See the [authentication requirements](README.md#sign-in-list-search-remember).
 
 ## Step 6: Open the memory canvas
 
@@ -440,27 +452,17 @@ object ID to a team.
 
 ### Capture is not working or the canvas asks you to sign in
 
-1. Run `/mh-login` once.
+1. Complete the Azure CLI login in Step 5, then run `/memory-house:mh-login`.
 2. Send one ordinary prompt.
-3. Inspect the hook log:
+3. Inspect the host's hook diagnostics. `AZURE_CLI_NOT_FOUND` means `az` is not
+   on its PATH; `AZURE_CLI_AUTH_REQUIRED` means terminal login/consent is needed;
+   `AZURE_CLI_TIMEOUT` means token acquisition exceeded its deadline.
+   `NOT_SIGNED_IN` after logout requires explicit `mh-login` to re-enable access.
+   HTTP 401/403 requires checking gateway audience, tenant, scopes and CLI-client
+   consent. A later hook can try again, but failed capture is not replayed.
 
-   ```bash
-   cat ~/.copilot/amt/hook.log
-   ```
-
-Useful log entries:
-
-- `login:auto:ok` means device enrollment completed.
-- `capture:agent:ok:201` means an agent turn was ingested successfully.
-- `skipped:no-hook-token:<reason>` means the hook had no usable token, and the reason says why.
-  `not signed in` means you never enrolled, `refresh rejected` means the device was signed out
-  and needs `/mh-login` again, and `refresh unreachable` means the gateway was not reachable
-  and the next prompt will retry on its own.
-- No log file means the hooks did not load. Missing `jq` on `PATH` is the most common cause.
-
-If the agent prints an enrollment code, do not copy or share it. Reinstall the latest plugin
-version and restart Copilot; the current plugin redeems that credential locally and redacts it
-from the response.
+Enrollment is no longer supported. If an older tool prints an enrollment code,
+do not copy or share it; update the plugin and restart the session.
 
 ### A plugin feature is "not available in this workspace"
 
@@ -542,7 +544,10 @@ Check that:
 
 ### You signed in with the wrong account
 
-Run `/mh-logout`, then `/mh-login` again with the intended Microsoft account.
+Run the Step 5 `az login` command in your terminal and choose the intended
+Microsoft account, then run `/memory-house:mh-login`. This updates the shared
+CLI profile used by other Azure CLI tools too. Copilot MCP OAuth must be
+changed separately. Plugin logout deliberately does not run `az logout`.
 
 ### The plugin looks outdated after an update
 

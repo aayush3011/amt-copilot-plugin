@@ -2,39 +2,37 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createClient } from './client.mjs';
 import { loadConfig } from './config.mjs';
-import { loginWithEntra } from './entra.mjs';
+import { loginCommand } from './azure-cli.mjs';
 import { safeError } from './errors.mjs';
 
-const status = value => ({
-  signedIn: value.signedIn, needsLogin: value.needsLogin, canRefresh: value.canRefresh,
-  accessExpiresAt: value.accessExpiresAt, refreshExpiresAt: value.refreshExpiresAt,
-  ...(value.reason ? { reason: value.reason } : {}),
-});
-
-// The plugin's local sign-in helper: `node runtime/auth.mjs login|status|logout|headers`.
-// `login` is the Microsoft browser sign-in that Claude Code and Codex use, `headers` is the
-// Authorization header they send to the remote MCP server, and `status`/`logout` back the skills.
-// `login` options (pca, msal, fetch, openBrowser, timeoutMs) are for tests.
-export async function runAuthCommand(command, { env = process.env, pluginRoot, stdout = process.stdout, login = {} } = {}) {
+export async function runAuthCommand(command, {
+  env = process.env, pluginRoot, stdout = process.stdout, stderr = process.stderr, acquireToken,
+} = {}) {
   let result;
+  let configured;
   try {
-    const configured = loadConfig({ env, ...(pluginRoot ? { pluginRoot } : {}) });
+    configured = loadConfig({ env, ...(pluginRoot ? { pluginRoot } : {}) });
     if (command === 'headers') {
-      // Claude Code gives up on a header helper after 10 seconds; a refresh must finish sooner.
-      const config = { ...configured, timeoutMs: Math.min(configured.timeoutMs, 7000), lockTimeoutMs: Math.min(configured.lockTimeoutMs, 2000) };
-      result = { Authorization: `HookToken ${await createClient({ config }).getAccessToken()}` };
+      const config = { ...configured, authTimeoutMs: Math.min(configured.authTimeoutMs, 7000) };
+      result = { Authorization: `Bearer ${await createClient({ config, env, acquireToken }).getAccessToken()}` };
     } else if (command === 'login') {
-      result = status(await loginWithEntra({ client: createClient({ config: configured }), onMessage: () => {}, ...login }));
+      result = await createClient({ config: configured, env, acquireToken }).login();
     } else if (command === 'status') {
-      result = status(await createClient({ config: configured }).status());
+      result = await createClient({ config: configured, env, acquireToken }).status();
     } else if (command === 'logout') {
-      result = await createClient({ config: configured }).logout();
+      result = await createClient({ config: configured, env, acquireToken }).logout();
     } else {
       result = { error: { code: 'USAGE', message: 'Usage: node runtime/auth.mjs login|status|logout|headers' } };
     }
   } catch (error) {
-    // A header helper must print only string headers; without a sign-in it sends none.
+    if (command === 'headers') {
+      const safe = safeError(error);
+      stderr.write(`memory-house: ${safe.code}: ${safe.message}\n`);
+    }
     result = command === 'headers' ? {} : { error: safeError(error) };
+    if (command === 'login' && ['AZURE_CLI_AUTH_REQUIRED', 'AZURE_CLI_TOKEN_INVALID'].includes(error.code)) {
+      result.error.message += ` Run in your terminal: ${loginCommand(configured)}. Then retry mh-login.`;
+    }
   }
   stdout.write(`${JSON.stringify(result)}\n`);
   return result;

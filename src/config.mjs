@@ -4,9 +4,10 @@ import { dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MemoryHouseError } from './errors.mjs';
 import { inspectDirectorySync } from './state.mjs';
+import { validateAzureCliConfig } from './azure-cli.mjs';
 
 export { MemoryHouseError } from './errors.mjs';
-const AUTH_FIELDS = ['tenantId', 'clientId', 'scope', 'redirectUri'];
+const AUTH_FIELDS = ['tenantId', 'scope'];
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 export function assertSafeUrl(value, { allowInsecureLocalhost = false } = {}) {
@@ -78,6 +79,7 @@ export function loadConfig(options = {}) {
       auth[name] = value;
     }
   }
+  if (!publisherMissing.length) validateAzureCliConfig(auth);
   const allowInsecureLocalhost = env.MH_ALLOW_INSECURE_LOCALHOST === '1';
   const url = assertSafeUrl(deployment.gatewayBase, { allowInsecureLocalhost });
   url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/mcp$/, '').replace(/\/+$/, '');
@@ -92,10 +94,11 @@ export function loadConfig(options = {}) {
   inspectDirectorySync(stateDir);
   return Object.freeze({
     gatewayBase, hookBase: `${gatewayBase}/hook`, mcpUrl: `${gatewayBase}/mcp/`,
-    stateDir, tokenPath: join(stateDir, 'token.json'), lockPath: join(stateDir, 'token.json.lock'),
+    stateDir, authStatePath: join(stateDir, 'auth.json'), lockPath: join(stateDir, 'auth.json.lock'),
     auth: Object.freeze(auth), ...auth, publisherMissing: Object.freeze(publisherMissing),
     allowInsecureLocalhost,
     timeoutMs: integer(options.timeoutMs ?? env.MEMORY_HOUSE_TIMEOUT_MS, 20_000, 'MEMORY_HOUSE_TIMEOUT_MS', 1, 300_000),
+    authTimeoutMs: integer(options.authTimeoutMs ?? env.MEMORY_HOUSE_AUTH_TIMEOUT_MS, 10_000, 'MEMORY_HOUSE_AUTH_TIMEOUT_MS', 1, 30_000),
     lockTimeoutMs: integer(options.lockTimeoutMs ?? env.MEMORY_HOUSE_LOCK_TIMEOUT_MS, 30_000, 'MEMORY_HOUSE_LOCK_TIMEOUT_MS', 1, 300_000),
     tokenSkewSeconds: integer(options.tokenSkewSeconds ?? env.MEMORY_HOUSE_TOKEN_SKEW_SECONDS, 120, 'MEMORY_HOUSE_TOKEN_SKEW_SECONDS', 0, 3600),
     maxResponseBytes: integer(options.maxResponseBytes, 1024 * 1024, 'maxResponseBytes', 1, 8 * 1024 * 1024),

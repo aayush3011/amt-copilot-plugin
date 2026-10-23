@@ -11,7 +11,8 @@ import { renderPanel } from './panel.mjs';
 export { createGateway, loadCanvasData, summarizeCanvasData };
 
 const SIGN_IN_CODES = new Set([
-  'NOT_SIGNED_IN', 'REFRESH_EXPIRED', 'REFRESH_REJECTED', 'GATEWAY_MISMATCH', 'INVALID_CACHE', 'PUBLISHER_CONFIG_MISSING',
+  'NOT_SIGNED_IN', 'AZURE_CLI_AUTH_REQUIRED', 'AZURE_CLI_NOT_FOUND', 'AZURE_CLI_TOKEN_INVALID',
+  'INVALID_AUTH_STATE', 'PUBLISHER_CONFIG_MISSING',
 ]);
 const BAD_REQUEST_CODES = new Set(['INVALID_PAYLOAD']);
 const BODY_LIMIT = 64 * 1024;

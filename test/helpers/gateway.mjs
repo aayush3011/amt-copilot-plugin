@@ -39,11 +39,8 @@ export async function mockGateway(t, options = {}) {
     requests: [],
     turns: [],
     memories: [{ id: "fixture-memory", scope_key: "user:fixture", type: "fact", memory_type: "fact", content: "The developer prefers concise TypeScript examples.", score: 0.95 }],
-    accessTokens: new Set(),
-    refreshTokens: new Set(),
-    counter: 0,
+    accessTokens: new Set(['fixture-access-1']),
     captureStatus: 201,
-    revokeStatus: 204,
     listingStatus: 200,
     listingResponse: null,
     cursors: new Map(),
@@ -56,17 +53,6 @@ export async function mockGateway(t, options = {}) {
     idempotent: new Map(),
     reconciles: 0,
   };
-  function grant(expiresIn = 3600) {
-    const n = ++state.counter;
-    const access = `fixture-access-${n}`;
-    const refresh = `fixture-refresh-${n}`;
-    state.accessTokens.add(access);
-    state.refreshTokens.add(refresh);
-    return {
-      access_token: access, refresh_token: refresh, token_type: "HookToken",
-      expires_in: expiresIn, refresh_expires_in: 86400,
-    };
-  }
   const server = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk.toString("utf8");
@@ -83,35 +69,16 @@ export async function mockGateway(t, options = {}) {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(value === undefined ? undefined : JSON.stringify(value));
     };
-    if (path === "/inference/memory/hook/redeem") {
-      return body?.enrollment_code === "fixture-enrollment"
-        ? send(200, grant(options.initialExpiresIn || 3600))
-        : send(401, { error: "invalid_enrollment" });
-    }
-    if (path === "/inference/memory/hook/refresh") {
-      if (!state.refreshTokens.delete(body?.refresh_token)) return send(401, { error: "invalid_grant" });
-      return send(200, grant());
-    }
-    if (path === "/inference/memory/hook/revoke") {
-      if (state.revokeStatus !== 204) return send(state.revokeStatus, { error: "fixture-provider-secret" });
-      state.refreshTokens.delete(body?.refresh_token);
-      return send(204);
-    }
+    const token = req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : undefined;
+    if (!state.accessTokens.has(token)) return send(401, { error: "unauthorized" });
     if (path === "/inference/memory/mcp/") {
-      // Like the gateway: an Entra token, or the plugin's hook token sent by Claude and Codex header helpers.
-      const hookToken = req.headers.authorization?.replace(/^HookToken /, "");
-      if (req.headers.authorization !== "Bearer fixture-entra" && !state.accessTokens.has(hookToken)) {
-        return send(401, { error: "unauthorized" });
-      }
       if (body?.method === "notifications/initialized") return send(202);
       let result;
       if (body?.method === "initialize") {
         result = { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } };
         res.setHeader("Mcp-Session-Id", "fixture-session");
       } else if (body?.method === "tools/list") {
-        result = { tools: ["search_memories", "enroll_hook_capture"].map(name => ({ name, inputSchema: { type: "object" } })) };
-      } else if (body?.method === "tools/call" && body?.params?.name === "enroll_hook_capture") {
-        result = { content: [{ type: "text", text: JSON.stringify({ enrollment_code: "fixture-enrollment" }) }] };
+        result = { tools: ["search_memories"].map(name => ({ name, inputSchema: { type: "object" } })) };
       } else return send(400, { error: "unsupported_rpc" });
       const rpc = { jsonrpc: "2.0", id: body.id, result };
       if (options.sse) {
@@ -120,8 +87,6 @@ export async function mockGateway(t, options = {}) {
       } else send(200, rpc);
       return;
     }
-    const token = req.headers.authorization?.replace(/^HookToken /, "");
-    if (!state.accessTokens.has(token)) return send(401, { error: "unauthorized" });
     if (path === "/inference/memory/memories" && req.method === "GET") {
       if (state.listingStatus !== 200) return send(state.listingStatus, { error: "fixture-provider-secret" });
       const pageSize = url.searchParams.has("page_size") ? Number(url.searchParams.get("page_size")) : 10;

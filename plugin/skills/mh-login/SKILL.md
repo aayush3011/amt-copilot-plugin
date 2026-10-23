@@ -1,39 +1,39 @@
 ---
 name: mh-login
-description: Sign in to Memory House on this device only when the user explicitly requests it.
+description: Enable Memory House using the existing Azure CLI session, only when the user explicitly requests it.
 ---
 
-Use this skill only for an explicit user request to sign in to Memory House. Being
-discoverable does not authorize sign-in: do not start it because another tool reports an
-expired session. Host tool approval still applies.
+Use this skill only for an explicit user request to sign in to Memory House.
+Host tool approval still applies; an expired session does not authorize interactive sign-in.
 
-**If the Memory House MCP tool `enroll_hook_capture` is available** (GitHub Copilot signs in
-to the Memory House MCP server itself), call it exactly once with no arguments. Select it by
-that exact name, allowing only a host/plugin namespace prefix. The plugin's post-tool hook
-redeems the returned enrollment code on this device and replaces the tool result with a
-status message before you see it. Follow that message. If it says the code was invalid or
-expired, call `enroll_hook_capture` one more time.
-
-**Otherwise** (Claude Code and Codex, whose Memory House tools use this same sign-in), run the
-plugin's sign-in helper yourself. It is `runtime/auth.mjs` in the installed plugin, two
-folders above the folder that contains this SKILL.md:
+Run `runtime/auth.mjs` in the installed plugin, two folders above this SKILL.md:
 
 ```bash
 node "<folder containing this SKILL.md>/../../runtime/auth.mjs" login
 ```
 
-It opens Microsoft sign-in in the user's browser and waits up to three minutes for the user
-to finish, so give the command at least that long to run. It prints one JSON line: report
-whether `signedIn` is true, not a sign-in URL. The Memory House tools then connect in a new
-session, or after reconnecting the server (`/mcp` in Claude Code).
+The helper verifies the existing Azure CLI session, enables this plugin on this device,
+and prints one safe JSON line. Allow up to 15 seconds. It does not open a browser.
+If it reports `AZURE_CLI_AUTH_REQUIRED`, show the safe `az login` command in its error and
+ask the user to run it in their own terminal, then retry this skill. For the published
+deployment the command is:
 
-Never quote, repeat, summarize or display an enrollment code or credential, and never ask
-the user to copy one. On success, reply only:
+```text
+az login --tenant 72f988bf-86f1-41af-91ab-2d7cd011db47 --scope https://dbinference.azure.com/.default --allow-no-subscriptions --output none
+```
 
-`Signed in to Memory House. Capture and recall are now active on this device.`
+The user may add `--use-device-code` if their tenant permits it. Never run interactive
+`az login` through an agent tool or display device codes in chat.
+For `AZURE_CLI_NOT_FOUND`, ask the user to install Azure CLI 2.54+ on the plugin host PATH.
+For other errors, report the safe message without claiming sign-in succeeded.
 
-After a second failure, report the error without any code. If a tool result ever shows an
-enrollment code, the hook did not run: say that sign-in could not finish and do not repeat it.
+Never display, read or copy access tokens, refresh tokens, Azure CLI cache files or
+enrollment credentials. Do not call `enroll_hook_capture`: that flow is no longer supported.
+On `signedIn: true`, reply:
 
-One sign-in covers Claude Code, Codex and Copilot on the same machine and OS user that use
-the default shared state directory. In Copilot, the MCP tools also need the app's own sign-in.
+`Signed in to Memory House using Azure CLI.`
+
+Hooks and canvas now use this CLI session. Claude Code and Codex use the same session
+for MCP headers; reconnect the server or start a new session. Copilot manages its MCP
+OAuth sign-in independently. All hosts must see the same CLI profile and plugin state
+to share this sign-in.

@@ -9,13 +9,13 @@ import { isolatedEnvironment } from './helpers/runtime.mjs';
 
 const loadConfig = options => loadPublisherConfig({ pluginRoot: PLUGIN_ROOT, ...options });
 
-test('packaged publisher defaults contain the verified public registration and exact callback', async t => {
+test('packaged publisher defaults select the Azure CLI tenant and gateway scope', async t => {
   const env = await isolatedEnvironment(t);
   const config = loadConfig({ env });
   assert.equal(config.tenantId, '72f988bf-86f1-41af-91ab-2d7cd011db47');
-  assert.equal(config.clientId, '45cdeed7-4e4e-481d-9f00-6708c0631565');
-  assert.equal(config.scope, 'api://45cdeed7-4e4e-481d-9f00-6708c0631565/Inference.Execute');
-  assert.equal(config.redirectUri, 'http://127.0.0.1:33418');
+  assert.equal(config.clientId, undefined);
+  assert.equal(config.scope, 'https://dbinference.azure.com/.default');
+  assert.equal(config.redirectUri, undefined);
   assert.deepEqual(config.publisherMissing, []);
   assert.doesNotThrow(() => requirePublisherConfig(config));
   assert.equal(config.hookBase, `${config.gatewayBase}/hook`);
@@ -32,7 +32,7 @@ test('environment endpoints, token overrides and old per-user config cannot repo
     env: { ...env, MEMORY_HOUSE_GATEWAY: 'https://wrong.example', AMT_GATEWAY_BASE: 'https://wrong.example',
       MEMORY_HOUSE_ENTRA_CLIENT_ID: 'wrong', AMT_ACCESS_TOKEN: 'fake-secret' },
   });
-  assert.equal(config.clientId, '45cdeed7-4e4e-481d-9f00-6708c0631565');
+  assert.equal(config.scope, 'https://dbinference.azure.com/.default');
   assert.notEqual(config.gatewayBase, 'https://wrong.example');
   assert.equal(await readFile(join(env.MEMORY_HOUSE_HOME, 'token.json'), 'utf8'), 'not read during configuration');
 });
@@ -52,10 +52,10 @@ test('publisher metadata is loaded from deployment.json rather than native MCP t
 test('missing public settings are named as publisher work, not an end-user configuration form', async t => {
   const env = await isolatedEnvironment(t);
   const deployment = fixtureDeployment();
-  deployment.entra.clientId = null;
-  deployment.entra.redirectUri = null;
+  deployment.entra.tenantId = null;
+  deployment.entra.scope = null;
   const config = loadConfig({ env, deployment });
-  assert.deepEqual(config.publisherMissing, ['entra.clientId', 'entra.redirectUri']);
+  assert.deepEqual(config.publisherMissing, ['entra.tenantId', 'entra.scope']);
   assert.throws(() => requirePublisherConfig(config), error =>
     error.code === 'PUBLISHER_CONFIG_MISSING' && /publisher/.test(error.message));
 });
@@ -68,7 +68,7 @@ test('publisher files reject credential fields and invalid shapes without reflec
     { ...valid, entra: { ...valid.entra, tenantId: 'invalid\nline' } }]) {
     const options = { env, deployment: deployment ?? {} };
     assert.throws(() => loadConfig(options), error =>
-      error.code === 'INVALID_DEPLOYMENT' && !error.message.includes('fake-secret'));
+      ['INVALID_DEPLOYMENT', 'INVALID_ENTRA_CONFIG'].includes(error.code) && !error.message.includes('fake-secret'));
   }
 });
 

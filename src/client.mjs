@@ -1,6 +1,8 @@
 import { join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { assertSafeUrl, loadConfig, requirePublisherConfig, MemoryHouseError } from './config.mjs';
 import { atomicJson, ensureDirectory, inspect, owned, readState as readFile, removeFile, withLock } from './state.mjs';
+import { acquireAzureCliToken } from './azure-cli.mjs';
 
 export { MemoryHouseError } from './config.mjs';
 
@@ -82,7 +84,7 @@ function jsonObject(raw, operation) {
 }
 
 /**
- * Internal shared transport for memory requests and the Entra MCP handshake.
+ * Internal shared transport for authenticated memory requests.
  * The deadline includes response-body streaming, and errors never include server text.
  */
 export async function sendRequest({
@@ -186,60 +188,25 @@ export async function sendRequest({
   }
 }
 
-function decodeCache(raw) {
-  if (raw === null) return null;
-  let value;
-  try {
-    value = JSON.parse(raw);
-    if (!isObject(value) || value.token_type !== 'HookToken') throw new Error('format');
-    validateCredential(value.access_token);
-    validateCredential(value.refresh_token);
-    if (!Number.isSafeInteger(value.expires_at) || value.expires_at <= 0) throw new Error('expiry');
-    if (value.version !== 1 || typeof value.gateway_base !== 'string') throw new Error('binding');
-    if (!Number.isSafeInteger(value.refresh_expires_at) || value.refresh_expires_at <= 0) throw new Error('refresh expiry');
-  } catch {
-    throw fail('INVALID_CACHE', 'Memory House credentials are invalid or not gateway-bound. Sign in again.');
-  }
-  return value;
-}
-
-function tokenResponse(value, now, gatewayBase, previousRefresh) {
-  if (!isObject(value) || value.token_type !== 'HookToken'
-      || !Number.isSafeInteger(value.expires_in) || value.expires_in <= 0
-      || !Number.isSafeInteger(value.refresh_expires_in) || value.refresh_expires_in <= 0
-      || !Number.isSafeInteger(now + value.expires_in) || !Number.isSafeInteger(now + value.refresh_expires_in)) {
-    throw fail('INVALID_TOKEN_RESPONSE', 'The gateway returned an invalid hook token pair. Sign in again; no success was recorded.');
-  }
-  try {
-    validateCredential(value.access_token);
-    validateCredential(value.refresh_token);
-  } catch {
-    throw fail('INVALID_TOKEN_RESPONSE', 'The gateway returned an invalid hook token pair. Sign in again; no success was recorded.');
-  }
-  if (previousRefresh !== undefined && value.refresh_token === previousRefresh) {
-    throw fail('INVALID_TOKEN_RESPONSE', 'The gateway did not rotate the refresh token. Sign in again; no success was recorded.');
-  }
-  return {
-    version: 1, gateway_base: gatewayBase, token_type: 'HookToken',
-    access_token: value.access_token, refresh_token: value.refresh_token,
-    expires_at: now + value.expires_in, refresh_expires_at: now + value.refresh_expires_in,
-  };
-}
-
 export function createClient(options = {}) {
   const config = Object.freeze({ ...(options.config ?? loadConfig(options)) });
   const safeBase = assertSafeUrl(config.gatewayBase, config).href.replace(/\/$/, '');
   if (safeBase !== config.gatewayBase || config.hookBase !== `${safeBase}/hook`
-      || config.mcpUrl !== `${safeBase}/mcp/` || config.tokenPath !== join(config.stateDir, 'token.json')
-      || config.lockPath !== `${config.tokenPath}.lock`
+      || config.mcpUrl !== `${safeBase}/mcp/` || config.authStatePath !== join(config.stateDir, 'auth.json')
+      || config.lockPath !== `${config.authStatePath}.lock`
       || resolve(config.stateDir) !== config.stateDir
       || !Number.isSafeInteger(config.timeoutMs) || config.timeoutMs <= 0 || config.timeoutMs > 300_000
+      || !Number.isSafeInteger(config.authTimeoutMs) || config.authTimeoutMs <= 0 || config.authTimeoutMs > 30_000
       || !Number.isSafeInteger(config.lockTimeoutMs) || config.lockTimeoutMs <= 0 || config.lockTimeoutMs > 300_000
       || !Number.isSafeInteger(config.maxResponseBytes) || config.maxResponseBytes <= 0 || config.maxResponseBytes > 8 * 1024 * 1024
       || !Number.isSafeInteger(config.tokenSkewSeconds) || config.tokenSkewSeconds < 0 || config.tokenSkewSeconds > 3600) {
     throw fail('INVALID_CONFIG', 'Use loadConfig() to construct a complete, safe Memory House client configuration.');
   }
   const fetchImpl = options.fetch ?? globalThis.fetch;
+  const acquireToken = options.acquireToken ?? (settings => acquireAzureCliToken(settings, { env: options.env ?? process.env, clock: options.clock }));
+  let token;
+  let acquiring;
+  let generation = null;
   const clock = options.clock ?? Date.now;
   const now = () => {
     const value = clock();
@@ -250,118 +217,84 @@ export function createClient(options = {}) {
     sendRequest({
       url, fetch: fetchImpl, timeoutMs: config.timeoutMs,
       maxResponseBytes: config.maxResponseBytes, method, body, operation, allowEmpty,
-      headers: token ? { Authorization: `HookToken ${token}` } : {},
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
   const request = (endpoint, options) => requestUrl(`${config.hookBase}/${endpoint}`, { operation: endpoint, ...options });
   const locked = async work => {
     await ensureDirectory(config.stateDir);
     return withLock(config.lockPath, config.lockTimeoutMs, async () => {
-      const stat = await inspect(config.tokenPath);
+      const stat = await inspect(config.authStatePath);
       if (stat && (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || !owned(stat))) {
         throw fail('UNSAFE_STATE', 'Refusing to modify unsafe Memory House state. No credential was sent.');
       }
       return work();
     });
   };
-  const clearCache = () => removeFile(config.tokenPath);
-  const readCache = async () => {
+  const disabled = async () => {
     const directory = await inspect(config.stateDir);
     if (directory && (!directory.isDirectory() || directory.isSymbolicLink() || !owned(directory))) {
       throw fail('UNSAFE_STATE', 'Memory House state must be an owned directory, not a symbolic link.');
     }
-    return decodeCache(await readFile(config.tokenPath));
-  };
-  const bound = cache => {
-    if (cache && cache.gateway_base !== config.gatewayBase) {
-      throw fail('GATEWAY_MISMATCH', 'Stored Memory House credentials belong to a different gateway. Sign in to the selected gateway; no cached credential was sent.');
+    const raw = await readFile(config.authStatePath);
+    if (raw === null) {
+      if (generation !== null) token = undefined;
+      generation = null;
+      return false;
     }
-    return cache;
-  };
-  const fresh = cache => cache && cache.expires_at > now() + config.tokenSkewSeconds;
-  const canRefresh = cache => Boolean(cache && cache.refresh_expires_at > now());
-  const statusFor = cache => {
-    const matches = !cache || cache.gateway_base === config.gatewayBase;
-    const usable = matches && (Boolean(cache && cache.expires_at > now()) || canRefresh(cache));
-    return {
-      signedIn: usable,
-      source: cache ? 'cache' : 'none',
-      gatewayBase: config.gatewayBase,
-      accessExpiresAt: matches ? cache?.expires_at ?? null : null,
-      refreshExpiresAt: matches ? cache?.refresh_expires_at ?? null : null,
-      canRefresh: matches && canRefresh(cache),
-      needsLogin: !usable,
-      publisherConfigReady: config.publisherMissing.length === 0,
-      publisherMissing: config.publisherMissing,
-      ...(matches ? {} : { reason: 'gateway_mismatch' }),
-    };
+    let state;
+    try { state = JSON.parse(raw); } catch {
+      throw fail('INVALID_AUTH_STATE', 'Memory House sign-in preference is invalid. Run mh-login to reset it.');
+    }
+    if (!isObject(state) || state.version !== 1 || typeof state.disabled !== 'boolean'
+      || typeof state.generation !== 'string' || !/^[a-f\d-]{36}$/i.test(state.generation)) {
+      throw fail('INVALID_AUTH_STATE', 'Memory House sign-in preference is invalid. Run mh-login to reset it.');
+    }
+    if (generation !== state.generation) token = undefined;
+    generation = state.generation;
+    return state.disabled;
   };
 
-  async function getAccessToken() {
-    const cached = bound(await readCache());
-    if (fresh(cached)) return cached.access_token;
-    return locked(async () => {
-      const current = bound(await readCache());
-      if (fresh(current)) return current.access_token;
-      if (!current) {
-        requirePublisherConfig(config);
-        throw fail('NOT_SIGNED_IN', 'Memory House is not signed in. Run mh-login in your app.');
+  async function currentToken() {
+    requirePublisherConfig(config);
+    if (token && token.expiresAt > now() + config.tokenSkewSeconds) return token;
+    if (!acquiring) acquiring = acquireToken(config).then(value => {
+      validateCredential(value?.accessToken, 'Azure CLI access token');
+      if (!Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now() + config.tokenSkewSeconds) {
+        throw fail('AZURE_CLI_TOKEN_INVALID', 'Azure CLI did not provide a usable token expiry.');
       }
-      if (!canRefresh(current)) {
-        await clearCache();
-        throw fail('REFRESH_EXPIRED', 'Memory House sign-in has expired. Run mh-login in your app.');
-      }
-      const started = now();
-      let data;
-      try {
-        ({ data } = await request('refresh', { body: { refresh_token: current.refresh_token } }));
-      } catch (error) {
-        if (error instanceof MemoryHouseError && error.status === 401) {
-          await clearCache();
-          throw fail('REFRESH_REJECTED', 'Memory House refresh was rejected. Local credentials were cleared; sign in again.', { status: 401 });
-        }
-        throw error;
-      }
-      const rotated = tokenResponse(data, started, config.gatewayBase, current.refresh_token);
-      await atomicJson(config.tokenPath, rotated);
-      return rotated.access_token;
-    });
+      token = value;
+      return value;
+    }).finally(() => { acquiring = undefined; });
+    return acquiring;
   }
 
-  async function redeem(enrollmentCode) {
-    validateCredential(enrollmentCode, 'Enrollment code');
+  async function getAccessToken() {
+    if (await disabled()) throw fail('NOT_SIGNED_IN', 'Memory House is disabled on this device. Run mh-login to enable Azure CLI authentication.');
+    const started = generation;
+    const value = await currentToken();
+    if (await disabled() || started !== generation) throw fail('NOT_SIGNED_IN', 'Memory House sign-in changed while acquiring a token. Retry the operation.');
+    return value.accessToken;
+  }
+
+  async function login() {
     return locked(async () => {
-      const started = now();
-      const { data } = await request('redeem', { body: { enrollment_code: enrollmentCode } });
-      const cache = tokenResponse(data, started, config.gatewayBase);
-      await atomicJson(config.tokenPath, cache);
-      return statusFor(cache);
+      token = undefined;
+      const value = await currentToken();
+      // Remove obsolete plugin-issued credentials without reading them or touching Azure CLI's cache.
+      await removeFile(join(config.stateDir, 'token.json'));
+      generation = randomUUID();
+      await atomicJson(config.authStatePath, { version: 1, disabled: false, generation });
+      return { signedIn: true, needsLogin: false, source: 'azure-cli', accessExpiresAt: value.expiresAt };
     });
   }
 
   async function logout() {
     return locked(async () => {
-      let cache;
-      let failure;
-      let revoked = false;
-      try {
-        cache = bound(await readCache());
-        if (cache) {
-          await request('revoke', { body: { refresh_token: cache.refresh_token }, allowEmpty: true });
-          revoked = true;
-        }
-      } catch (error) {
-        failure = error;
-      }
-      await clearCache();
-      if (failure) {
-        throw fail('REVOCATION_FAILED',
-          'Local Memory House credentials were cleared, but gateway revocation could not be confirmed. Previously issued access tokens may remain valid until expiry.',
-          { localCleared: true, revoked: false, ...(failure.status ? { status: failure.status } : {}) });
-      }
-      return {
-        signedOut: true, localCleared: true, revoked,
-        message: 'Local credentials cleared. Previously issued access tokens may remain valid until expiry.',
-      };
+      await atomicJson(config.authStatePath, { version: 1, disabled: true, generation: randomUUID() });
+      token = undefined;
+      await removeFile(join(config.stateDir, 'token.json'));
+      return { signedOut: true, azureCliSignedOut: false,
+        message: 'Memory House disabled on this device. Azure CLI and Copilot MCP sign-in are unchanged; in-flight tokens remain valid until expiry.' };
     });
   }
 
@@ -428,8 +361,14 @@ export function createClient(options = {}) {
   }
 
   async function status() {
-    return statusFor(await readCache());
+    try {
+      await getAccessToken();
+      return { signedIn: true, needsLogin: false, source: 'azure-cli', accessExpiresAt: token.expiresAt };
+    } catch (error) {
+      if (!['NOT_SIGNED_IN', 'AZURE_CLI_AUTH_REQUIRED'].includes(error.code)) throw error;
+      return { signedIn: false, needsLogin: true, source: 'azure-cli', accessExpiresAt: null, reason: error.code };
+    }
   }
 
-  return Object.freeze({ config, getAccessToken, redeem, logout, capture, search, getMemories, status });
+  return Object.freeze({ config, getAccessToken, login, logout, capture, search, getMemories, status });
 }

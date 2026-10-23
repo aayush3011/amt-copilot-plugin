@@ -10,8 +10,10 @@ two folders above the folder that contains this SKILL.md:
 node "<folder containing this SKILL.md>/../../runtime/auth.mjs" status
 ```
 
-It reads local state only and prints one JSON line. Report whether the plugin is signed in
-(`signedIn`) and, if so, until when (`refreshExpiresAt`, in Unix seconds). Do not show
+It verifies Azure CLI token acquisition without prompting, which may refresh over the network,
+and prints one JSON line. Report whether the plugin is signed in
+(`signedIn`) and, if so, its current access-token expiry (`accessExpiresAt`, in Unix seconds).
+Azure CLI handles renewal; this expiry is not a promise of unattended access. Do not show
 credentials or deployment URLs. Being signed in does not prove that this app runs the capture
 hooks; refer to the documented support limits rather than claiming automatic capture.
 

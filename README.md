@@ -4,12 +4,12 @@
 GitHub Copilot.**
 
 Add this repository as a marketplace, install **Memory House**, and sign in with
-Microsoft Entra ID through Azure CLI. The application selects its native adapter from the same installed
+Microsoft Entra ID in your browser. The application selects its native adapter from the same installed
 plugin. The memory tools come from the deployed Memory House MCP server, which
 every app reaches by URL; the plugin adds native capture hooks, skills, the
 Copilot app canvas and a small sign-in helper. No clone, build, ZIP selection,
 local dependency installation or per-project hook installation is required for users.
-Azure CLI is a prerequisite for authentication.
+Azure CLI is not required.
 
 **Repository:** <https://github.com/aayush3011/amt-copilot-plugin>
 
@@ -21,9 +21,9 @@ the host executes capture hooks.
 ## Verified CLI support
 
 Observed on 2026-09-16, when the plugin still ran its own local MCP server. The
-remote MCP server and the Azure CLI sign-in described below have not yet been
+remote MCP server and protected-cache browser sign-in described below have not yet been
 re-verified live against the deployed gateway. The historical results are not
-evidence that the new scope or Azure CLI client has gateway consent.
+evidence that the configured public client has consent for the new gateway scope.
 
 | Host version | Plugin MCP tools | Automatic per-turn capture from the plugin |
 | --- | --- | --- |
@@ -45,10 +45,10 @@ support with model-selected `add_memory` calls.** See
 
 ## Install in your application
 
-Requires a current supported desktop/local plugin host, Node.js 20+ and
-[Azure CLI 2.54+](https://learn.microsoft.com/cli/azure/install-azure-cli) available
-to its processes. Your organization must permit the plugin, the remote Memory
-House MCP server, and conversation capture.
+Requires a current supported desktop/local plugin host, Node.js 20+, a browser and
+OS credential protection: Windows PowerShell/DPAPI, an unlocked macOS Keychain,
+or Linux `secret-tool` with an unlocked Secret Service (for example GNOME Keyring).
+Your organization must permit the plugin, remote MCP server and conversation capture.
 
 | Application | Add this repository, then install Memory House |
 | --- | --- |
@@ -76,51 +76,50 @@ your local sign-in.
 
 ## Sign in, list, search, remember
 
-First sign in from **your own terminal**, on the machine and OS user running
-the plugin:
+Run **`mh-login`** using the host-specific command below. It opens Microsoft's
+sign-in page in your system browser. Select your account and complete credentials
+and MFA there, never in chat. An existing Microsoft browser session may avoid
+another password prompt. The helper waits up to three minutes.
 
-```text
-az login --tenant 72f988bf-86f1-41af-91ab-2d7cd011db47 --scope https://dbinference.azure.com/.default --allow-no-subscriptions --output none
-```
+The plugin uses authorization code + PKCE and stores the full MSAL token cache,
+including renewal state, in `~/.memory-house/msal-cache.json.enc`. Windows uses
+DPAPI for the current OS user; macOS/Linux encrypt the file with a key stored in
+Keychain/Secret Service. No plaintext fallback is allowed. Treat the encrypted
+file as sensitive; do not share, inspect or copy it between users or machines.
 
-Use `--use-device-code` only if your organization permits device-code login.
-This is a user-delegated token, not a device identity or an unattended service
-credential. Never paste device codes or tokens into chat.
+Background hooks, headers and canvas reuse valid cached tokens. MSAL renews them
+silently on demand near expiry and saves refresh-token rotation. There is no
+timer and no browser prompt from background requests. MFA/Conditional Access,
+revoked sessions or missing consent can require another explicit `mh-login`.
+This is delegated user access, not device identity or permanent app-only access.
 
-Then run **`mh-login`** using the host-specific command below. It verifies the
-existing CLI session and enables the plugin; it never starts interactive login.
-Background hooks call `az account get-access-token` for the configured tenant
-and scope, send `Authorization: Bearer <token>`, and let Azure CLI manage token
-renewal. Tokens stay in process memory and Azure CLI's own cache; the plugin
-does not persist access/refresh tokens or use enrollment codes.
-
-**Claude Code and Codex** use the same CLI session for MCP headers. Reconnect
+**Claude Code and Codex** use the same protected cache for MCP headers. Reconnect
 their MCP server after login. **Copilot manages MCP OAuth independently**;
 its MCP tools still need the app's sign-in. See
 [maintainer documentation](docs/maintaining.md#remote-mcp-server-and-sign-in).
 
-Hosts sharing the same Azure CLI profile and `~/.memory-house` share plugin
-authentication. `mh-logout` disables new plugin requests using a credential-free
-`auth.json` preference; it does **not** run `az logout`, revoke Entra tokens,
-or affect other CLI consumers. In-flight requests and host-cached MCP headers
+Hosts sharing the same OS user and `~/.memory-house` share plugin authentication.
+`mh-logout` disables new plugin requests using a credential-free `auth.json`
+preference and deletes the protected MSAL cache. It does not revoke Entra tokens
+or sign other applications out. In-flight requests and host-cached MCP headers
 may work until expiry; reconnect MCP after logout. `mh-login` re-enables access.
 Legacy plugin `token.json` files are ignored and removed on explicit login/logout.
 
-Azure CLI login enables hooks automatically unless `mh-logout` has disabled
-them. Remote/cloud hosts and other OS users need their own CLI installation
-and session. Codex's header helper normally receives only HOME and PATH:
-custom `CODEX_HOME`, `MEMORY_HOUSE_HOME` and `AZURE_CONFIG_DIR` may not reach it,
-so use its default profile or arrange host-supported environment forwarding.
-Do not copy credentials into the plugin to work around environment isolation.
+Initial `mh-login` is required. Remote/cloud hosts and other OS users need their
+own sign-in and secure OS cache; headless sessions cannot start browser sign-in.
+Codex's header helper normally receives only HOME and PATH: custom `CODEX_HOME`
+and `MEMORY_HOUSE_HOME` may not reach it. Use the default state directory or
+host-supported environment forwarding. Never copy credentials into the plugin.
 
-**Gateway prerequisite:** MISE and the gateway must accept the CLI's Entra
-Bearer user token for the `https://dbinference.azure.com` resource on MCP,
-hook capture/search and canvas routes. The API registration must expose
-delegated permissions and allow/consent the Azure CLI client; `.default`
-requests those configured permissions, not a permission named `.default`.
-An administrator must verify audience, issuer/tenant, lifetime and required
-`scp`/authorization policy. This plugin change does not reconfigure the gateway
-or prove that the published deployment is ready.
+**Gateway prerequisite:** MISE and the gateway must accept the plugin's Entra
+tokens for the `https://dbinference.azure.com` resource on MCP, hook capture/search
+and canvas routes. The API registration must expose delegated permissions and
+allow/consent public client `45cdeed7-4e4e-481d-9f00-6708c0631565`, with the registered
+redirect `http://127.0.0.1:33418`. The public-client registration must support
+authorization code + PKCE without a secret. `.default` requests configured
+permissions, not a permission named `.default`. An administrator must verify
+audience, issuer/tenant, lifetime and required `scp`/authorization policy. This
+plugin change does not reconfigure the gateway or prove deployment readiness.
 
 | Host | Sign in | Sign out | Status | Search / remember |
 | --- | --- | --- | --- | --- |
@@ -265,19 +264,20 @@ allows sending conversation text to your Memory House deployment.
   `codex plugin remove memory-house@memory-house-marketplace`, then optionally
   `codex plugin marketplace remove memory-house-marketplace`. This does not
   erase previously captured memories or sign the other apps out.
-- **Sign-in required/expired:** run the terminal `az login` command above, then
-  `mh-login`. `mh-status` checks CLI acquisition, which may refresh over the
-  network, without returning credentials. Conditional Access, revoked sessions
-  or missing consent require user/admin intervention; hooks never prompt or
-  retry interactive login. In Copilot, sign in to the MCP tools again when the
-  app asks.
-- **Azure CLI missing/timed out:** make `az` available on the plugin host PATH,
-  restart the host after installation, and check CLI connectivity. The token
-  command defaults to 10 seconds (`MEMORY_HOUSE_AUTH_TIMEOUT_MS`, maximum 30
-  seconds); hooks cap it at 5 seconds and MCP header helpers at 7 seconds.
+- **Sign-in required/expired:** run `mh-login` and complete Microsoft browser sign-in.
+  `mh-status` checks silent acquisition and may refresh over the network. Conditional
+  Access, revoked sessions or missing consent require user/admin intervention;
+  hooks never prompt. Copilot's MCP tools may separately ask you to sign in.
+- **Protected cache unavailable:** unlock Keychain/Secret Service. Linux requires
+  `secret-tool` (often supplied by `libsecret-tools`); Windows requires PowerShell
+  and DPAPI. No plaintext fallback is supported. Never paste cache contents into chat.
+- **Token acquisition timed out:** check connectivity and the OS credential store.
+  Network/cache operations default to 10 seconds (`MEMORY_HOUSE_AUTH_TIMEOUT_MS`,
+  maximum 30 seconds); hooks cap them at 5 seconds and header helpers at 7 seconds.
 - **Gateway returns 401/403:** verify the API resource, delegated permissions,
-  CLI-client consent and gateway MISE/authorization policies. Switching the
+  public-client consent and gateway MISE/authorization policies. Changing the
   header alone cannot make an unconfigured gateway accept the token.
+
 - **An old tool shows an enrollment code:** do not copy or share it. Update
   the plugin and restart the session; enrollment is no longer supported.
 - **Publisher configuration error:** contact the publisher rather than entering
@@ -291,8 +291,8 @@ allows sending conversation text to your Memory House deployment.
   `subscriptionType` (here, `"pro"`); `loggedIn: true` alone was misleading.
   Respect managed login policy. This is separate from Memory House's Microsoft
   sign-in and required no plugin, gateway, or billing-plan change.
-- **Sign out:** use `mh-logout` to disable new plugin requests. Azure CLI
-  remains signed in; Copilot manages its MCP sign-in independently. Reconnect
+- **Sign out:** use `mh-logout` to disable new plugin requests and delete the protected
+  cache. Copilot manages its MCP sign-in independently. Reconnect
   Claude/Codex MCP to drop cached headers. Existing tokens are not revoked.
 
 The single installable payload is **`plugin/`**. All three marketplace catalogs

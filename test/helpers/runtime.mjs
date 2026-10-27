@@ -3,15 +3,20 @@ import { delimiter, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { PACKAGE_FILES, PLUGIN_ROOT, MARKETPLACE_FILES } from '../../scripts/package-files.mjs';
-import { installFakeAzureCli } from './azure-cli.mjs';
 
 export async function isolatedEnvironment(t) {
   const home = await mkdtemp(join(tmpdir(), 'memory-house-native-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const cli = await installFakeAzureCli(home);
+  let path = process.env.PATH;
+  if (process.platform !== 'win32') {
+    const bin = join(home, 'fixture-bin');
+    await mkdir(bin);
+    const script = await readFile(new URL('./secret-service-fixture.mjs', import.meta.url), 'utf8');
+    for (const name of ['secret-tool', 'security']) await writeFile(join(bin, name), script, { mode: 0o700 });
+    path = `${bin}${delimiter}${path}`;
+  }
   return {
-    PATH: `${cli.bin}${delimiter}${process.env.PATH}`,
-    AZURE_CONFIG_DIR: cli.config,
+    PATH: path,
     ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
     // Unlike cmd.exe, PowerShell has no default PATHEXT; without it `node` never resolves to node.exe.
     ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),

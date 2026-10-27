@@ -3,6 +3,8 @@
   "gatewayBase": "https://reranker-api-h2b5czhkfkcphnf4.westus3-01.azurewebsites.net/inference/memory",
   "entra": {
     "tenantId": "72f988bf-86f1-41af-91ab-2d7cd011db47",
-    "scope": "https://dbinference.azure.com/.default"
+    "clientId": "45cdeed7-4e4e-481d-9f00-6708c0631565",
+    "scope": "https://dbinference.azure.com/.default",
+    "redirectUri": "http://127.0.0.1:33418"
   }
 }

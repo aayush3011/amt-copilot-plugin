@@ -1,6 +1,6 @@
 ---
 name: mh-login
-description: Enable Memory House using the existing Azure CLI session, only when the user explicitly requests it.
+description: Sign in to Memory House in the Microsoft browser window, only when the user explicitly requests it.
 ---
 
 Use this skill only for an explicit user request to sign in to Memory House.
@@ -12,28 +12,25 @@ Run `runtime/auth.mjs` in the installed plugin, two folders above this SKILL.md:
 node "<folder containing this SKILL.md>/../../runtime/auth.mjs" login
 ```
 
-The helper verifies the existing Azure CLI session, enables this plugin on this device,
-and prints one safe JSON line. Allow up to 15 seconds. It does not open a browser.
-If it reports `AZURE_CLI_AUTH_REQUIRED`, show the safe `az login` command in its error and
-ask the user to run it in their own terminal, then retry this skill. For the published
-deployment the command is:
+The helper opens Microsoft's sign-in page in the system browser and waits up to three
+minutes for the loopback callback. Allow up to four minutes for the command. Tell the
+user to select their account and complete any credentials/MFA only in that Microsoft
+window. Never ask for a password, MFA response, authorization code or token in chat.
+Existing Microsoft browser sessions may avoid another credential prompt.
 
-```text
-az login --tenant 72f988bf-86f1-41af-91ab-2d7cd011db47 --scope https://dbinference.azure.com/.default --allow-no-subscriptions --output none
-```
-
-The user may add `--use-device-code` if their tenant permits it. Never run interactive
-`az login` through an agent tool or display device codes in chat.
-For `AZURE_CLI_NOT_FOUND`, ask the user to install Azure CLI 2.54+ on the plugin host PATH.
+On success it enables this plugin and saves an OS-protected MSAL cache for reuse and
+silent renewal. Azure CLI is not required. Windows uses DPAPI; macOS requires an unlocked
+Keychain; Linux requires secret-tool and an unlocked Secret Service. If protection is
+unavailable, report the safe error; never bypass it or write plaintext credentials.
 For other errors, report the safe message without claiming sign-in succeeded.
 
-Never display, read or copy access tokens, refresh tokens, Azure CLI cache files or
+Never display, read or copy access tokens, refresh tokens, sign-in cache files or
 enrollment credentials. Do not call `enroll_hook_capture`: that flow is no longer supported.
 On `signedIn: true`, reply:
 
-`Signed in to Memory House using Azure CLI.`
+`Signed in to Memory House with Microsoft Entra ID.`
 
-Hooks and canvas now use this CLI session. Claude Code and Codex use the same session
+Hooks and canvas now use the protected cache without opening a browser. Claude Code and Codex use the same session
 for MCP headers; reconnect the server or start a new session. Copilot manages its MCP
-OAuth sign-in independently. All hosts must see the same CLI profile and plugin state
+OAuth sign-in independently. All hosts must use the same OS user and plugin state directory
 to share this sign-in.

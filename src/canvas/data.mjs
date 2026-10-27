@@ -1,6 +1,6 @@
 // Memory House canvas data: the caller's memories from GET /memories, labelled and grouped by
 // the hierarchy nodes in GET /v1/me/reach, plus the identity from GET /whoami. All calls use the
-// plugin's Azure CLI authentication; nothing here stores credentials.
+// plugin's cached Entra authentication; nothing here stores credentials.
 import { createClient, MEMORY_LIST_LIMITS, MEMORY_TYPES, sendRequest } from '../client.mjs';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);

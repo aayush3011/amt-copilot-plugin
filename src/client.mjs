@@ -2,7 +2,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { assertSafeUrl, loadConfig, requirePublisherConfig, MemoryHouseError } from './config.mjs';
 import { atomicJson, ensureDirectory, inspect, owned, readState as readFile, removeFile, withLock } from './state.mjs';
-import { acquireAzureCliToken } from './azure-cli.mjs';
+import { acquireEntraToken, clearEntraCache } from './entra.mjs';
 
 export { MemoryHouseError } from './config.mjs';
 
@@ -194,6 +194,8 @@ export function createClient(options = {}) {
   if (safeBase !== config.gatewayBase || config.hookBase !== `${safeBase}/hook`
       || config.mcpUrl !== `${safeBase}/mcp/` || config.authStatePath !== join(config.stateDir, 'auth.json')
       || config.lockPath !== `${config.authStatePath}.lock`
+      || config.cachePath !== join(config.stateDir, 'msal-cache.json.enc')
+      || config.cacheLockPath !== join(config.stateDir, 'msal-cache.lock')
       || resolve(config.stateDir) !== config.stateDir
       || !Number.isSafeInteger(config.timeoutMs) || config.timeoutMs <= 0 || config.timeoutMs > 300_000
       || !Number.isSafeInteger(config.authTimeoutMs) || config.authTimeoutMs <= 0 || config.authTimeoutMs > 30_000
@@ -203,10 +205,11 @@ export function createClient(options = {}) {
     throw fail('INVALID_CONFIG', 'Use loadConfig() to construct a complete, safe Memory House client configuration.');
   }
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const acquireToken = options.acquireToken ?? (settings => acquireAzureCliToken(settings, { env: options.env ?? process.env, clock: options.clock }));
+  const acquireToken = options.acquireToken ?? ((settings, request) => acquireEntraToken(settings, { ...request, env: options.env, clock: options.clock }));
   let token;
   let acquiring;
   let generation = null;
+  let revision = 0;
   const clock = options.clock ?? Date.now;
   const now = () => {
     const value = clock();
@@ -237,7 +240,7 @@ export function createClient(options = {}) {
     }
     const raw = await readFile(config.authStatePath);
     if (raw === null) {
-      if (generation !== null) token = undefined;
+      if (generation !== null) { token = undefined; revision++; }
       generation = null;
       return false;
     }
@@ -249,7 +252,7 @@ export function createClient(options = {}) {
       || typeof state.generation !== 'string' || !/^[a-f\d-]{36}$/i.test(state.generation)) {
       throw fail('INVALID_AUTH_STATE', 'Memory House sign-in preference is invalid. Run mh-login to reset it.');
     }
-    if (generation !== state.generation) token = undefined;
+    if (generation !== state.generation) { token = undefined; revision++; }
     generation = state.generation;
     return state.disabled;
   };
@@ -257,19 +260,20 @@ export function createClient(options = {}) {
   async function currentToken() {
     requirePublisherConfig(config);
     if (token && token.expiresAt > now() + config.tokenSkewSeconds) return token;
+    const startedRevision = revision;
     if (!acquiring) acquiring = acquireToken(config).then(value => {
-      validateCredential(value?.accessToken, 'Azure CLI access token');
+      validateCredential(value?.accessToken, 'Entra access token');
       if (!Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now() + config.tokenSkewSeconds) {
-        throw fail('AZURE_CLI_TOKEN_INVALID', 'Azure CLI did not provide a usable token expiry.');
+        throw fail('ENTRA_TOKEN_INVALID', 'Microsoft did not provide a usable token expiry.');
       }
-      token = value;
+      if (revision === startedRevision) token = value;
       return value;
     }).finally(() => { acquiring = undefined; });
     return acquiring;
   }
 
   async function getAccessToken() {
-    if (await disabled()) throw fail('NOT_SIGNED_IN', 'Memory House is disabled on this device. Run mh-login to enable Azure CLI authentication.');
+    if (await disabled()) throw fail('NOT_SIGNED_IN', 'Memory House is disabled on this device. Run mh-login to sign in.');
     const started = generation;
     const value = await currentToken();
     if (await disabled() || started !== generation) throw fail('NOT_SIGNED_IN', 'Memory House sign-in changed while acquiring a token. Retry the operation.');
@@ -278,23 +282,32 @@ export function createClient(options = {}) {
 
   async function login() {
     return locked(async () => {
+      revision++;
       token = undefined;
-      const value = await currentToken();
-      // Remove obsolete plugin-issued credentials without reading them or touching Azure CLI's cache.
+      requirePublisherConfig(config);
+      const value = await acquireToken(config, { interactive: true });
+      validateCredential(value?.accessToken, 'Entra access token');
+      if (!Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now() + config.tokenSkewSeconds) {
+        throw fail('ENTRA_TOKEN_INVALID', 'Microsoft did not provide a usable token expiry.');
+      }
+      token = value;
+      // Remove obsolete plugin-issued credentials without reading them.
       await removeFile(join(config.stateDir, 'token.json'));
       generation = randomUUID();
       await atomicJson(config.authStatePath, { version: 1, disabled: false, generation });
-      return { signedIn: true, needsLogin: false, source: 'azure-cli', accessExpiresAt: value.expiresAt };
+      return { signedIn: true, needsLogin: false, source: 'entra', accessExpiresAt: value.expiresAt };
     });
   }
 
   async function logout() {
     return locked(async () => {
+      revision++;
       await atomicJson(config.authStatePath, { version: 1, disabled: true, generation: randomUUID() });
       token = undefined;
+      await clearEntraCache(config);
       await removeFile(join(config.stateDir, 'token.json'));
-      return { signedOut: true, azureCliSignedOut: false,
-        message: 'Memory House disabled on this device. Azure CLI and Copilot MCP sign-in are unchanged; in-flight tokens remain valid until expiry.' };
+      return { signedOut: true,
+        message: 'Memory House disabled and its sign-in cache removed. Copilot MCP sign-in is unchanged; in-flight tokens remain valid until expiry.' };
     });
   }
 
@@ -363,10 +376,10 @@ export function createClient(options = {}) {
   async function status() {
     try {
       await getAccessToken();
-      return { signedIn: true, needsLogin: false, source: 'azure-cli', accessExpiresAt: token.expiresAt };
+      return { signedIn: true, needsLogin: false, source: 'entra', accessExpiresAt: token.expiresAt };
     } catch (error) {
-      if (!['NOT_SIGNED_IN', 'AZURE_CLI_AUTH_REQUIRED'].includes(error.code)) throw error;
-      return { signedIn: false, needsLogin: true, source: 'azure-cli', accessExpiresAt: null, reason: error.code };
+      if (!['NOT_SIGNED_IN', 'ENTRA_AUTH_REQUIRED'].includes(error.code)) throw error;
+      return { signedIn: false, needsLogin: true, source: 'entra', accessExpiresAt: null, reason: error.code };
     }
   }
 

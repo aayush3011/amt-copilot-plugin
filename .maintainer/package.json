@@ -9,6 +9,7 @@
   "description": "Pinned development dependencies only; not installed or used by desktop plugin hosts.",
   "license": "MIT",
   "devDependencies": {
+    "@azure/msal-node": "7.1.1",
     "esbuild": "0.28.2"
   }
 }

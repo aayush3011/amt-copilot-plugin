@@ -16,11 +16,11 @@ node "<folder containing this SKILL.md>/../../runtime/auth.mjs" logout
 
 It writes a credential-free disabled preference shared by Memory House apps using this
 state directory, after which new plugin capture, recall, canvas and header requests stop.
-It removes obsolete plugin token files but does not revoke Entra tokens or run `az logout`;
-other Azure CLI consumers remain signed in. In-flight requests or host-cached headers can
+It deletes the plugin's protected MSAL cache and obsolete plugin token files, but does not
+revoke Entra tokens or sign out other applications. In-flight requests or host-cached headers can
 remain authorized until their access tokens expire. Reconnect MCP to drop cached headers.
-It prints one JSON line. Report the outcome in one sentence, including that Azure CLI remains
-signed in. Never display credentials or sign the user back in.
+It prints one JSON line. Report the outcome in one sentence, including that the plugin cache
+was removed. Never display credentials or sign the user back in.
 
 In Claude Code and Codex this also disconnects the Memory House MCP tools. In Copilot it does
 not sign the app out of the Memory House MCP server; the app manages that sign-in.

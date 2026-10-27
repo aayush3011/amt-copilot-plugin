@@ -34,7 +34,7 @@ async function dependencyNotices(inputs) {
     text.push(`===== ${pkg.name}@${pkg.version} (${pkg.license}) =====`);
     for (const file of licenses) {
       if (!(await lstat(join(root, file))).isFile()) throw new Error(`Invalid license file in ${pkg.name}`);
-      text.push(`--- ${file} ---`, (await readFile(join(root, file), 'utf8')).replace(/\r\n?/g, '\n'));
+      text.push(`--- ${file} ---`, (await readFile(join(root, file), 'utf8')).replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, ''));
     }
   }
   return { dependencies, text: Buffer.from(text.join('\n')) };

@@ -4,11 +4,24 @@ import { dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MemoryHouseError } from './errors.mjs';
 import { inspectDirectorySync } from './state.mjs';
-import { validateAzureCliConfig } from './azure-cli.mjs';
 
 export { MemoryHouseError } from './errors.mjs';
-const AUTH_FIELDS = ['tenantId', 'scope'];
+const AUTH_FIELDS = ['tenantId', 'clientId', 'scope', 'redirectUri'];
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+export function validateEntraConfig(config) {
+  const invalid = message => new MemoryHouseError('INVALID_ENTRA_CONFIG', message);
+  const guid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
+  if (!guid.test(config.tenantId ?? '') || !guid.test(config.clientId ?? '')
+    || typeof config.scope !== 'string' || !/^(?:https:\/\/|api:\/\/)[a-z\d._:/-]+\/[a-z\d._-]+$/i.test(config.scope)) {
+    throw invalid('Configure the tenant, registered public-client ID and gateway scope in deployment.json.');
+  }
+  let url;
+  try { url = new URL(config.redirectUri); } catch { throw invalid('Configure the registered loopback redirect URI.'); }
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password || url.search || url.hash) {
+    throw invalid('Use a registered http://127.0.0.1:<port> loopback redirect URI.');
+  }
+}
 
 export function assertSafeUrl(value, { allowInsecureLocalhost = false } = {}) {
   let url;
@@ -79,7 +92,7 @@ export function loadConfig(options = {}) {
       auth[name] = value;
     }
   }
-  if (!publisherMissing.length) validateAzureCliConfig(auth);
+  if (!publisherMissing.length) validateEntraConfig(auth);
   const allowInsecureLocalhost = env.MH_ALLOW_INSECURE_LOCALHOST === '1';
   const url = assertSafeUrl(deployment.gatewayBase, { allowInsecureLocalhost });
   url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/mcp$/, '').replace(/\/+$/, '');
@@ -95,6 +108,7 @@ export function loadConfig(options = {}) {
   return Object.freeze({
     gatewayBase, hookBase: `${gatewayBase}/hook`, mcpUrl: `${gatewayBase}/mcp/`,
     stateDir, authStatePath: join(stateDir, 'auth.json'), lockPath: join(stateDir, 'auth.json.lock'),
+    cachePath: join(stateDir, 'msal-cache.json.enc'), cacheLockPath: join(stateDir, 'msal-cache.lock'),
     auth: Object.freeze(auth), ...auth, publisherMissing: Object.freeze(publisherMissing),
     allowInsecureLocalhost,
     timeoutMs: integer(options.timeoutMs ?? env.MEMORY_HOUSE_TIMEOUT_MS, 20_000, 'MEMORY_HOUSE_TIMEOUT_MS', 1, 300_000),

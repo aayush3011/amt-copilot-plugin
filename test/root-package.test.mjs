@@ -9,7 +9,7 @@ import test from 'node:test';
 import { buildRuntime } from '../scripts/build.mjs';
 import { fixtureDeployment } from './helpers/deployment.mjs';
 import { isolatedEnvironment, rootSnapshot } from './helpers/runtime.mjs';
-import { signInAzureCli } from './helpers/azure-cli.mjs';
+import { seedEntraSession } from './helpers/entra.mjs';
 import { mockGateway } from './helpers/gateway.mjs';
 import { connectCodexAppServer } from './helpers/codex.mjs';
 import { PLUGIN_ROOT, MARKETPLACE_FILES, PACKAGE_FILES, verifyPayload } from '../scripts/package-files.mjs';
@@ -55,7 +55,7 @@ async function discover(root, host) {
   assert.deepEqual(Object.keys(server).sort(), ['headersHelper', 'http_headers_helper', 'type', 'url']);
   assert.equal(server.type, 'http');
   assert.equal(server.url, `${gatewayBase}/mcp/`);
-  // Claude and Codex send Azure CLI tokens through these launchers; Copilot signs in itself.
+  // Claude and Codex send cached Entra tokens through these launchers; Copilot signs in itself.
   assert.match(server.headersHelper, /process\.env\.CLAUDE_PLUGIN_ROOT,'runtime\/auth\.mjs'.* -- headers$/);
   assert.ok(server.http_headers_helper.includes(`['${manifest.version}','local']`));
   assert.ok(server.http_headers_helper.includes("'memory-house-marketplace','memory-house',v,'runtime','auth.mjs'"));
@@ -113,8 +113,8 @@ async function hook(host, event, payload, env, root, shell = process.platform ==
 }
 
 async function signIn(host, env, root) {
-  await signInAzureCli(env);
-  const result = await run(process.execPath, [join(root, 'runtime/auth.mjs'), 'login'], { env, cwd: env.HOME, timeout: 15_000 });
+  await seedEntraSession(env, await json(join(root, 'deployment.json')));
+  const result = await run(process.execPath, [join(root, 'runtime/auth.mjs'), 'status'], { env, cwd: env.HOME, timeout: 15_000 });
   assert.equal(JSON.parse(result.stdout).signedIn, true);
   assert.doesNotMatch(result.stdout, /fixture-access/);
   return result;
@@ -204,8 +204,7 @@ test('included runtime is reproducible, license-complete and in the Git-publisha
   }
   const notices = await readFile(join(PLUGIN_ROOT, 'runtime/THIRD_PARTY_NOTICES.txt'), 'utf8');
   for (const dependency of manifest.dependencies) assert.ok(notices.includes(`${dependency.name}@${dependency.version}`));
-  // Azure CLI owns authentication; there are no bundled runtime npm dependencies.
-  assert.equal(manifest.dependencies.length, 0);
+  assert.ok(manifest.dependencies.some(value => value.name === '@azure/msal-node'));
   assert.equal(manifest.dependencies.some(value => value.name.startsWith('@modelcontextprotocol/')), false);
   assert.equal(Object.keys(manifest.sources).some(path => path.startsWith('/')), false);
   const ignored = spawnSync('git', ['check-ignore', 'plugin/runtime/hook.mjs', 'plugin/runtime/manifest.json'], { cwd: ROOT, encoding: 'utf8' });
@@ -213,7 +212,7 @@ test('included runtime is reproducible, license-complete and in the Git-publisha
   assert.equal(ignored.stdout, '');
 });
 
-test('each host verifies Azure CLI authentication without sending enrollment requests', async t => {
+test('each host verifies cached Entra authentication without sending enrollment requests', async t => {
   const gateway = await mockGateway(t);
   const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
   for (const host of Object.keys(HOSTS)) {
@@ -226,7 +225,7 @@ test('each host verifies Azure CLI authentication without sending enrollment req
   assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/mcp/')).length, 0);
 });
 
-test('the Claude and Codex header launchers find the plugin and send the shared Azure CLI token', async t => {
+test('the Claude and Codex header launchers find the plugin and send the cached Entra token', async t => {
   const gateway = await mockGateway(t);
   const env = await isolatedEnvironment(t);
   const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
@@ -242,9 +241,9 @@ test('the Claude and Codex header launchers find the plugin and send the shared 
     return JSON.parse(response.stdout);
   };
   const claude = () => launch(server.headersHelper, { CLAUDE_PLUGIN_ROOT: root });
-  // Codex normally passes only HOME and PATH; the fixture also needs its isolated CLI profile and loopback allowance.
+  // Codex normally passes only HOME and PATH; the fixture also needs loopback allowance.
   const codexEnv = {
-    HOME: env.HOME, PATH: env.PATH, USERPROFILE: env.USERPROFILE, AZURE_CONFIG_DIR: env.AZURE_CONFIG_DIR, MH_ALLOW_INSECURE_LOCALHOST: '1',
+    HOME: env.HOME, PATH: env.PATH, USERPROFILE: env.USERPROFILE, MH_ALLOW_INSECURE_LOCALHOST: '1',
     ...(env.SystemRoot ? { SystemRoot: env.SystemRoot } : {}),
   };
   const codex = async () => {
@@ -382,7 +381,7 @@ test('rebuilds refuse locally edited or unrecognized generated files', async t =
   assert.equal(await readFile(join(unknown, 'my-file.txt'), 'utf8'), 'keep');
 });
 
-test('available Claude CLI validates, installs and connects the remote MCP server with the Azure CLI token in an isolated profile', async t => {
+test('available Claude CLI validates, installs and connects the remote MCP server with a cached Entra token in an isolated profile', async t => {
   const env = {
     ...await isolatedEnvironment(t), DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', GIT_CONFIG_NOSYSTEM: '1',
@@ -414,7 +413,7 @@ test('available Claude CLI validates, installs and connects the remote MCP serve
   await assert.rejects(access(join(installedRoot, 'node_modules')), { code: 'ENOENT' });
   await assert.rejects(access(join(installedRoot, 'package-lock.json')), { code: 'ENOENT' });
   assert.equal((await authStatus(env, installedRoot)).signedIn, false);
-  // After the plugin's sign-in, Claude's header helper connects the remote MCP server with the Azure CLI token.
+  // After sign-in, Claude's header helper connects the remote MCP server with the cached Entra token.
   await signIn('claude', env, root);
   const listed = await run('claude', ['mcp', 'list'], { env, cwd: env.HOME, timeout: 60_000 });
   assert.match(listed.stdout, /plugin:memory-house:memory-house: .*\(HTTP\) - ✔ Connected/);

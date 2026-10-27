@@ -654,7 +654,7 @@ export async function runHook(options = {}) {
   const normalized = normalizeHook({ harness, event, payload });
   if (normalized.event === 'post-tool' && isObject(payload) && isEnrollmentTool(payload)) {
     log('login:obsolete-enrollment-ignored');
-    return replacedToolResult(normalized.harness, payload, 'Enrollment authentication is no longer supported. Run mh-login to use Azure CLI. Never display enrollment credentials.');
+    return replacedToolResult(normalized.harness, payload, 'Enrollment authentication is no longer supported. Run mh-login for Microsoft sign-in. Never display enrollment credentials.');
   }
   if (normalized.skipReason) {
     log(`skipped:${normalized.skipReason}`);

@@ -2,7 +2,6 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createClient } from './client.mjs';
 import { loadConfig } from './config.mjs';
-import { loginCommand } from './azure-cli.mjs';
 import { safeError } from './errors.mjs';
 
 export async function runAuthCommand(command, {
@@ -16,6 +15,7 @@ export async function runAuthCommand(command, {
       const config = { ...configured, authTimeoutMs: Math.min(configured.authTimeoutMs, 7000) };
       result = { Authorization: `Bearer ${await createClient({ config, env, acquireToken }).getAccessToken()}` };
     } else if (command === 'login') {
+      stderr.write('Opening Microsoft sign-in in your browser. Complete sign-in there; never enter credentials in chat.\n');
       result = await createClient({ config: configured, env, acquireToken }).login();
     } else if (command === 'status') {
       result = await createClient({ config: configured, env, acquireToken }).status();
@@ -30,9 +30,6 @@ export async function runAuthCommand(command, {
       stderr.write(`memory-house: ${safe.code}: ${safe.message}\n`);
     }
     result = command === 'headers' ? {} : { error: safeError(error) };
-    if (command === 'login' && ['AZURE_CLI_AUTH_REQUIRED', 'AZURE_CLI_TOKEN_INVALID'].includes(error.code)) {
-      result.error.message += ` Run in your terminal: ${loginCommand(configured)}. Then retry mh-login.`;
-    }
   }
   stdout.write(`${JSON.stringify(result)}\n`);
   return result;

@@ -6,7 +6,7 @@ export { MemoryHouseError } from './config.mjs';
 
 const credentialLimit = 32 * 1024;
 export const MEMORY_TYPES = Object.freeze(['fact', 'episodic', 'procedural']);
-export const MEMORY_LIST_LIMITS = Object.freeze({ maxCount: 200, defaultCount: 50, pageSize: 50 });
+export const MEMORY_LIST_LIMITS = Object.freeze({ maxCount: 200, defaultCount: 50, pageSize: 50, maxScopes: 20, scopeChars: 512 });
 const SEARCH_LIMITS = Object.freeze({ queryBytes: 16 * 1024, maxTopK: 50 });
 const CAPTURE_LIMITS = Object.freeze({ threadBytes: 256, requestBytes: 256 * 1024 });
 const CURSOR_CHARS = 8192;
@@ -49,6 +49,18 @@ function listingPage(data) {
     throw fail('INVALID_RESPONSE', 'Memory House listing did not return valid items, count and continuation status.');
   }
   return data;
+}
+
+// AMT narrows a listing to these scope keys within what the caller can already read.
+export const isListingScope = scope => typeof scope === 'string' && scope.trim() !== '' && scope === scope.trim()
+  && scope.length <= MEMORY_LIST_LIMITS.scopeChars && !/[\x00-\x1f\x7f]/.test(scope);
+
+function listingScopes(scopes) {
+  if (scopes === undefined) return [];
+  if (!Array.isArray(scopes) || !scopes.length || scopes.length > MEMORY_LIST_LIMITS.maxScopes || !scopes.every(isListingScope)) {
+    throw fail('INVALID_PAYLOAD', 'Memory listing scopes must be 1 to 20 scope keys of at most 512 characters, without surrounding spaces or control characters.');
+  }
+  return [...new Set(scopes)];
 }
 
 function checkedJson(value) {
@@ -394,8 +406,8 @@ export function createClient(options = {}) {
   }
 
   async function getMemories(options = {}) {
-    if (!isObject(options) || Object.keys(options).some(key => !['recent_k', 'memory_types', 'include_superseded'].includes(key))) {
-      throw fail('INVALID_PAYLOAD', 'Memory listing accepts only a count, memory types and superseded visibility.');
+    if (!isObject(options) || Object.keys(options).some(key => !['recent_k', 'memory_types', 'include_superseded', 'scopes'].includes(key))) {
+      throw fail('INVALID_PAYLOAD', 'Memory listing accepts only a count, memory types, superseded visibility and scopes.');
     }
     const { recent_k, memory_types = [], include_superseded = false } = options;
     if ((recent_k !== undefined && (!Number.isSafeInteger(recent_k) || recent_k < 1 || recent_k > MEMORY_LIST_LIMITS.maxCount))
@@ -403,12 +415,14 @@ export function createClient(options = {}) {
       || typeof include_superseded !== 'boolean') {
       throw fail('INVALID_PAYLOAD', 'Memory listing requires a count from 1 to 200, supported memory types and a boolean superseded filter.');
     }
+    const scopes = listingScopes(options.scopes);
     const requested = recent_k ?? MEMORY_LIST_LIMITS.defaultCount;
     // The gateway binds each cursor to page_size, so every page of one listing uses the same size.
     const pageSize = Math.min(requested, MEMORY_LIST_LIMITS.pageSize);
     const filters = new URLSearchParams({ page_size: String(pageSize) });
     for (const type of new Set(memory_types)) filters.append('memory_types', type);
     if (include_superseded) filters.set('include_superseded', 'true');
+    for (const scope of scopes) filters.append('scopes', scope);
     const token = await getAccessToken();
     const items = [];
     let cursor;

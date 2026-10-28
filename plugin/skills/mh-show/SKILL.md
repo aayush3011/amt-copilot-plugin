@@ -9,8 +9,10 @@ In the GitHub Copilot app, open the live Memory House canvas:
    `open_canvas` with `canvasId` set to `memory-house` and `instanceId` set to
    `memory-house-main`. It takes no input.
 2. Confirm in one sentence that the canvas is open. It shows the user's personal
-   memories and every hierarchy node they can read, and refreshes itself. Do not
-   also list the memories in chat unless the user asks.
+   memories and every hierarchy node they can read, and refreshes itself. Its
+   Playbooks tab shows My Learnings (the user's personal memories), then the
+   user's Microsoft IQ playbooks and sections with the memories promoted into
+   each section. Do not also list the memories in chat unless the user asks.
 
 If the canvas reports that Memory House is not signed in, suggest the `mh-login`
 skill, but do not invoke it unless the user asks.

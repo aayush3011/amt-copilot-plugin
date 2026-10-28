@@ -247,7 +247,11 @@ test('memory listing uses the existing GET route with encoded repeated filters a
   ]);
   await f.client.getMemories({ recent_k: 20, memory_types: ['episodic'] });
   assert.equal(f.calls[2].url, `${f.config.gatewayBase}/memories?page_size=20&memory_types=episodic`);
-  assert.equal(f.calls.length, 3);
+  await f.client.getMemories({ recent_k: 10, scopes: ['user:me', 'scope:miq:pb:Eng/Platform', 'user:me'] });
+  assert.deepEqual([...new URL(f.calls[3].url).searchParams], [
+    ['page_size', '10'], ['scopes', 'user:me'], ['scopes', 'scope:miq:pb:Eng/Platform'],
+  ]);
+  assert.equal(f.calls.length, 4);
   assert.ok(f.calls.every(call => call.method === 'GET' && call.body === undefined && call.headers.Authorization === 'HookToken fake-access-1'));
 });
 
@@ -297,7 +301,9 @@ test('memory listing validates filters and rejects identity or endpoint override
   const f = await fixture(t);
   for (const options of [null, [], { recent_k: null }, { recent_k: 0 }, { recent_k: 201 }, { recent_k: '50' }, { recent_k: 1.5 },
     { memory_types: ['unknown'] }, { memory_types: 'fact' }, { memory_types: Array(4).fill('fact') },
-    { scopes: ['scope:one'] }, { include_superseded: 'true' }, { page_size: 10 }, { cursor: 'position-1' },
+    { scopes: [] }, { scopes: 'scope:one' }, { scopes: [''] }, { scopes: [' scope:one'] }, { scopes: [7] },
+    { scopes: ['scope:\u0001'] }, { scopes: ['x'.repeat(513)] }, { scopes: Array.from({ length: 21 }, (_, index) => `scope:${index}`) },
+    { include_superseded: 'true' }, { page_size: 10 }, { cursor: 'position-1' },
     { token: 'fake-secret' }, { user_id: 'other' }, { gatewayBase: 'https://other.example' }, { offset: 50 }]) {
     await assert.rejects(f.client.getMemories(options), { code: 'INVALID_PAYLOAD' });
   }

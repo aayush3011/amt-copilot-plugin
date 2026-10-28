@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '../src/config.mjs';
 import { createClient } from '../src/client.mjs';
-import { createGateway, loadCanvasData, shapeCanvasData, summarizeCanvasData } from '../src/canvas/data.mjs';
+import { createGateway, loadCanvasData, loadScopedMemories, shapeCanvasData, summarizeCanvasData } from '../src/canvas/data.mjs';
 import { importMemories, importSessions, listSessions } from '../src/canvas/importers.mjs';
 import { canvasActionError, startCanvasServer } from '../src/canvas/index.mjs';
 import { fixtureDeployment } from './helpers/deployment.mjs';
@@ -46,6 +46,33 @@ async function hierarchyGateway(t) {
   gateway.state.memories = MEMORIES;
   return gateway;
 }
+
+test('scoped memory listing reads 20 scopes per request, skips keys AMT cannot filter by and reports truncation', async () => {
+  const calls = [];
+  const items = {
+    'scope:s3': [{ id: 'older', scope_key: 'scope:s3', content: 'Older.', created_at: '2026-10-01T00:00:00Z' },
+      { id: 'newer', scope_key: 'scope:s3', content: 'Newer.', created_at: '2026-10-02T00:00:00Z' },
+      { id: 'stray', scope_key: 'scope:not-requested', content: 'Not asked for.' }],
+    'scope:s30': [{ id: 'newer', scope_key: 'scope:s3', content: 'Duplicate.' }],
+  };
+  const gateway = { client: { async getMemories(options) {
+    calls.push(options);
+    const found = options.scopes.flatMap(scope => items[scope] ?? []);
+    return { items: found, count: found.length, has_more: options.scopes.includes('scope:s44') };
+  } } };
+  const scopes = [...Array.from({ length: 45 }, (_, index) => `scope:s${index}`), 'scope:s3', `scope:${'x'.repeat(600)}`, ' scope:padded'];
+
+  const result = await loadScopedMemories(gateway, scopes, { labels: new Map([['scope:s3', { name: 'Three', path: 'Root/Three' }]]) });
+
+  assert.deepEqual(calls.map(options => [options.recent_k, options.scopes.length]), [[200, 20], [200, 20], [200, 5]]);
+  assert.deepEqual(Object.keys(result.groups), ['scope:s3']);
+  assert.deepEqual(result.groups['scope:s3'].map(record => [record.id, record.scope_label, record.scope_path]),
+    [['newer', 'Three', 'Root / Three'], ['older', 'Three', 'Root / Three']]);
+  assert.equal(result.total, 2);
+  assert.equal(result.truncated, true);
+  assert.deepEqual(await loadScopedMemories(gateway, []), { groups: {}, total: 0, truncated: false });
+  assert.equal(calls.length, 3, 'no scopes means no request');
+});
 
 function raw(url, { method = 'GET', path = '/', headers = {}, body } = {}) {
   const target = new URL(url);

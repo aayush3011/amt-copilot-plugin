@@ -12,11 +12,12 @@
     "scripts/package-files.mjs": "88ac7e6593c72e791ecb72d0b35a5973eeb53beb8f3411f291dc75a6522800ae",
     "src/auth.mjs": "c04f75dcf57fb4cf521902a683d513af3502ce576f5e6aa06fbf54dea18b23b4",
     "src/browser.mjs": "45ef8b301a816e05454d6dcee2f8f9ed92c7fc3c3515b0f5a26fb683c0e220ed",
-    "src/canvas/data.mjs": "95d8ca7521aae03807c3c23e7e9f28ab029da2120a4480694ff7accd47010a6a",
+    "src/canvas/data.mjs": "1db05d24cb4adc615b249b90158958b446908d61a071ff46fefc123d5e2d3784",
     "src/canvas/importers.mjs": "fc1395b1d8f296ce669aac6dfb5eaffbe5090a6757a5f08b4d0d63655d23c086",
-    "src/canvas/index.mjs": "5d75115bb3d20d4e4b31183f34fb241aafe457978579699899ff7bb5bb0e5673",
-    "src/canvas/panel.mjs": "537cb8f93da88e8c44006b4ce47267487df08579e49141e202ced3b4831c85a4",
-    "src/client.mjs": "c3a056625253beb32d5cdabfe5754b84cf498c9e97f3aac2960d0f55dc9e4931",
+    "src/canvas/index.mjs": "39864ba7a28b3ac00cc614af8b6f9283037741540940b0a1455a09a5789b3e3e",
+    "src/canvas/miq.mjs": "48af798acb9b489827adccb8018586a2fb72ede8e61d76548dac9244799fbead",
+    "src/canvas/panel.mjs": "13efe602b001fcdcb22a7115826e44ed95ac77b44c0da034c727148c5dfc13e4",
+    "src/client.mjs": "89a1a42796007d7e989dd6053150c5761aabaf5b5bd8342771f0624ff1f034a9",
     "src/config.mjs": "4f99f426741139e62b70e91e7db3924f4ed9403f9ab9f442eb63bff173c005f6",
     "src/entra.mjs": "85d446d7ac96b7ae7ea0cb34dfc282bb894de3ba809ceac9a96ec981619488df",
     "src/errors.mjs": "3c5bb091ce0f32ff4efb2a79a0519a1c24665a8fa3afad00ba8549bc43cabec3",
@@ -37,12 +38,12 @@
     ".codex/plugin-hooks.json": "352bec0d5199f7941f9649dc71433cfbba6850de293c363b3a21c39c7a127b20",
     ".github/entry.mjs": "13d0d8563e5305038be18cfb276883c1d5e2ddbdf8177ec25c777a897ba005fa",
     ".github/plugin-hooks.json": "12288dc1c211ae91aaf4dcfc8a5cc250f3333993add9c48819ff7091844ebe93",
-    "com.github.copilot/extensions/memory-canvas/extension.mjs": "2dee19e651438bb64cf0168a3982701d7693017b6c5d7ecd70dd646a18600ece",
+    "com.github.copilot/extensions/memory-canvas/extension.mjs": "d82d3ead301101c01e4a6d1d120315c88df28080eb9f8eb82dc0f4350ef52eb5",
     "skills/mh-memory/SKILL.md": "48bcdaf026d1e50ad273de671107b69e2b8121a061975c4d4a063c0c426742fa",
     "skills/mh-login/SKILL.md": "097ca926f0295449f97b5eafbfc146dd24c645669669318d477764a49fd8965d",
     "skills/mh-logout/SKILL.md": "5c11a91ed18a621ceccf8c931d0a47fbb6a541f707f62561f9f1835bbbe1dd95",
     "skills/mh-status/SKILL.md": "822850b0d5b001ba3225df151223272ba856d2abf62d611f2522f3dd9fe424c9",
-    "skills/mh-show/SKILL.md": "a553a8210f0fcc38e0f2fd69b057c95a5145da9bbbca57fc093ce92618224dd3",
+    "skills/mh-show/SKILL.md": "bed9bdaf52b7378b7b4fe9eb715f7021c76004c99b71feb9410fecaf1ad3fbba",
     "skills/use-memory/SKILL.md": "c49a734200c3f894b177aa7aabf9f9cefd2aff220217796eba5d49c46aa38506"
   },
   "dependencies": [
@@ -134,12 +135,12 @@
   ],
   "outputs": {
     "THIRD_PARTY_NOTICES.txt": "989aa83ec39e7318810a3d624a0dbad5c646c7f557fb6138d3f224913a821fd0",
-    "auth.mjs": "d4a45cad1eaec59a946ca33bc5ebf211c6b2dc8c41cbbacd8fc4a339ff43b261",
-    "canvas.mjs": "2d68e330e2ac2d08c5c838a91f6cb2b0aa38d4d8313c124cda3f77ce22b21497",
-    "hook.mjs": "b4c655933d62544e5f1419480dbd738193edc8d3a45238719df8c2d8c174fbc3",
+    "auth.mjs": "263b89fdbc920dec336f7c7ea68f0d7bab3cc0c018872c6f9fbcd9a75f002207",
+    "canvas.mjs": "8385ff34d198b6f4be5a98886a764cc627a9b5d86b51db8c2a1beedb30d07153",
+    "hook.mjs": "a3a900019c3acc497ee10c2a9fdebb5ff89d2b514547740b9c4c29ca6ae819f9",
     "shared-6K7TCUKU.mjs": "588c17ff28b30f2447c8a1cedeec5cda4b43e34ee96bd0c8a7c2e38effc7581d",
-    "shared-BAUMEJ2Z.mjs": "66da94b38fe2b64fda8330702ccba530f79e12c1aba1b4d837a8d0909c13e269",
-    "shared-HS26EMRW.mjs": "728030dc2cc5ef4eb56e07f0c0f109cc1dd1a45a5dc3c78ebc527b1fb444c742",
-    "shared-NCUF5LPZ.mjs": "342ba212605ef7d9ad5cdd8eb70634b49bbac7eb3904fc444f7bc047dd2ca074"
+    "shared-F6UALMI2.mjs": "5fcc6c393c4fdc767b300f1950c26001a415e367199840edf93866356e7d811b",
+    "shared-NCUF5LPZ.mjs": "342ba212605ef7d9ad5cdd8eb70634b49bbac7eb3904fc444f7bc047dd2ca074",
+    "shared-NQPEADBJ.mjs": "4b5520364aef33772dcdef199113cf6b534589add5e4b5233d6798b1f67f2bfd"
   }
 }

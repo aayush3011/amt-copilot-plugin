@@ -1,5 +1,6 @@
 // Memory House canvas for the GitHub Copilot app. This file is wiring only: the panel server,
-// hierarchy-aware data loading and the import engine are in the bundled ../../../runtime/canvas.mjs.
+// hierarchy-aware data loading, the Microsoft IQ playbook reader and the import engine are in the
+// bundled ../../../runtime/canvas.mjs.
 // stdout carries the extension JSON-RPC protocol, so nothing here writes to the console.
 import { CanvasError, createCanvas, joinSession } from '@github/copilot-sdk/extension';
 import { canvasActionError, createGateway, loadCanvasData, startCanvasServer, summarizeCanvasData } from '../../../runtime/canvas.mjs';
@@ -12,7 +13,7 @@ await joinSession({
     createCanvas({
       id: 'memory-house',
       displayName: 'Memory House',
-      description: 'Browse your Memory House memories by personal scope and hierarchy node, and import local Copilot or Claude history.',
+      description: 'Browse your Memory House memories by personal scope and hierarchy node, view My Learnings and your Microsoft IQ playbooks with the memories promoted into their sections, and import local Copilot or Claude history.',
       actions: [
         {
           name: 'refresh',

@@ -317,13 +317,14 @@ state-directory overrides are separate; each app's MCP sign-in is independent.
 Agents list memories with the remote `get_memories` tool (`page_size` up to
 50, `cursor`, `memory_types`); the skills say when to follow `next_cursor`.
 The plugin lists memories itself only for the Copilot app canvas, through its
-hook-token client: `GET {gatewayBase}/memories` with optional `memory_types`
-and `include_superseded`, a fixed `page_size` of `min(count, 50)`, following
-`next_cursor` for at most `ceil(count / page_size)` requests (count 1 to 200,
-default 50) and stopping when `has_more` is false. Each cursor is bound to the
-page size, filters, caller authorization and reset generation. Any failed page
-fails the whole listing, and malformed continuation metadata produces an
-error rather than an empty result.
+hook-token client: `GET {gatewayBase}/memories` with optional `memory_types`,
+`include_superseded` and `scopes` (1 to 20 scope keys of at most 512 characters,
+which AMT intersects with what the caller can read), a fixed `page_size` of
+`min(count, 50)`, following `next_cursor` for at most `ceil(count / page_size)`
+requests (count 1 to 200, default 50) and stopping when `has_more` is false.
+Each cursor is bound to the page size, filters, caller authorization and reset
+generation. Any failed page fails the whole listing, and malformed continuation
+metadata produces an error rather than an empty result.
 
 ## Skill commands
 
@@ -395,8 +396,10 @@ to stdout, which carries the extension protocol. Everything else is in
 `src/canvas/` and is bundled as the `canvas` entry, `runtime/canvas.mjs`:
 
 - `data.mjs` loads `GET /memories` (paged by the shared client),
-  `GET /whoami` and `GET /v1/me/reach` through the gateway with the HookToken.
+  `GET /whoami` and `GET /v1/me/reach` through the gateway with the HookToken,
+  and the scope-filtered listings behind the Playbooks tab.
 - `importers.mjs` reads local history and sends it to AMT.
+- `miq.mjs` reads Microsoft IQ playbooks with the user's Azure CLI token.
 - `panel.mjs` is the page.
 - `index.mjs` is the loopback server.
 
@@ -421,6 +424,88 @@ loaded, not each node. A promoted copy's card shows where it came from, the user
 whose memory started the promotion, and why it was promoted, read from the
 memory's `metadata` (or from the separate `promotion` summary that AMT sent before
 REST returned whole records).
+
+**Playbooks.** The Playbooks tab reads Microsoft IQ directly, because the gateway
+cannot call it for plugin users: its on-behalf-of exchange to Power BI
+`Item.Read.All` lacks admin consent, and hook-token callers have no Entra user
+token to exchange. `miq.mjs` runs `az account get-access-token --tenant
+<deployment tenantId> --scope https://analysis.windows.net/powerbi/api/.default`
+(the Azure CLI is a pre-consented Microsoft client), keeps the token in memory
+until five minutes before it expires, and never logs or returns it. It tries
+`MEMORY_HOUSE_AZ_PATH`, then `az` on `PATH`, then the usual install locations,
+because a GUI app may start with a minimal `PATH`; on Windows `az.cmd` runs
+through `cmd.exe` with only constant arguments and the validated tenant GUID.
+App-only tokens and tokens for another tenant are refused. Requests go to MIQ
+Daily (`wabi-daily-us-east2-redirect.analysis.windows.net`) through the shared
+`sendRequest` (timeouts, size limits, no redirects), and failures are restated
+as `MIQ_*` errors with safe messages:
+
+- `GET /v1/miq/__private/playbooks` lists the playbooks, following continuation
+  tokens, sorted by name.
+- A playbook's tree loads on first expand: each section's
+  `GET .../__private/sections/{path}` and `.../sections/members/{path}`, six
+  requests at a time, depth-first, up to 500 sections. Microsoft IQ omits
+  unreadable children; a child refused anyway is shown as refused, and a refused
+  root as *No access*. Child paths outside their parent are ignored.
+- Each section reports direct curator, user and group-or-app counts and the
+  caller's direct role, matched by the token's `oid`. Membership reads list
+  direct assignments only, but Microsoft IQ makes a section's curator a curator
+  of every section below it, so those sections carry `curatorVia`, the curated
+  section's path, and show *curator (inherited)*. Group membership is not
+  expanded.
+
+**Same person.** Microsoft IQ is read with the Azure CLI account, so the server
+reads it only when that account is the Memory House user: the token's `oid` must
+equal the `GET /whoami` principal `user:<oid>`, compared on every playbook-list
+and tree request. Otherwise the page would show one person's playbooks beside
+another person's memories. Every Microsoft IQ request in that call uses the
+verified token rather than asking the token cache again, so one read never mixes
+accounts. A cached token can predate an `az login`, so a mismatch asks the Azure
+CLI once more before refusing. An Azure CLI failure is reported before a missing
+Memory House sign-in, because the page shows the sign-in problem in My Learnings
+anyway. A mismatch answers `MIQ_ACCOUNT_MISMATCH`, naming the Azure CLI account
+from the token's `upn`, `preferred_username` or `unique_name` claim. It drops the
+cached token, so a corrected `az login` is picked up on the next Refresh, and
+forgets the server's listed playbooks and loaded trees. The server also
+remembers which Memory House user those were read for. When `/whoami` names
+someone else, `GET /api/miq/memories` forgets them and answers
+`MIQ_ACCOUNT_CHANGED`; a list or tree read that started before such a reset
+answers the same instead of being cached or shown. On `MIQ_ACCOUNT_MISMATCH` the
+page hides all playbooks and sections, and reopens the open ones once the
+accounts match. On `MIQ_ACCOUNT_CHANGED`, or when My Learnings names a different
+user, it hides them and reloads them for the new user.
+
+**Section memories and My Learnings.** Each readable section carries the AMT scope
+that AMT's Microsoft IQ topology sync creates for it (`miqScopeId`, the same as
+`miq_scope_id` in AMT's `service/app/integrations/miq/topology.py`):
+`scope:miq:<playbook-id>` for the root and `scope:miq:<playbook-id>:<path below
+the root>` below it. After a tree loads, the page lists the memories in those
+scopes through the hook-token client, 20 scopes per listing with the newest 200
+each, so a large playbook can be truncated. AMT returns only memories the
+caller can read; its sync lets curators read their whole subtree and members
+their sections and those sections' ancestors. Scope keys the listing filter
+cannot take (over 512 characters, surrounding spaces or control characters) are
+skipped. My Learnings lists the newest 200 memories in the caller's own scope,
+the `principal` from `GET /whoami`. Both refresh on the auto-refresh interval
+without reading Microsoft IQ again. A background refresh skips a listing whose
+previous request is still running and redraws only when the result changed; a
+failed one keeps what is shown. The sections do not show memories until a root
+curator has synced the playbook into AMT's topology and memories have been
+promoted into it.
+
+**Playbook refresh.** Refresh re-reads the playbook list and, only after it
+succeeds, reloads every open playbook; a failed list keeps what is shown. The
+list and the open playbooks' sections also refresh quietly every 10 minutes
+while the Playbooks tab is showing and the panel is visible, checked once a
+minute and when the tab is selected; turning auto-refresh off stops it. A quiet
+refresh never shows a loading placeholder or collapses an open playbook or an
+expanded section. It redraws only what changed, drops playbooks that are no
+longer listed, and retries an open playbook whose sections failed to load. When
+the list cannot be read, the error shows above the list and everything stays.
+When one playbook's sections cannot be re-read, they stay with an out-of-date
+notice. Closed playbooks are not re-read; sections cached while closed show at
+once when reopened, and are re-read quietly if they are older than 10 minutes.
+A Refresh supersedes a running background refresh.
 
 **Import.**
 
@@ -459,6 +544,18 @@ They also send no-store, nosniff and same-origin `Cross-Origin-Resource-Policy`
 headers. Only one import runs at a time. Sign-in failures return 401
 `not_signed_in`. Other plugin errors return their safe code and message, never
 gateway text.
+
+`GET /api/miq/playbooks` returns the listing. `GET /api/miq/tree` takes
+`workspace_id` and `playbook_id` (GUIDs, else 400) and serves only playbooks the
+latest listing returned (else 404 `playbook_not_listed`), so the page never
+supplies a section path. `GET /api/miq/memories` takes the same parameters and
+lists the memories in the sections of a tree this server loaded (else 404
+`playbook_not_loaded`), so the page never supplies a scope key either.
+`GET /api/learnings` returns the caller's personal memories. Both Microsoft IQ
+routes first require the Azure CLI account to be the Memory House user, and the
+memories route requires the Memory House user its trees were read for (see
+**Same person**). Microsoft IQ and Azure CLI failures, and a mismatched or changed
+account, return 502 with an `MIQ_*` code and safe message.
 
 The 0.8.1 canvas's `complete_signin` action (replaced by `mh-login`) and its
 `forget_memory` action (0.14.0 has no forget tool) are not carried over.

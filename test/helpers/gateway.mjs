@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
 const MEMORY_TYPES = ["fact", "episodic", "procedural"];
-const LISTING_PARAMETERS = new Set(["page_size", "cursor", "memory_types", "include_superseded"]);
+const LISTING_PARAMETERS = new Set(["page_size", "cursor", "memory_types", "include_superseded", "scopes"]);
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const validThread = value => typeof value === "string" && value.trim() !== ""
   && Buffer.byteLength(value) <= 256 && !/[/\\?#\u0000-\u001f]/.test(value);
@@ -126,14 +126,16 @@ export async function mockGateway(t, options = {}) {
       if (state.listingStatus !== 200) return send(state.listingStatus, { error: "fixture-provider-secret" });
       const pageSize = url.searchParams.has("page_size") ? Number(url.searchParams.get("page_size")) : 10;
       const types = url.searchParams.getAll("memory_types");
+      const scopes = url.searchParams.getAll("scopes");
       if ([...url.searchParams.keys()].some(key => !LISTING_PARAMETERS.has(key))
-        || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 50 || types.some(type => !MEMORY_TYPES.includes(type))) {
+        || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 50 || types.some(type => !MEMORY_TYPES.includes(type))
+        || scopes.length > 20 || scopes.some(scope => !scope.trim() || scope.length > 512)) {
         return send(422, { code: "invalid_request" });
       }
       if (state.listingResponse !== null) return send(200, state.listingResponse);
       const superseded = url.searchParams.get("include_superseded") === "true";
       // Like AMT, a cursor is valid only with the page size and filters that produced it.
-      const binding = JSON.stringify([pageSize, [...new Set(types)].sort(), superseded]);
+      const binding = JSON.stringify([pageSize, [...new Set(types)].sort(), superseded, [...new Set(scopes)].sort()]);
       let offset = 0;
       if (url.searchParams.has("cursor")) {
         const position = state.cursors.get(url.searchParams.get("cursor"));
@@ -141,7 +143,8 @@ export async function mockGateway(t, options = {}) {
         offset = position.offset;
       }
       const matching = state.memories.filter(item =>
-        (!types.length || types.includes(item.memory_type ?? item.type)) && (superseded || !item.superseded_by));
+        (!types.length || types.includes(item.memory_type ?? item.type)) && (superseded || !item.superseded_by)
+        && (!scopes.length || scopes.includes(item.scope_key)));
       const items = matching.slice(offset, offset + pageSize);
       let cursor = null;
       if (offset + pageSize < matching.length) {

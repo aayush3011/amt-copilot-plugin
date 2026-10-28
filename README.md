@@ -187,11 +187,37 @@ House canvas. The side panel shows:
   - Text is filtered for credentials and runtime context first. Original
     timestamps are not kept. Re-importing an unchanged session replays the
     earlier request rather than duplicating it.
+- **Playbooks:** first **My Learnings**, your newest 200 personal memories, then
+  the Microsoft IQ playbooks you can see. Selecting a playbook loads its sections,
+  nested by path, with your role (curator or user) and how many curators, users
+  and groups or apps are assigned directly. Curating a section makes you a
+  curator of every section below it, shown as *curator (inherited)*. Each section shows how many Memory
+  House memories have been promoted into it that you can read. Select the count
+  to see them, with where each was promoted from and why. Playbooks Microsoft IQ
+  refuses to show you are marked *No access*. The tab only reads Microsoft IQ and
+  Memory House; it changes nothing in either.
 
 The canvas uses the plugin's sign-in, like the hooks. If it reports that you are
 not signed in, run `mh-login`, then select **Refresh**. It
 runs only in the GitHub Copilot app, as a local panel served on `127.0.0.1`.
 Deleting and promoting memories are not available from the panel.
+
+The **Playbooks** tab reads Microsoft IQ with your own Azure CLI sign-in, because the
+Memory House gateway cannot call Microsoft IQ for plugin users yet. Install the
+[Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), run
+`az login --tenant <your Entra tenant ID>` with the same account you use for
+Memory House, then select **Refresh**. The tab shows playbooks only when the two
+accounts are the same person; otherwise it says which account the Azure CLI is
+using. The canvas asks the Azure CLI for a Microsoft IQ token for the tenant in
+`deployment.json`, keeps it in memory only, and calls Microsoft IQ directly. If
+`az` is not on the app's `PATH`, the canvas also checks the usual install
+locations; set `MEMORY_HOUSE_AZ_PATH` to the full path of `az` to choose one. My
+Learnings and the section memories use the plugin's sign-in, and refresh on the
+auto-refresh interval. The playbook list and the open playbooks' sections
+refresh every 10 minutes while the tab is showing, keeping what you have
+expanded; turning auto-refresh off stops both. Memories reach a section only
+after a playbook curator syncs the playbook into Memory House and memories are
+promoted into it.
 
 ## Automatic memory
 

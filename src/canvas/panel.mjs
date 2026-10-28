@@ -107,17 +107,46 @@ export function renderPanel({ token, nonce }) {
   .modal .selall { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 8px; }
   .modal .selall input { width: auto; }
   .modal .selall label { margin: 0; }
+  main[hidden] { display: none; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { width: auto; padding: 4px 12px; border-radius: 999px; border-color: transparent; background: transparent; }
+  .tab[aria-selected="true"] { border-color: var(--mh-accent); background: color-mix(in srgb, var(--mh-accent) 18%, var(--mh-bg)); }
+  .playbook-view { display: block; }
+  .pb-list { margin-top: 12px; max-width: 960px; }
+  .pb { border: 1px solid var(--mh-border); border-radius: 12px; margin-bottom: 8px; }
+  .pb-head { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; align-items: center; text-align: left;
+    padding: 9px 12px; border: 0; border-radius: 12px; background: transparent; }
+  .pb-head:hover { background: var(--mh-soft); }
+  .pb-sub { display: block; font-size: 11px; color: var(--mh-muted); font-weight: 400; }
+  .pb-body { padding: 2px 12px 12px 36px; }
+  .sections { list-style: none; margin: 0; padding: 0 0 0 16px; border-left: 1px solid var(--mh-border); }
+  .sections.top { padding-left: 0; border-left: 0; }
+  .sections li { margin: 8px 0 0; }
+  .sec-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .sec-name { font-weight: 600; overflow-wrap: anywhere; }
+  .sec-desc { font-size: 12px; color: var(--mh-muted); margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .pill.you { background: color-mix(in srgb, var(--mh-accent) 28%, transparent); }
+  .pill.refused { background: var(--true-color-orange-muted, color-mix(in srgb, #bc4c00 20%, transparent)); }
+  .pb.learnings { border-color: color-mix(in srgb, var(--mh-accent) 45%, var(--mh-border)); }
+  .pill.mem-toggle { width: auto; border-color: transparent; cursor: pointer;
+    background: var(--true-color-green-muted, color-mix(in srgb, #1a7f37 20%, transparent)); }
+  .pill.mem-toggle[aria-expanded="true"] { border-color: var(--mh-accent); }
+  .sec-mem { margin: 8px 0 4px; }
 </style>
 </head>
 <body>
 <header>
   <h1>Memory House</h1>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button id="tabMemories" class="tab" role="tab" type="button" aria-selected="true" aria-controls="memoryView">Memories</button>
+    <button id="tabPlaybooks" class="tab" role="tab" type="button" aria-selected="false" aria-controls="playbookView">Playbooks</button>
+  </nav>
   <span id="who" class="who">Loading...</span>
   <span class="spacer"></span>
   <button id="import" class="primary" type="button">Import memory</button>
   <button id="refresh" type="button">Refresh</button>
 </header>
-<main>
+<main id="memoryView" role="tabpanel" aria-labelledby="tabMemories">
   <aside>
     <label>Signed-in principal</label><div id="principal" class="identity">Loading...</div>
     <label>Tenant</label><div id="tenant" class="identity">Loading...</div>
@@ -158,6 +187,13 @@ export function renderPanel({ token, nonce }) {
     <div id="error" class="notice err" role="alert" hidden></div>
     <div id="notices" class="notice" hidden></div>
     <div id="cards"></div>
+  </section>
+</main>
+<main id="playbookView" class="playbook-view" role="tabpanel" aria-labelledby="tabPlaybooks" hidden>
+  <section>
+    <h2>Playbooks</h2>
+    <div class="hint">My Learnings lists your personal memories. Below it are the playbooks and sections Microsoft IQ shows you, read with your Azure CLI sign-in, which must be the account you use for Memory House, and the memories promoted into each section. Select a playbook to load its sections. Memories refresh on the Memories tab's auto-refresh interval, and playbooks and open sections every 10 minutes while this tab is showing, unless auto-refresh is off. Nothing is changed in Microsoft IQ or Memory House.</div>
+    <div id="playbooks" class="pb-list"></div>
   </section>
 </main>
 
@@ -206,17 +242,21 @@ export function renderPanel({ token, nonce }) {
     return html;
   }
 
-  function card(memory) {
+  // In the Playbooks view the section names the scope, and the caller's own principal reads as "You".
+  function card(memory, options = {}) {
     const kind = memory.scope_kind;
     const where = kind === 'personal' ? 'Personal' : memory.scope_path || memory.scope_label;
     const pills = [
-      '<span class="pill ' + esc(kind) + '">' + esc(where) + '</span>',
+      options.hideScope ? '' : '<span class="pill ' + esc(kind) + '">' + esc(where) + '</span>',
       memory.type ? '<span class="pill">' + esc(memory.type) + '</span>' : '',
       memory.source ? '<span class="pill">via ' + esc(memory.source) + '</span>' : '',
       memory.superseded ? '<span class="pill">superseded</span>' : '',
       ...memory.tags.slice(0, 4).map(tag => '<span class="pill">' + esc(tag) + '</span>'),
     ].join('');
     const promo = memory.promotion;
+    const mine = value => Boolean(options.principal) && value === options.principal;
+    const fromLabel = promo && mine(promo.from_scope) ? 'Your personal memories' : promo?.from_label;
+    const origin = promo && mine(promo.origin) ? 'You' : promo?.origin;
     const details = {
       id: memory.id, scope_key: memory.scope_key, scope_path: memory.scope_path || undefined, type: memory.type,
       created_at: memory.created_at, updated_at: memory.updated_at, salience: memory.salience, confidence: memory.confidence, source: memory.source,
@@ -224,8 +264,8 @@ export function renderPanel({ token, nonce }) {
       promotion_rationale: promo?.rationale || undefined, promoted_at: promo?.promoted_at || undefined,
     };
     const promoLines = promo ? '<div class="promo">' +
-      (promo.from_label ? '<div><b>From:</b> ' + esc(promo.from_label) + '</div>' : '') +
-      (promo.origin ? '<div><b>Origin:</b> ' + esc(promo.origin) + '</div>' : '') +
+      (fromLabel ? '<div><b>From:</b> ' + esc(fromLabel) + '</div>' : '') +
+      (origin ? '<div><b>Origin:</b> ' + esc(origin) + '</div>' : '') +
       (promo.rationale ? '<div><b>Why:</b> ' + esc(promo.rationale) + '</div>' : '') + '</div>' : '';
     return '<article class="card"><p>' + esc(memory.content || '(no text)') + '</p>' + promoLines + '<div class="meta">' + pills +
       '</div><details><summary>Details</summary><pre>' + esc(JSON.stringify(details, null, 2)) + '</pre></details></article>';
@@ -301,7 +341,7 @@ export function renderPanel({ token, nonce }) {
     }
   }
 
-  $('refresh').addEventListener('click', load);
+  $('refresh').addEventListener('click', () => refreshView());
   $('filterToggle').addEventListener('click', () => {
     const panel = $('filterPanel');
     panel.hidden = !panel.hidden;
@@ -461,12 +501,395 @@ export function renderPanel({ token, nonce }) {
 
   $('import').addEventListener('click', openChoice);
 
+  // Microsoft IQ playbooks, read through the canvas server with the user's own Azure CLI sign-in.
+  // Each playbook's sections load when it is first expanded. The memories promoted into those
+  // sections and the My Learnings entry come from Memory House, and refresh on the auto-refresh
+  // interval without reading Microsoft IQ. Playbooks and sections change rarely and read slowly,
+  // so the list and the open playbooks refresh quietly every 10 minutes instead.
+  const LEARNINGS = 'learnings';
+  const PLAYBOOK_REFRESH_MS = 10 * 60 * 1000;
+  const pb = {
+    view: 'memories', list: null, listError: '', listLoading: false, listTicket: 0, listCheckedAt: 0,
+    trees: new Map(), treeLoadedAt: new Map(), treeErrors: new Map(), treeRefreshing: new Set(), memories: new Map(),
+    learnings: null, open: new Set(), openSections: new Set(), tickets: new Map(), inflight: new Set(), generation: 0,
+  };
+  const pbKey = playbook => playbook.workspaceId + '/' + playbook.playbookId;
+  const treePath = playbook => '/api/miq/tree?' + new URLSearchParams({ workspace_id: playbook.workspaceId, playbook_id: playbook.playbookId });
+  const plural = (count, noun, nouns) => Number(count) + ' ' + (Number(count) === 1 ? noun : nouns || noun + 's');
+  const ready = value => Boolean(value) && value !== 'loading' && !(value instanceof Error);
+  const me = () => (ready(pb.learnings) ? pb.learnings.principal : null);
+
+  function refreshView() {
+    if (pb.view === 'playbooks') loadPlaybooks();
+    else load();
+  }
+
+  function setView(view) {
+    pb.view = view;
+    const playbooks = view === 'playbooks';
+    $('memoryView').hidden = playbooks;
+    $('playbookView').hidden = !playbooks;
+    $('tabMemories').setAttribute('aria-selected', String(!playbooks));
+    $('tabPlaybooks').setAttribute('aria-selected', String(playbooks));
+    if (!playbooks) return;
+    if (!pb.list && !pb.listLoading) loadPlaybooks();
+    else refreshPlaybooksIfStale();
+  }
+
+  async function getJson(path) {
+    const response = await fetch(path, { headers: HEADERS, cache: 'no-store' });
+    if (response.status === 401) throw new Error('Not signed in to Memory House. Run /mh-login in a chat, then select Refresh.');
+    if (!response.ok) {
+      let body = null;
+      try { body = await response.json(); } catch {}
+      const error = new Error(body && typeof body.message === 'string' ? body.message : 'Memory House request failed (HTTP ' + response.status + ').');
+      error.code = body && typeof body.error === 'string' ? body.error : '';
+      throw error;
+    }
+    return response.json();
+  }
+
+  // Playbooks read with an Azure CLI account that is not the Memory House user would pair someone else's
+  // playbooks with these memories, so none stay shown. Open playbooks reopen once the account matches.
+  const isAccountMismatch = value => value instanceof Error && value.code === 'MIQ_ACCOUNT_MISMATCH';
+  function dropPlaybooks(message) {
+    pb.list = null;
+    pb.listError = message;
+    pb.generation += 1;
+    pb.trees.clear();
+    pb.treeLoadedAt.clear();
+    pb.treeErrors.clear();
+    pb.memories.clear();
+    renderPlaybooks();
+  }
+
+  // Memory House is now signed in as someone else, so the playbooks shown were read for the previous person.
+  function reloadForNewAccount() {
+    dropPlaybooks('You are now signed in to Memory House as someone else. Loading your playbooks...');
+    loadPlaybooks();
+  }
+
+  // Returns true when an answer was about the account rather than the data, after acting on it.
+  function handledAccountChange(value) {
+    if (isAccountMismatch(value)) { dropPlaybooks(value.message); return true; }
+    if (value instanceof Error && value.code === 'MIQ_ACCOUNT_CHANGED') { reloadForNewAccount(); return true; }
+    return false;
+  }
+
+  // A background refresh skips a key whose last request is still running, keeps what is shown until
+  // new data arrives, and redraws only on a change. An explicit load supersedes a running request.
+  // An answer that is no longer current is dropped, and an account change is acted on even in the background.
+  async function fetchMemories(key, path, read, write, quiet, isCurrent = () => true) {
+    if (quiet && pb.inflight.has(key)) return;
+    const ticket = (pb.tickets.get(key) || 0) + 1;
+    pb.tickets.set(key, ticket);
+    pb.inflight.add(key);
+    const previous = read();
+    if (!quiet || !ready(previous)) { write('loading'); renderPlaybooks(); }
+    let next;
+    try {
+      next = await getJson(path);
+    } catch (error) {
+      next = error instanceof Error ? error : new Error('Could not load memories.');
+    }
+    if (pb.tickets.get(key) !== ticket) return;
+    pb.inflight.delete(key);
+    if (!isCurrent() || handledAccountChange(next)) return;
+    if (quiet && ready(previous) && (next instanceof Error || JSON.stringify(next) === JSON.stringify(previous))) return;
+    write(next);
+    renderPlaybooks();
+  }
+
+  function loadLearnings(quiet = false) {
+    return fetchMemories(LEARNINGS, '/api/learnings', () => pb.learnings, value => {
+      const before = ready(pb.learnings) ? pb.learnings.principal : null;
+      pb.learnings = value;
+      // Memory House is now signed in as someone else: reload the playbooks for that person.
+      if (before && ready(value) && value.principal !== before) setTimeout(reloadForNewAccount, 0);
+    }, quiet);
+  }
+
+  function loadSectionMemories(key, quiet = false) {
+    const playbook = (pb.list || []).find(item => pbKey(item) === key);
+    if (!playbook) return;
+    // Memories requested before the playbooks were reloaded or hidden belong to trees no longer shown.
+    const generation = pb.generation;
+    const query = new URLSearchParams({ workspace_id: playbook.workspaceId, playbook_id: playbook.playbookId });
+    return fetchMemories(key, '/api/miq/memories?' + query, () => pb.memories.get(key),
+      value => pb.memories.set(key, value), quiet, () => generation === pb.generation);
+  }
+
+  function memoryCards(records) {
+    const principal = me();
+    return records.map(record => card(record, { hideScope: true, principal })).join('');
+  }
+
+  function sectionHtml(key, node, memories) {
+    const records = ready(memories) && node.scope ? memories.groups[node.scope] || [] : [];
+    const sectionKey = key + ' ' + node.scope;
+    const showing = records.length > 0 && pb.openSections.has(sectionKey);
+    const pills = [];
+    if (node.refused) pills.push('<span class="pill refused">no access (HTTP ' + esc(node.refused) + ')</span>');
+    else if (node.skipped) pills.push('<span class="pill refused">not loaded</span>');
+    else {
+      if (records.length) {
+        pills.push('<button type="button" class="pill mem-toggle" aria-expanded="' + showing + '" data-section="' + esc(sectionKey) +
+          '" title="' + (showing ? 'Hide' : 'Show') + ' the memories in this section"><span aria-hidden="true">' + (showing ? '&#9662; ' : '&#9656; ') +
+          '</span>' + esc(plural(records.length, 'memory', 'memories')) + '</button>');
+      }
+      if (node.role === 'curator') pills.push('<span class="pill you">you: curator</span>');
+      else if (node.curatorVia) {
+        pills.push('<span class="pill you" title="' + esc('You curate ' + node.curatorVia.split('/').join(' / ') + ', which covers the sections below it.') +
+          '">you: curator (inherited)</span>');
+      } else if (node.role) pills.push('<span class="pill you">you: ' + esc(node.role) + '</span>');
+      pills.push('<span class="pill">' + esc(plural(node.curators, 'direct curator')) + '</span>');
+      pills.push('<span class="pill">' + esc(plural(node.users, 'direct user')) + '</span>');
+      if (node.groups) pills.push('<span class="pill">' + esc(plural(node.groups, 'group or app', 'groups or apps')) + '</span>');
+    }
+    const children = (node.children || []).length
+      ? '<ul class="sections">' + node.children.map(child => '<li>' + sectionHtml(key, child, memories) + '</li>').join('') + '</ul>' : '';
+    return '<div class="sec-row"><span class="sec-name">' + esc(node.name) + '</span>' + pills.join('') + '</div>' +
+      (node.description ? '<div class="sec-desc">' + esc(node.description) + '</div>' : '') +
+      (showing ? '<div class="sec-mem">' + memoryCards(records) + '</div>' : '') + children;
+  }
+
+  function memoryNote(memories) {
+    if (memories === 'loading') return '<div class="hint">Loading the memories in these sections...</div>';
+    if (memories instanceof Error) return '<div class="notice err">Memories could not be loaded: ' + esc(memories.message) + '</div>';
+    if (!ready(memories)) return '';
+    if (!memories.total) return '<div class="hint">No memories have been promoted into these sections yet.</div>';
+    return memories.truncated ? '<div class="hint">Showing the newest memories: Memory House returns up to 200 for every 20 sections.</div>' : '';
+  }
+
+  function pbHtml(key, name, sub, body, extraClass) {
+    const open = pb.open.has(key);
+    return '<div class="pb' + (extraClass ? ' ' + extraClass : '') + '"><button type="button" class="pb-head" aria-expanded="' + open + '" data-key="' + esc(key) + '">' +
+      '<span class="tree-icon" aria-hidden="true">' + (open ? '&#9662;' : '&#9656;') + '</span>' +
+      '<span><span class="tree-name">' + esc(name) + '</span><span class="pb-sub">' + esc(sub) + '</span></span></button>' +
+      (open && body ? '<div class="pb-body">' + body + '</div>' : '') + '</div>';
+  }
+
+  function learningsHtml() {
+    const data = pb.learnings;
+    if (data instanceof Error) return pbHtml(LEARNINGS, 'My Learnings', data.message, '', 'learnings');
+    if (!ready(data)) return pbHtml(LEARNINGS, 'My Learnings', 'Loading your personal memories...', '', 'learnings');
+    const sub = data.truncated ? 'Your newest ' + plural(data.total, 'personal memory', 'personal memories')
+      : plural(data.total, 'personal memory', 'personal memories');
+    const body = data.memories.length ? memoryCards(data.memories)
+      : '<div class="empty">No personal memories yet. Memory House saves them from your conversations.</div>';
+    return pbHtml(LEARNINGS, 'My Learnings', sub, body, 'learnings');
+  }
+
+  function playbookHtml(playbook) {
+    const key = pbKey(playbook);
+    const tree = pb.trees.get(key);
+    const memories = pb.memories.get(key);
+    let sub = 'Select to load its sections';
+    let body = '';
+    if (tree === 'loading') sub = 'Loading sections...';
+    else if (tree instanceof Error) { sub = 'Could not load its sections'; body = '<div class="err">' + esc(tree.message) + '</div>'; }
+    else if (tree && !tree.access) sub = 'No access: Microsoft IQ answered HTTP ' + tree.status;
+    else if (tree) {
+      const parts = [plural(tree.sections, 'section')];
+      if (ready(memories)) parts.push(plural(memories.total, 'memory', 'memories'));
+      if (tree.root && tree.root.role) parts.push('you: ' + tree.root.role);
+      sub = parts.join(' - ');
+      const refreshError = pb.treeErrors.get(key);
+      body = (refreshError ? '<div class="notice err">These sections could not be refreshed and may be out of date: ' + esc(refreshError) + '</div>' : '') +
+        memoryNote(memories) + '<ul class="sections top"><li>' + sectionHtml(key, tree.root, memories) + '</li></ul>' +
+        (tree.truncated ? '<div class="hint">Showing the first ' + esc(tree.sections) + ' sections.</div>' : '');
+    }
+    return pbHtml(key, playbook.name, sub, body, '');
+  }
+
+  // innerHTML replaces every button, so focus moves to the replacement of the focused one.
+  function renderPlaybooks() {
+    const container = $('playbooks');
+    const active = container.contains(document.activeElement) ? document.activeElement : null;
+    const focus = active && ['data-section', 'data-key'].find(name => active.hasAttribute(name));
+    const focusValue = focus ? active.getAttribute(focus) : null;
+    let html = learningsHtml();
+    if (pb.listError) html += '<div class="notice err" role="alert">' + esc(pb.listError) + '</div>';
+    if (pb.list === null) html += pb.listLoading ? '<div class="empty">Loading your Microsoft IQ playbooks...</div>' : '';
+    else if (!pb.list.length) html += '<div class="empty">Microsoft IQ lists no playbooks for you.</div>';
+    else html += pb.list.map(playbookHtml).join('');
+    container.innerHTML = html;
+    if (!focus) return;
+    for (const element of container.querySelectorAll('[' + focus + ']')) {
+      if (element.getAttribute(focus) === focusValue) { element.focus(); return; }
+    }
+  }
+
+  async function openPlaybook(key) {
+    const playbook = (pb.list || []).find(item => pbKey(item) === key);
+    if (!playbook) return;
+    pb.open.add(key);
+    const cached = pb.trees.get(key);
+    if (cached && !(cached instanceof Error)) {
+      renderPlaybooks();
+      // Sections cached while the playbook was closed show at once and refresh quietly when old.
+      if (ready(cached) && Date.now() - (pb.treeLoadedAt.get(key) || 0) >= PLAYBOOK_REFRESH_MS) refreshTree(key);
+      return;
+    }
+    const generation = pb.generation;
+    pb.trees.set(key, 'loading');
+    pb.treeErrors.delete(key);
+    renderPlaybooks();
+    let tree;
+    try {
+      tree = await getJson(treePath(playbook));
+    } catch (error) {
+      tree = error instanceof Error ? error : new Error('Could not load this playbook.');
+    }
+    if (generation !== pb.generation || handledAccountChange(tree)) return;
+    pb.trees.set(key, tree);
+    if (ready(tree)) pb.treeLoadedAt.set(key, Date.now());
+    renderPlaybooks();
+    if (ready(tree) && tree.access) loadSectionMemories(key);
+  }
+
+  // Re-reads an open playbook's sections without clearing what is shown. A failure keeps the sections
+  // and says so above them; a change redraws them, keeping expanded sections, and refreshes their memories.
+  async function refreshTree(key) {
+    const playbook = (pb.list || []).find(item => pbKey(item) === key);
+    if (!playbook || pb.treeRefreshing.has(key)) return;
+    pb.treeRefreshing.add(key);
+    const generation = pb.generation;
+    let tree;
+    try {
+      tree = await getJson(treePath(playbook));
+    } catch (error) {
+      tree = error instanceof Error ? error : new Error('Could not refresh this playbook.');
+    } finally {
+      pb.treeRefreshing.delete(key);
+    }
+    if (generation !== pb.generation || !ready(pb.trees.get(key)) || handledAccountChange(tree)) return;
+    if (tree instanceof Error) {
+      if (pb.treeErrors.get(key) !== tree.message) { pb.treeErrors.set(key, tree.message); renderPlaybooks(); }
+      return;
+    }
+    pb.treeLoadedAt.set(key, Date.now());
+    const recovered = pb.treeErrors.delete(key);
+    if (recovered || JSON.stringify(tree) !== JSON.stringify(pb.trees.get(key))) {
+      pb.trees.set(key, tree);
+      if (!tree.access) pb.memories.delete(key);
+      renderPlaybooks();
+    }
+    if (tree.access) loadSectionMemories(key, true);
+  }
+
+  // Refresh reloads the list and every open playbook. The background refresh re-reads the list and
+  // the open playbooks quietly and redraws only what changed. Either way, sections and memories are
+  // replaced only once a new list arrives, so a failed refresh keeps what is shown and reports the
+  // failure above the list. A newer load supersedes an older one.
+  async function loadPlaybooks(quiet = false) {
+    if (quiet && pb.listLoading) return;
+    const ticket = ++pb.listTicket;
+    pb.listLoading = true;
+    pb.listCheckedAt = Date.now();
+    if (!quiet) loadLearnings();
+    let data;
+    try {
+      data = await getJson('/api/miq/playbooks');
+    } catch (error) {
+      data = error instanceof Error ? error : new Error('Could not load your Microsoft IQ playbooks.');
+    }
+    if (ticket !== pb.listTicket) return;
+    pb.listLoading = false;
+    if (handledAccountChange(data)) return;
+    const error = data instanceof Error ? data.message : '';
+    let changed = !quiet || error !== pb.listError;
+    pb.listError = error;
+    if (!error) {
+      const list = Array.isArray(data.playbooks) ? data.playbooks : [];
+      if (quiet) changed = mergeList(list) || changed;
+      else replaceList(list);
+    }
+    if (changed) renderPlaybooks();
+  }
+
+  function replaceList(list) {
+    pb.list = list;
+    pb.generation += 1;
+    pb.trees.clear();
+    pb.treeLoadedAt.clear();
+    pb.treeErrors.clear();
+    pb.memories.clear();
+    for (const key of [...pb.open]) {
+      if (key === LEARNINGS) continue;
+      if (list.some(item => pbKey(item) === key)) openPlaybook(key);
+      else pb.open.delete(key);
+    }
+  }
+
+  // Applies a background list: drops playbooks that are gone, re-reads the open ones and retries an open
+  // playbook whose sections failed to load. Closed playbooks refresh when next opened. Returns whether
+  // the list changed.
+  function mergeList(list) {
+    const changed = JSON.stringify(list) !== JSON.stringify(pb.list);
+    pb.list = list;
+    const listed = new Set(list.map(pbKey));
+    for (const key of [...pb.trees.keys()]) {
+      if (listed.has(key)) continue;
+      pb.trees.delete(key);
+      pb.treeLoadedAt.delete(key);
+      pb.treeErrors.delete(key);
+      pb.memories.delete(key);
+    }
+    for (const key of [...pb.open]) {
+      if (key === LEARNINGS) continue;
+      if (!listed.has(key)) { pb.open.delete(key); continue; }
+      const tree = pb.trees.get(key);
+      if (ready(tree)) refreshTree(key);
+      else if (tree !== 'loading') openPlaybook(key);
+    }
+    return changed;
+  }
+
+  // Memories refresh on the Memories tab's auto-refresh interval, without reading Microsoft IQ.
+  function refreshPlaybookMemories() {
+    loadLearnings(true);
+    for (const [key, tree] of pb.trees) if (ready(tree) && tree.access) loadSectionMemories(key, true);
+  }
+
+  // Checked every minute and when the Playbooks tab is selected. Like the memory refresh, it stops
+  // while auto-refresh is off or the panel is hidden.
+  function refreshPlaybooksIfStale() {
+    if (document.hidden || !autoRefreshSeconds || pb.view !== 'playbooks' || pb.listLoading) return;
+    if (Date.now() - pb.listCheckedAt >= PLAYBOOK_REFRESH_MS) loadPlaybooks(true);
+  }
+
+  $('tabMemories').addEventListener('click', () => setView('memories'));
+  $('tabPlaybooks').addEventListener('click', () => setView('playbooks'));
+  $('playbooks').addEventListener('click', event => {
+    const toggle = event.target.closest('.mem-toggle');
+    if (toggle) {
+      const section = toggle.getAttribute('data-section');
+      if (pb.openSections.has(section)) pb.openSections.delete(section);
+      else pb.openSections.add(section);
+      renderPlaybooks();
+      return;
+    }
+    const head = event.target.closest('.pb-head');
+    if (!head) return;
+    const key = head.getAttribute('data-key');
+    if (pb.open.has(key)) { pb.open.delete(key); renderPlaybooks(); }
+    else if (key === LEARNINGS) { pb.open.add(key); renderPlaybooks(); }
+    else openPlaybook(key);
+  });
+
   let timer = null;
+  let autoRefreshSeconds = 0;
   function setAutoRefresh(seconds) {
     const value = Math.min(Math.max(Number(seconds) || 0, 0), 300);
+    autoRefreshSeconds = value;
     $('autoRefreshValue').textContent = value ? value + 's' : 'off';
     if (timer) clearInterval(timer);
-    timer = value ? setInterval(() => { if (!document.hidden) load(); }, value * 1000) : null;
+    timer = value ? setInterval(() => {
+      if (document.hidden) return;
+      if (pb.view === 'memories') load();
+      else refreshPlaybookMemories();
+    }, value * 1000) : null;
   }
   $('autoRefresh').addEventListener('input', event => {
     const value = Math.min(Math.max(Number(event.target.value) || 0, 0), 300);
@@ -476,6 +899,7 @@ export function renderPanel({ token, nonce }) {
 
   load();
   setAutoRefresh($('autoRefresh').value);
+  setInterval(refreshPlaybooksIfStale, 60 * 1000);
 </script>
 </body>
 </html>`;

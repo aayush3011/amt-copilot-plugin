@@ -14,7 +14,7 @@ Setup takes about five minutes and is a one-time thing per machine.
 
 ## Step 0: Only if you installed the older "amt-memory" plugin
 
-Skip this if this is your first install.
+### **Skip this if this is your first install.**
 
 Memory House used to be called **amt-memory**. Installing the new plugin does not replace the
 old one, it installs alongside it, and both register the same capture hooks. The result is that
@@ -252,15 +252,21 @@ Then continue with Step 1.
 The Copilot app installs plugins from a marketplace, which is just a GitHub repo.
 
 1. Open the **GitHub Copilot app**.
-2. In the sidebar, go to **Customize** then **Plugins**.
-3. Click the **gear icon** next to the marketplace dropdown, then **Add custom marketplace**.
-4. Enter this repository:
+2. In the sidebar, go to Customize --> Add --> Manage marketplace.
+
+![img.png](img.png)
+
+3. Enter this repository:
 
    ```text
    aayush3011/amt-copilot-plugin
    ```
 
-5. The marketplace loads and **memory-house** appears in the plugins list.
+![img_1.png](img_1.png)
+
+4. The marketplace loads and **memory-house** appears in the plugins list.
+
+![img_2.png](img_2.png)
 
 The repository is public, so you do not need to be granted access first.
 
@@ -303,7 +309,6 @@ the troubleshooting entry if you want the details.
 2. Go to the **MCP** tab and confirm **memory-house** shows as connected, with its tools
    listed. You should not be asked to sign in again.
 
-
 ## Step 5: Enroll this device
 
 Open a **new** chat and run:
@@ -312,7 +317,8 @@ Open a **new** chat and run:
 /mh-login
 ```
 
-The agent fetches a short-lived enrollment code and redeems it for you. It should finish by saying it is signed in, without showing you a code or asking you to run anything.
+The agent fetches a short-lived enrollment code and redeems it for you. It should finish by saying it is signed in,
+without showing you a code or asking you to run anything.
 
 ```text
 Signed in to Memory House. Capture and recall are now active on this device.
@@ -350,16 +356,16 @@ before each prompt and captures what matters at the end of each turn.
 
 ## Troubleshooting
 
-| Symptom | Start here |
-| --- | --- |
-| Team or Org is empty | Confirm your account belongs to a configured team. |
-| Every turn shows up twice | The old `amt-memory` plugin is still installed. See Step 0. |
-| Nothing is captured or the canvas asks you to sign in | Run `/mh-login`, then inspect the hook log. |
-| A feature is "not available in this workspace" | Restart Copilot and open a new chat. |
-| The MCP tab returns to **Sign in** | Verify with `whoami`; the badge may be stale. |
-| Sign-in fails with `ENTRA_CONFIG ... 2002` (Windows) | Sign in from the CLI instead. See Step 3. |
-| The MCP server shows no tools | Check disabled and duplicate MCP server settings. |
-| The plugin looks outdated | Re-add the marketplace and reinstall the plugin. |
+| Symptom                                               | Start here                                                  |
+|-------------------------------------------------------|-------------------------------------------------------------|
+| Team or Org is empty                                  | Confirm your account belongs to a configured team.          |
+| Every turn shows up twice                             | The old `amt-memory` plugin is still installed. See Step 0. |
+| Nothing is captured or the canvas asks you to sign in | Run `/mh-login`, then inspect the hook log.                 |
+| A feature is "not available in this workspace"        | Restart Copilot and open a new chat.                        |
+| The MCP tab returns to **Sign in**                    | Verify with `whoami`; the badge may be stale.               |
+| Sign-in fails with `ENTRA_CONFIG ... 2002` (Windows)  | Sign in from the CLI instead. See Step 3.                   |
+| The MCP server shows no tools                         | Check disabled and duplicate MCP server settings.           |
+| The plugin looks outdated                             | Re-add the marketplace and reinstall the plugin.            |
 
 ### Every turn shows up twice
 

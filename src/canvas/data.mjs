@@ -1,12 +1,15 @@
 // Memory House canvas data: the caller's memories from GET /memories, labelled and grouped by
-// the hierarchy nodes in GET /v1/me/reach, plus the identity from GET /whoami. All calls use the
-// plugin's existing gateway-bound HookToken sign-in; nothing here stores credentials.
-import { createClient, MEMORY_LIST_LIMITS, MEMORY_TYPES, sendRequest } from '../client.mjs';
+// the hierarchy nodes in GET /v1/me/reach, plus the identity from GET /whoami. The Playbooks view
+// lists GET /memories narrowed to scope keys: a playbook's sections, or the caller's own scope. All
+// calls use the plugin's existing gateway-bound HookToken sign-in; nothing here stores credentials.
+import { createClient, isListingScope, MEMORY_LIST_LIMITS, MEMORY_TYPES, sendRequest } from '../client.mjs';
+import { MemoryHouseError } from '../errors.mjs';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value, max = 4096) => (typeof value === 'string' && value.length <= max ? value : null);
 const NODE_PREFIX = 'node:';
 const MAX_TIMEOUT_MS = 300_000;
+const SCOPED_LISTING_CONCURRENCY = 3;
 
 export const CANVAS_DEFAULTS = Object.freeze({ limit: MEMORY_LIST_LIMITS.maxCount });
 
@@ -78,6 +81,67 @@ export async function loadCanvasData(gateway, filters = {}) {
   const nodes = reach.status === 'fulfilled' ? validNodes(reach.value.data) : null;
   if (!nodes) warnings.push('The hierarchy could not be loaded, so shared memories are shown by node ID.');
   return shapeCanvasData({ who: identity, nodes: nodes ?? [], listing: listing.value, filters: selected, warnings });
+}
+
+async function mapLimited(values, limit, work) {
+  const results = new Array(values.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < values.length) {
+      const index = next;
+      next += 1;
+      results[index] = await work(values[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
+  return results;
+}
+
+/**
+ * The newest memories the caller can read in each of `scopes`, as canvas records grouped by scope
+ * key. AMT filters one listing by at most 20 scopes and returns at most 200 memories, so scopes are
+ * listed in batches of 20, and `truncated` is true when a batch had more. `labels` maps a scope to
+ * `{ name, path }` for card labels. Scope keys AMT cannot filter by, such as keys longer than 512
+ * characters, are skipped.
+ */
+export async function loadScopedMemories(gateway, scopes, { labels = new Map(), principal = null } = {}) {
+  const wanted = [...new Set(scopes)].filter(isListingScope);
+  const batches = [];
+  for (let index = 0; index < wanted.length; index += MEMORY_LIST_LIMITS.maxScopes) {
+    batches.push(wanted.slice(index, index + MEMORY_LIST_LIMITS.maxScopes));
+  }
+  const listings = await mapLimited(batches, SCOPED_LISTING_CONCURRENCY,
+    batch => gateway.client.getMemories({ recent_k: MEMORY_LIST_LIMITS.maxCount, scopes: batch }));
+  const keep = new Set(wanted);
+  const groups = {};
+  const seen = new Set();
+  let total = 0;
+  for (const item of listings.flatMap(listing => listing.items)) {
+    if (!isObject(item) || typeof item.id !== 'string' || seen.has(item.id) || !keep.has(item.scope_key)) continue;
+    seen.add(item.id);
+    const record = shapeRecord(item, labels, principal);
+    (groups[record.scope_key] ||= []).push(record);
+    total += 1;
+  }
+  for (const list of Object.values(groups)) list.sort(newestFirst);
+  return { groups, total, truncated: listings.some(listing => listing.has_more === true) };
+}
+
+/** The caller's personal memories: the newest 200 in the principal scope that GET /whoami names. */
+export async function loadPersonalMemories(gateway) {
+  const who = await loadIdentity(gateway);
+  if (!isListingScope(who.principal)) {
+    throw new MemoryHouseError('INVALID_RESPONSE', 'Memory House did not return your signed-in identity. Try again.');
+  }
+  const { groups, total, truncated } = await loadScopedMemories(gateway, [who.principal], { principal: who.principal });
+  return { principal: who.principal, tenant: who.tenant, memories: groups[who.principal] ?? [], total, truncated };
+}
+
+/** The signed-in Memory House principal and tenant from GET /whoami. */
+export async function loadIdentity(gateway) {
+  const who = validWho((await gateway.json('/whoami', { operation: 'identity' })).data);
+  if (!who) throw new MemoryHouseError('INVALID_RESPONSE', 'Memory House did not return your signed-in identity. Try again.');
+  return who;
 }
 
 function displayPath(path) {

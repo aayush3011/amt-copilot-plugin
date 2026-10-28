@@ -4,8 +4,9 @@
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { MemoryHouseError, safeError } from '../errors.mjs';
-import { createGateway, loadCanvasData, summarizeCanvasData } from './data.mjs';
+import { createGateway, loadCanvasData, loadIdentity, loadPersonalMemories, loadScopedMemories, summarizeCanvasData } from './data.mjs';
 import { defaultRoots, importMemories, importSessions, importSource, listSessions, IMPORT_LIMITS } from './importers.mjs';
+import { createMiqReader, isGuid } from './miq.mjs';
 import { renderPanel } from './panel.mjs';
 
 export { createGateway, loadCanvasData, summarizeCanvasData };
@@ -85,15 +86,86 @@ function failure(res, error) {
   return sendJson(res, 500, { error: 'internal_error', message: 'The Memory House canvas hit an unexpected error.' });
 }
 
+function playbookKey(url) {
+  const workspaceId = (url.searchParams.get('workspace_id') ?? '').toLowerCase();
+  const playbookId = (url.searchParams.get('playbook_id') ?? '').toLowerCase();
+  if (!isGuid(workspaceId) || !isGuid(playbookId)) {
+    throw new RequestError(400, 'invalid_playbook', 'Choose a playbook from the list.');
+  }
+  return `${workspaceId}/${playbookId}`;
+}
+
+// Each readable section's AMT scope with the name and path its memory cards show.
+function sectionLabels(root) {
+  const labels = new Map();
+  const visit = node => {
+    if (node.scope) labels.set(node.scope, { name: node.name, path: node.path });
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(root);
+  return labels;
+}
+
 /**
  * Start one canvas server on an ephemeral loopback port.
  * `gateway` options are passed to createGateway (tests inject a client configuration);
- * `roots` overrides the Copilot and Claude history locations.
+ * `roots` overrides the Copilot and Claude history locations; `miq` options are passed to
+ * createMiqReader (tests inject fetch and a token source).
  */
-export async function startCanvasServer({ gateway: gatewayOptions = {}, roots = defaultRoots() } = {}) {
+export async function startCanvasServer({ gateway: gatewayOptions = {}, roots = defaultRoots(), miq: miqOptions = {} } = {}) {
   const token = randomBytes(32).toString('base64url');
   let gateway;
   const getGateway = () => (gateway ??= createGateway(gatewayOptions));
+  let miq;
+  const getMiq = () => (miq ??= createMiqReader({
+    ...miqOptions, tenantId: miqOptions.tenantId ?? getGateway().client.config.tenantId,
+  }));
+  // Trees load only for playbooks Microsoft IQ listed, so the page never supplies a section path.
+  let playbooks = new Map();
+  // Section scopes of each loaded tree, so refreshing its memories does not read Microsoft IQ again.
+  const trees = new Map();
+  // The Memory House principal the cached playbooks and trees were read for, and a counter that
+  // changes whenever they are forgotten, so a read that started before then is not cached or shown.
+  let verifiedFor = null;
+  let readGeneration = 0;
+  const forgetPlaybooks = () => {
+    playbooks = new Map();
+    trees.clear();
+    verifiedFor = null;
+    readGeneration += 1;
+  };
+  const accountChanged = () => new MemoryHouseError('MIQ_ACCOUNT_CHANGED', 'You are now signed in to Memory House as someone else. Select Refresh to load your playbooks.');
+  const requireSameRead = generation => {
+    if (generation !== readGeneration) throw accountChanged();
+  };
+  const listPlaybooks = async (account, generation) => {
+    const listing = await getMiq().listPlaybooks(account);
+    requireSameRead(generation);
+    playbooks = new Map(listing.playbooks.map(playbook => [`${playbook.workspaceId}/${playbook.playbookId}`, playbook]));
+    for (const key of trees.keys()) if (!playbooks.has(key)) trees.delete(key);
+    return listing;
+  };
+  // Microsoft IQ is read with the Azure CLI account, so it is read only for the person signed in to
+  // Memory House; otherwise the page would show one person's playbooks beside another person's memories.
+  // Every read in the request uses the verified account's token. A mismatch, or a different person
+  // than the cached trees were read for, forgets those trees so their section memories are not listed.
+  const verifiedMiq = async () => {
+    const reader = getMiq();
+    const principal = (async () => (await loadIdentity(getGateway())).principal)();
+    let account;
+    try {
+      account = await reader.verifyAccount(principal);
+    } catch (error) {
+      if (error?.code === 'MIQ_ACCOUNT_MISMATCH') forgetPlaybooks();
+      throw error;
+    }
+    const person = (await principal).toLowerCase();
+    if (person !== verifiedFor) {
+      forgetPlaybooks();
+      verifiedFor = person;
+    }
+    return { reader, account, generation: readGeneration };
+  };
   let port = 0;
   let importing = false;
 
@@ -149,6 +221,36 @@ export async function startCanvasServer({ gateway: gatewayOptions = {}, roots = 
           const source = importSource(body.source);
           return sendJson(res, 200, await exclusive(() => importMemories({ gateway: getGateway(), source, roots })));
         }
+        case 'GET /api/miq/playbooks': {
+          const { account, generation } = await verifiedMiq();
+          return sendJson(res, 200, await listPlaybooks(account, generation));
+        }
+        case 'GET /api/miq/tree': {
+          const key = playbookKey(url);
+          const { reader, account, generation } = await verifiedMiq();
+          if (!playbooks.has(key)) await listPlaybooks(account, generation);
+          const playbook = playbooks.get(key);
+          if (!playbook) throw new RequestError(404, 'playbook_not_listed', 'Microsoft IQ does not list this playbook for you. Refresh the list.');
+          const tree = await reader.loadPlaybookTree(playbook, account);
+          requireSameRead(generation);
+          if (tree.access) trees.set(key, sectionLabels(tree.root));
+          else trees.delete(key);
+          return sendJson(res, 200, tree);
+        }
+        case 'GET /api/miq/memories': {
+          const key = playbookKey(url);
+          // The trees were read for one Memory House user; signing in as someone else ends their use.
+          const person = (await loadIdentity(getGateway())).principal.toLowerCase();
+          if (verifiedFor !== null && person !== verifiedFor) {
+            forgetPlaybooks();
+            throw accountChanged();
+          }
+          const labels = trees.get(key);
+          if (!labels) throw new RequestError(404, 'playbook_not_loaded', 'Open the playbook to load its sections first.');
+          return sendJson(res, 200, await loadScopedMemories(getGateway(), [...labels.keys()], { labels }));
+        }
+        case 'GET /api/learnings':
+          return sendJson(res, 200, await loadPersonalMemories(getGateway()));
         default:
           throw new RequestError(404, 'not_found', 'Not found.');
       }

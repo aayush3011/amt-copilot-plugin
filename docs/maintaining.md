@@ -92,8 +92,36 @@ only `127.0.0.1`, validates callback host/path and rejects duplicate codes/state
 Browser sign-in has a three-minute deadline and closes its listener on exit.
 No device-code or Azure CLI dependency is required.
 
+**Two audiences.** Hooks and canvas use `entra.scope` (the gateway resource).
+Claude/Codex MCP headers use `entra.mcpScope`, because the hosted MCP server
+accepts only its own audience and uses the token for on-behalf-of calls. After
+the gateway sign-in, login acquires the MCP token silently for the same account;
+only when Entra requires interaction (typically missing consent) does it open one
+more browser step with that account's login hint. Entra rejects a single request
+that combines a `/.default` scope with a specific permission (`AADSTS70011`), so
+`extraScopesToConsent` cannot be used here. A declined or different-account MCP
+step leaves the gateway sign-in in place and reports `mcpReady: false` with a
+safe `mcpReason` code; a different account is removed from the cache.
+
+**Tenant.** `entra.tenantId` is optional and, when set, must be a tenant GUID or
+verified domain; `common`, `organizations` and `consumers` are rejected because
+guest accounts need a tenant-specific authority. A domain resolves to its GUID
+from Microsoft's OpenID metadata. Login also sends an unauthenticated
+`GET <gateway>/whoami` and reads the `401` challenge
+`WWW-Authenticate: Bearer authorization_uri="https://login.microsoftonline.com/<tenant>"`
+(other parameters such as `error="invalid_token"` are allowed, in any order).
+Only an HTTPS `login.microsoftonline.com` URI whose path is exactly one tenant
+GUID is accepted; other hosts are never followed. Without a configured tenant the
+challenge is required; with one, a valid challenge for another tenant fails with
+`TENANT_MISMATCH` before any browser opens, and a missing challenge is ignored.
+The effective tenant GUID selects the MSAL authority, must equal the token's
+tenant, is part of the cache context, and is recorded in `auth.json` for
+background requests, which never run discovery. If a pinned tenant later differs
+from the recorded one, requests fail with `TENANT_CHANGED` until `mh-login`.
+`mh-status` reports the tenant.
+
 `src/entra.mjs` loads the selected account from the protected MSAL cache and uses
-`acquireTokenSilent` for every non-login request. A valid cached token is reused;
+`acquireTokenSilent` for every non-login request, with the scope for its audience. A valid cached token is reused;
 near expiry, MSAL renews on demand using its cached renewal state. The serialized
 cache (including refresh-token rotation) is persisted under a cross-process lock.
 Within one client, acquisition is deduplicated and tokens are kept until expiry
@@ -102,7 +130,9 @@ Interaction-required results tell the user to run `mh-login`; background hooks,
 headers and canvas never open a browser. Rejected gateway requests are not retried.
 
 **Persistent cache.** `~/.memory-house/msal-cache.json.enc` contains an encrypted
-MSAL cache plus the selected account and tenant/client/scope context. Existing
+MSAL cache plus the selected account and effective-tenant/client/scope context.
+An explicit sign-in replaces a cache whose context no longer matches; background
+requests reject it. Existing
 owned-directory, no-follow, bounded-read and atomic-write helpers protect state.
 Unix directories/files use 0700/0600. A separate `msal-cache.lock` serializes
 read/refresh/write and deletion; login/logout also hold the auth-preference lock.
@@ -122,10 +152,11 @@ users/machines, inspect them in chat or commit them. OS protection does not defe
 against malicious code already running as the same user. Pure bundled Node remains
 the packaging contract: no native keytar/MSAL Extensions install on user machines.
 
-`runtime/auth.mjs headers` emits one JSON object with the authorization header,
-or `{}` on failure; sanitized diagnostics go to stderr. Network/cache operation
+`runtime/auth.mjs headers` emits one JSON object with the MCP-audience
+authorization header, or `{}` on failure; sanitized diagnostics go to stderr. Network/cache operation
 timeouts default to 10 seconds (maximum 30), capped at 7 seconds for headers and
-5 seconds for hooks. Interactive login separately allows three minutes.
+5 seconds for hooks. Interactive login separately allows three minutes per
+browser step (two steps when MCP consent is missing).
 
 - **Claude** runs `headersHelper` from the plugin root with `CLAUDE_PLUGIN_ROOT`.
   Run `mh-login` and reconnect MCP instead of relying on host OAuth.
@@ -149,12 +180,16 @@ plugin refresh/revoke endpoint. Claude/Codex enrollment-only post-tool hooks sta
 removed; Copilot keeps post-tool recall and safely discards old enrollment results.
 
 **Gateway prerequisite (not changed here).** MISE must validate Entra tokens on
-MCP, `/hook/capture`, `/hook/search`, `/memories` and canvas routes, including
+capture (`POST /memory`), search (`POST /search`), `/memories` and canvas routes,
+and the MCP server must validate tokens for `entra.mcpScope`, including
 issuer/tenant, API audience (appropriate to its token version), lifetime and
 delegated `scp`/authorization checks. The reused public client
 `45cdeed7-4e4e-481d-9f00-6708c0631565` must allow the exact loopback redirect,
 authorization code + PKCE without a secret, and consent to the gateway's exposed
-delegated permissions for `https://dbinference.azure.com/.default`.
+delegated permissions for `https://dbinference.azure.com/.default` and the
+MCP permission `api://inference-service-mcp/Logs.Read`. The gateway's `/hook/*`
+routes accept HookTokens only and are no longer called. Unauthenticated requests
+should return the tenant challenge described above.
 `.default` selects configured permissions; it is not an authorization claim.
 Gateway consent and live sign-in have not been verified by fixture tests.
 
@@ -295,7 +330,7 @@ stream.
 
 ## Publisher configuration
 
-`plugin/deployment.json` contains only the public gateway, tenant, client, scope and redirect.
+`plugin/deployment.json` contains only the public gateway, optional tenant, client, gateway and MCP scopes, and redirect.
 Hooks, canvas and auth helpers read it; `mcp.json` repeats the gateway with
 `/mcp/`. The Entra scope is configured below; live gateway compatibility
 for this authentication path must still be verified:
@@ -303,8 +338,9 @@ for this authentication path must still be verified:
 | Setting | Configured value (live consent unverified) |
 | --- | --- |
 | Gateway | `https://reranker-api-h2b5czhkfkcphnf4.westus3-01.azurewebsites.net/inference/memory` |
-| Entra tenant | `72f988bf-86f1-41af-91ab-2d7cd011db47` |
+| Entra tenant (optional; omit to discover) | `72f988bf-86f1-41af-91ab-2d7cd011db47` |
 | API scope | `https://dbinference.azure.com/.default` |
+| MCP scope | `api://inference-service-mcp/Logs.Read` |
 | Public client | `45cdeed7-4e4e-481d-9f00-6708c0631565` |
 | Loopback redirect | `http://127.0.0.1:33418` |
 

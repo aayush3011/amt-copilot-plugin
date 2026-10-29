@@ -15,10 +15,11 @@ test('packaged publisher defaults select the Entra public client, tenant and gat
   assert.equal(config.tenantId, '72f988bf-86f1-41af-91ab-2d7cd011db47');
   assert.equal(config.clientId, '45cdeed7-4e4e-481d-9f00-6708c0631565');
   assert.equal(config.scope, 'https://dbinference.azure.com/.default');
+  assert.equal(config.mcpScope, 'api://inference-service-mcp/Logs.Read');
   assert.equal(config.redirectUri, 'http://127.0.0.1:33418');
   assert.deepEqual(config.publisherMissing, []);
   assert.doesNotThrow(() => requirePublisherConfig(config));
-  assert.equal(config.hookBase, `${config.gatewayBase}/hook`);
+  assert.equal(config.hookBase, undefined);
   assert.equal(config.mcpUrl, `${config.gatewayBase}/mcp/`);
   await assert.rejects(access(config.stateDir), { code: 'ENOENT' });
 });
@@ -54,8 +55,11 @@ test('missing public settings are named as publisher work, not an end-user confi
   const deployment = fixtureDeployment();
   deployment.entra.tenantId = null;
   deployment.entra.scope = null;
+  deployment.entra.mcpScope = null;
   const config = loadConfig({ env, deployment });
-  assert.deepEqual(config.publisherMissing, ['entra.tenantId', 'entra.scope']);
+  // The tenant is optional: mh-login discovers it from the gateway.
+  assert.deepEqual(config.publisherMissing, ['entra.scope', 'entra.mcpScope']);
+  assert.equal(config.tenantId, null);
   assert.throws(() => requirePublisherConfig(config), error =>
     error.code === 'PUBLISHER_CONFIG_MISSING' && /publisher/.test(error.message));
 });

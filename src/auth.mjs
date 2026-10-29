@@ -13,9 +13,9 @@ export async function runAuthCommand(command, {
     configured = loadConfig({ env, ...(pluginRoot ? { pluginRoot } : {}) });
     if (command === 'headers') {
       const config = { ...configured, authTimeoutMs: Math.min(configured.authTimeoutMs, 7000) };
-      result = { Authorization: `Bearer ${await createClient({ config, env, acquireToken }).getAccessToken()}` };
+      result = { Authorization: `Bearer ${await createClient({ config, env, acquireToken }).getAccessToken('mcp')}` };
     } else if (command === 'login') {
-      stderr.write('Opening Microsoft sign-in in your browser. Complete sign-in there; never enter credentials in chat.\n');
+      stderr.write('Opening Microsoft sign-in in your browser. Complete sign-in there, and approve Memory House tool access if Microsoft asks; never enter credentials in chat.\n');
       result = await createClient({ config: configured, env, acquireToken }).login();
     } else if (command === 'status') {
       result = await createClient({ config: configured, env, acquireToken }).status();

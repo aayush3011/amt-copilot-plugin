@@ -1,8 +1,9 @@
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { assertSafeUrl, loadConfig, requirePublisherConfig, MemoryHouseError } from './config.mjs';
+import { assertSafeUrl, isTenantGuid, loadConfig, requirePublisherConfig, MemoryHouseError } from './config.mjs';
 import { atomicJson, ensureDirectory, inspect, owned, readState as readFile, removeFile, withLock } from './state.mjs';
 import { acquireEntraToken, clearEntraCache } from './entra.mjs';
+import { resolveLoginTenant } from './tenant.mjs';
 
 export { MemoryHouseError } from './config.mjs';
 
@@ -191,7 +192,7 @@ export async function sendRequest({
 export function createClient(options = {}) {
   const config = Object.freeze({ ...(options.config ?? loadConfig(options)) });
   const safeBase = assertSafeUrl(config.gatewayBase, config).href.replace(/\/$/, '');
-  if (safeBase !== config.gatewayBase || config.hookBase !== `${safeBase}/hook`
+  if (safeBase !== config.gatewayBase
       || config.mcpUrl !== `${safeBase}/mcp/` || config.authStatePath !== join(config.stateDir, 'auth.json')
       || config.lockPath !== `${config.authStatePath}.lock`
       || config.cachePath !== join(config.stateDir, 'msal-cache.json.enc')
@@ -206,10 +207,14 @@ export function createClient(options = {}) {
   }
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const acquireToken = options.acquireToken ?? ((settings, request) => acquireEntraToken(settings, { ...request, env: options.env, clock: options.clock }));
-  let token;
-  let acquiring;
+  // One in-memory token per audience: `gateway` for hooks and canvas, `mcp` for Claude/Codex headers.
+  let tokens = {};
+  const acquiring = {};
   let generation = null;
   let revision = 0;
+  // The tenant recorded by the last explicit sign-in, and the deployment setting it was resolved from.
+  let signedInTenant = null;
+  let signedInSetting = null;
   const clock = options.clock ?? Date.now;
   const now = () => {
     const value = clock();
@@ -222,7 +227,6 @@ export function createClient(options = {}) {
       maxResponseBytes: config.maxResponseBytes, method, body, operation, allowEmpty,
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
-  const request = (endpoint, options) => requestUrl(`${config.hookBase}/${endpoint}`, { operation: endpoint, ...options });
   const locked = async work => {
     await ensureDirectory(config.stateDir);
     return withLock(config.lockPath, config.lockTimeoutMs, async () => {
@@ -240,8 +244,10 @@ export function createClient(options = {}) {
     }
     const raw = await readFile(config.authStatePath);
     if (raw === null) {
-      if (generation !== null) { token = undefined; revision++; }
+      if (generation !== null) { tokens = {}; revision++; }
       generation = null;
+      signedInTenant = null;
+      signedInSetting = null;
       return false;
     }
     let state;
@@ -249,33 +255,54 @@ export function createClient(options = {}) {
       throw fail('INVALID_AUTH_STATE', 'Memory House sign-in preference is invalid. Run mh-login to reset it.');
     }
     if (!isObject(state) || state.version !== 1 || typeof state.disabled !== 'boolean'
-      || typeof state.generation !== 'string' || !/^[a-f\d-]{36}$/i.test(state.generation)) {
+      || typeof state.generation !== 'string' || !/^[a-f\d-]{36}$/i.test(state.generation)
+      || (state.tenantId !== undefined && !isTenantGuid(state.tenantId))
+      || (state.tenantSetting !== undefined && state.tenantSetting !== null && typeof state.tenantSetting !== 'string')) {
       throw fail('INVALID_AUTH_STATE', 'Memory House sign-in preference is invalid. Run mh-login to reset it.');
     }
-    if (generation !== state.generation) { token = undefined; revision++; }
+    if (generation !== state.generation) { tokens = {}; revision++; }
     generation = state.generation;
+    signedInTenant = state.tenantId?.toLowerCase() ?? null;
+    signedInSetting = state.tenantSetting ?? null;
     return state.disabled;
   };
 
-  async function currentToken() {
+  // Background requests never discover a tenant: they use the one mh-login recorded, or a pinned GUID.
+  function effectiveTenant() {
+    const setting = config.tenantId;
+    if (signedInTenant) {
+      const pinned = isTenantGuid(setting) ? setting.toLowerCase() !== signedInTenant
+        : Boolean(setting) && setting.toLowerCase() !== signedInSetting?.toLowerCase();
+      if (pinned) {
+        throw fail('TENANT_CHANGED', 'The deployment tenant differs from the tenant this device signed in to. Run mh-login.');
+      }
+      return signedInTenant;
+    }
+    if (isTenantGuid(setting)) return setting.toLowerCase();
+    throw fail('ENTRA_AUTH_REQUIRED', 'Sign in to Memory House with mh-login. Background requests never open a browser.');
+  }
+
+  async function currentToken(resource, tenantId) {
     requirePublisherConfig(config);
-    if (token && token.expiresAt > now() + config.tokenSkewSeconds) return token;
+    const cached = tokens[resource];
+    if (cached && cached.expiresAt > now() + config.tokenSkewSeconds) return cached;
     const startedRevision = revision;
-    if (!acquiring) acquiring = acquireToken(config).then(value => {
+    if (!acquiring[resource]) acquiring[resource] = acquireToken({ ...config, tenantId }, { resource }).then(value => {
       validateCredential(value?.accessToken, 'Entra access token');
       if (!Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now() + config.tokenSkewSeconds) {
         throw fail('ENTRA_TOKEN_INVALID', 'Microsoft did not provide a usable token expiry.');
       }
-      if (revision === startedRevision) token = value;
+      if (revision === startedRevision) tokens[resource] = value;
       return value;
-    }).finally(() => { acquiring = undefined; });
-    return acquiring;
+    }).finally(() => { acquiring[resource] = undefined; });
+    return acquiring[resource];
   }
 
-  async function getAccessToken() {
+  async function getAccessToken(resource = 'gateway') {
+    if (!['gateway', 'mcp'].includes(resource)) throw fail('INVALID_CONFIG', 'Unsupported Memory House token request.');
     if (await disabled()) throw fail('NOT_SIGNED_IN', 'Memory House is disabled on this device. Run mh-login to sign in.');
     const started = generation;
-    const value = await currentToken();
+    const value = await currentToken(resource, effectiveTenant());
     if (await disabled() || started !== generation) throw fail('NOT_SIGNED_IN', 'Memory House sign-in changed while acquiring a token. Retry the operation.');
     return value.accessToken;
   }
@@ -283,19 +310,23 @@ export function createClient(options = {}) {
   async function login() {
     return locked(async () => {
       revision++;
-      token = undefined;
+      tokens = {};
       requirePublisherConfig(config);
-      const value = await acquireToken(config, { interactive: true });
+      const tenantId = await resolveLoginTenant(config, { fetch: fetchImpl });
+      const value = await acquireToken({ ...config, tenantId }, { interactive: true });
       validateCredential(value?.accessToken, 'Entra access token');
       if (!Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now() + config.tokenSkewSeconds) {
         throw fail('ENTRA_TOKEN_INVALID', 'Microsoft did not provide a usable token expiry.');
       }
-      token = value;
+      tokens.gateway = { accessToken: value.accessToken, expiresAt: value.expiresAt };
       // Remove obsolete plugin-issued credentials without reading them.
       await removeFile(join(config.stateDir, 'token.json'));
       generation = randomUUID();
-      await atomicJson(config.authStatePath, { version: 1, disabled: false, generation });
-      return { signedIn: true, needsLogin: false, source: 'entra', accessExpiresAt: value.expiresAt };
+      signedInTenant = tenantId;
+      signedInSetting = config.tenantId ?? null;
+      await atomicJson(config.authStatePath, { version: 1, disabled: false, generation, tenantId, tenantSetting: signedInSetting });
+      return { signedIn: true, needsLogin: false, source: 'entra', tenantId, accessExpiresAt: value.expiresAt,
+        mcpReady: value.mcpReady === true, ...(value.mcpReady === false && value.mcpReason ? { mcpReason: value.mcpReason } : {}) };
     });
   }
 
@@ -303,7 +334,7 @@ export function createClient(options = {}) {
     return locked(async () => {
       revision++;
       await atomicJson(config.authStatePath, { version: 1, disabled: true, generation: randomUUID() });
-      token = undefined;
+      tokens = {};
       await clearEntraCache(config);
       await removeFile(join(config.stateDir, 'token.json'));
       return { signedOut: true,
@@ -323,7 +354,7 @@ export function createClient(options = {}) {
       throw fail('INVALID_PAYLOAD', 'Capture request exceeds the 256 KiB Memory House limit.');
     }
     const token = await getAccessToken();
-    return (await request('capture', { body, token })).data;
+    return (await requestUrl(`${config.gatewayBase}/memory`, { body, token, operation: 'capture' })).data;
   }
 
   async function search(query, topK = 8) {
@@ -332,7 +363,7 @@ export function createClient(options = {}) {
       throw fail('INVALID_PAYLOAD', 'topK must be an integer from 1 to 50.');
     }
     const token = await getAccessToken();
-    const { data } = await request('search', { body: { query, top_k: topK }, token });
+    const { data } = await requestUrl(`${config.gatewayBase}/search`, { body: { query, top_k: topK }, token, operation: 'search' });
     if (!isObject(data) || !Array.isArray(data.items)) {
       throw fail('INVALID_RESPONSE', 'Memory House search did not return an items array.');
     }
@@ -376,10 +407,12 @@ export function createClient(options = {}) {
   async function status() {
     try {
       await getAccessToken();
-      return { signedIn: true, needsLogin: false, source: 'entra', accessExpiresAt: token.expiresAt };
+      return { signedIn: true, needsLogin: false, source: 'entra', tenantId: effectiveTenant(),
+        accessExpiresAt: tokens.gateway?.expiresAt ?? null };
     } catch (error) {
-      if (!['NOT_SIGNED_IN', 'ENTRA_AUTH_REQUIRED'].includes(error.code)) throw error;
-      return { signedIn: false, needsLogin: true, source: 'entra', accessExpiresAt: null, reason: error.code };
+      if (!['NOT_SIGNED_IN', 'ENTRA_AUTH_REQUIRED', 'TENANT_CHANGED'].includes(error.code)) throw error;
+      return { signedIn: false, needsLogin: true, source: 'entra', tenantId: signedInTenant
+        ?? (isTenantGuid(config.tenantId) ? config.tenantId.toLowerCase() : null), accessExpiresAt: null, reason: error.code };
     }
   }
 

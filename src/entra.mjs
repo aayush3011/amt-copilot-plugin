@@ -6,11 +6,15 @@ import { atomicJson, ensureDirectory, readState, removeFile, withLock } from './
 import { createCacheProtection } from './cache-protection.mjs';
 import { openBrowserUrl } from './browser.mjs';
 import { sendRequest } from './client.mjs';
-import { validateEntraConfig } from './config.mjs';
+import { isTenantGuid, validateEntraConfig } from './config.mjs';
 
 const fail = (code, message) => new MemoryHouseError(code, message);
 const required = () => fail('ENTRA_AUTH_REQUIRED', 'Sign in to Memory House with mh-login. Background requests never open a browser.');
+// config.tenantId here is the effective tenant GUID, configured or discovered at mh-login.
 const context = config => JSON.stringify([config.tenantId, config.clientId, config.scope]);
+const RESOURCES = new Set(['gateway', 'mcp']);
+const needsInteraction = error => error instanceof InteractionRequiredAuthError
+  || ['invalid_grant', 'no_tokens_found', 'no_account_in_silent_request'].includes(error?.errorCode);
 
 function authorityUrl(value) {
   const url = new URL(value);
@@ -36,7 +40,7 @@ function networkClient(config, fetchImpl) {
   };
 }
 
-export async function browserSignIn(pca, config, { openBrowser = openBrowserUrl, timeoutMs = 180_000 } = {}) {
+export async function browserSignIn(pca, config, { openBrowser = openBrowserUrl, timeoutMs = 180_000, loginHint } = {}) {
   const redirect = new URL(config.redirectUri);
   const state = randomBytes(32).toString('base64url');
   const verifier = randomBytes(32).toString('base64url');
@@ -86,7 +90,9 @@ export async function browserSignIn(pca, config, { openBrowser = openBrowserUrl,
     });
     active();
     const request = { scopes: [config.scope], redirectUri: config.redirectUri, state,
-      responseMode: 'query', codeChallenge: challenge, codeChallengeMethod: 'S256', prompt: 'select_account' };
+      responseMode: 'query', codeChallenge: challenge, codeChallengeMethod: 'S256',
+      // A follow-up consent step targets the account that just signed in instead of showing the picker.
+      ...(loginHint ? { loginHint } : { prompt: 'select_account' }) };
     const url = authorityUrl(await pca.getAuthCodeUrl(request));
     active();
     if (['access_token', 'refresh_token', 'client_secret', 'code_verifier', 'code'].some(key => url.searchParams.has(key))) {
@@ -113,11 +119,50 @@ export async function browserSignIn(pca, config, { openBrowser = openBrowserUrl,
   }
 }
 
+function usableToken(result, config, clock, label) {
+  const expiresAt = Math.floor(result?.expiresOn?.getTime() / 1000);
+  if (typeof result?.accessToken !== 'string' || !/^[a-z\d._~+/-]+=*$/i.test(result.accessToken)
+    || result.accessToken.length > 32 * 1024 || !result.account?.homeAccountId
+    || result.tenantId?.toLowerCase() !== config.tenantId.toLowerCase()
+    || !Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(clock() / 1000) + config.tokenSkewSeconds) {
+    throw fail('ENTRA_TOKEN_INVALID', `Microsoft did not return a usable ${label} access token. Retry mh-login.`);
+  }
+  return { accessToken: result.accessToken, expiresAt };
+}
+
+/**
+ * After the gateway sign-in, obtains the MCP token from the same account: silently when its consent
+ * already exists, otherwise through one more browser step for that account. Entra rejects one request
+ * that combines the gateway's `.default` scope with a specific MCP permission (AADSTS70011).
+ */
+async function signInForMcp(pca, cache, config, account, { openBrowser, clock }) {
+  let result;
+  try {
+    result = await pca.acquireTokenSilent({ account, scopes: [config.mcpScope] });
+  } catch (error) {
+    if (!needsInteraction(error)) throw error;
+    result = await browserSignIn(pca, { ...config, scope: config.mcpScope }, { openBrowser, loginHint: account.username });
+  }
+  if (result?.account?.homeAccountId !== account.homeAccountId) {
+    // Drop a different account picked in the consent step so the cache keeps only the signed-in user.
+    if (result?.account && typeof cache.removeAccount === 'function') await cache.removeAccount(result.account);
+    throw fail('ENTRA_ACCOUNT_MISMATCH', 'Approve Memory House tool access with the same account you signed in with, then retry mh-login.');
+  }
+  usableToken(result, config, clock, 'MCP');
+}
+
+/**
+ * `resource` selects the gateway scope (hooks and canvas) or the MCP scope (Claude/Codex headers).
+ * `interactive` signs in for the gateway and then the MCP scope; background calls are always silent.
+ */
 export async function acquireEntraToken(config, {
-  interactive = false, env = process.env, protection = createCacheProtection(config, { env }), createApplication,
-  openBrowser, fetch: fetchImpl = globalThis.fetch, clock = Date.now,
+  interactive = false, resource = 'gateway', env = process.env, protection = createCacheProtection(config, { env }),
+  createApplication, openBrowser, fetch: fetchImpl = globalThis.fetch, clock = Date.now,
 } = {}) {
   validateEntraConfig(config);
+  if (!isTenantGuid(config.tenantId)) throw fail('INVALID_ENTRA_CONFIG', 'Microsoft sign-in requires a resolved tenant GUID. Run mh-login.');
+  if (!RESOURCES.has(resource) || (interactive && resource !== 'gateway')) throw fail('INVALID_CONFIG', 'Unsupported Memory House token request.');
+  const scope = resource === 'mcp' ? config.mcpScope : config.scope;
   await ensureDirectory(config.stateDir);
   return withLock(config.cacheLockPath, config.authTimeoutMs, async () => {
     try {
@@ -135,31 +180,39 @@ export async function acquireEntraToken(config, {
       if (raw !== null) {
         try {
           const stored = JSON.parse(await protection.unprotect(JSON.parse(raw)));
-          if (stored?.context !== context(config) || typeof stored.cache !== 'string' || typeof stored.accountId !== 'string') {
-            throw fail('INVALID_CACHE', 'The sign-in cache does not match this deployment. Run mh-logout, then mh-login.');
+          if (typeof stored?.cache !== 'string' || typeof stored.accountId !== 'string') throw new Error('format');
+          if (stored.context !== context(config)) {
+            // An explicit sign-in replaces a cache from another tenant or deployment.
+            if (!interactive) throw fail('INVALID_CACHE', 'The sign-in cache does not match this deployment. Run mh-logout, then mh-login.');
+          } else {
+            cache.deserialize(stored.cache);
+            selected = stored.accountId;
+            originalCache = stored.cache;
           }
-          cache.deserialize(stored.cache);
-          selected = stored.accountId;
-          originalCache = stored.cache;
         } catch (error) {
           if (error instanceof MemoryHouseError) throw error;
           throw fail('INVALID_CACHE', 'The sign-in cache is invalid. Run mh-logout, then mh-login.');
         }
       }
       let result;
+      let token;
+      let mcp;
       if (interactive) {
         result = await browserSignIn(pca, config, { openBrowser });
+        token = usableToken(result, config, clock, 'gateway');
+        // The gateway sign-in stands even if MCP access is declined; only Claude/Codex MCP depend on it.
+        try {
+          await signInForMcp(pca, cache, config, result.account, { openBrowser, clock });
+          mcp = { mcpReady: true };
+        } catch (error) {
+          mcp = { mcpReady: false, mcpReason: error instanceof MemoryHouseError ? error.code
+            : needsInteraction(error) ? 'ENTRA_AUTH_REQUIRED' : 'ENTRA_AUTH_FAILED' };
+        }
       } else {
         const account = selected ? await cache.getAccountByHomeId(selected) : null;
         if (!account) throw required();
-        result = await pca.acquireTokenSilent({ account, scopes: [config.scope] });
-      }
-      const expiresAt = Math.floor(result?.expiresOn?.getTime() / 1000);
-      if (typeof result?.accessToken !== 'string' || !/^[a-z\d._~+/-]+=*$/i.test(result.accessToken)
-        || result.accessToken.length > 32 * 1024 || !result.account?.homeAccountId
-        || result.tenantId?.toLowerCase() !== config.tenantId.toLowerCase()
-        || !Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(clock() / 1000) + config.tokenSkewSeconds) {
-        throw fail('ENTRA_TOKEN_INVALID', 'Microsoft did not return a usable gateway access token. Retry mh-login.');
+        result = await pca.acquireTokenSilent({ account, scopes: [scope] });
+        token = usableToken(result, config, clock, resource === 'mcp' ? 'MCP' : 'gateway');
       }
       const serialized = cache.serialize();
       // Persist renewals while holding the cross-process lock, including rotated refresh tokens.
@@ -168,12 +221,10 @@ export async function acquireEntraToken(config, {
           context: context(config), accountId: result.account.homeAccountId, cache: serialized,
         })));
       }
-      return { accessToken: result.accessToken, expiresAt };
+      return { ...token, ...mcp };
     } catch (error) {
       if (error instanceof MemoryHouseError) throw error;
-      if (error instanceof InteractionRequiredAuthError || ['invalid_grant', 'no_tokens_found', 'no_account_in_silent_request'].includes(error.errorCode)) {
-        throw required();
-      }
+      if (needsInteraction(error)) throw required();
       throw fail('ENTRA_AUTH_FAILED', 'Microsoft authentication failed. Check connectivity, app registration, gateway consent and tenant policy, then retry mh-login.');
     }
   });

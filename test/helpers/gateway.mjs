@@ -22,7 +22,7 @@ function validSearch(body) {
     && (body.top_k === undefined || (Number.isInteger(body.top_k) && body.top_k >= 1 && body.top_k <= 50));
 }
 
-// AMT POST /memory: extraction turns, or direct facts (no thread or role) that are embedded synchronously.
+// POST /memory: captured or imported turns for extraction, or direct facts (no thread or role).
 function validInsertion(body) {
   if (body?.extract === false) {
     return Object.keys(body).every(key => ["extract", "items"].includes(key))
@@ -39,7 +39,11 @@ export async function mockGateway(t, options = {}) {
     requests: [],
     turns: [],
     memories: [{ id: "fixture-memory", scope_key: "user:fixture", type: "fact", memory_type: "fact", content: "The developer prefers concise TypeScript examples.", score: 0.95 }],
+    // Like the gateway, data routes and the MCP endpoint each accept only their own audience.
     accessTokens: new Set(['fixture-access-1']),
+    mcpAccessTokens: new Set(['fixture-mcp-access-1']),
+    // The unauthenticated 401 challenge that names the gateway tenant; null omits the header.
+    challenge: 'Bearer authorization_uri="https://login.microsoftonline.com/33333333-3333-3333-3333-333333333333"',
     captureStatus: 201,
     listingStatus: 200,
     listingResponse: null,
@@ -70,7 +74,11 @@ export async function mockGateway(t, options = {}) {
       res.end(value === undefined ? undefined : JSON.stringify(value));
     };
     const token = req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : undefined;
-    if (!state.accessTokens.has(token)) return send(401, { error: "unauthorized" });
+    const accepted = path === "/inference/memory/mcp/" ? state.mcpAccessTokens : state.accessTokens;
+    if (!accepted.has(token)) {
+      if (state.challenge !== null) res.setHeader("WWW-Authenticate", state.challenge);
+      return send(401, { error: "unauthorized" });
+    }
     if (path === "/inference/memory/mcp/") {
       if (body?.method === "notifications/initialized") return send(202);
       let result;
@@ -115,21 +123,7 @@ export async function mockGateway(t, options = {}) {
       }
       return send(200, { items, count: items.length, next_cursor: cursor, has_more: cursor !== null });
     }
-    if (path === "/inference/memory/hook/capture") {
-      if (state.captureStatus >= 300) return send(state.captureStatus, { error: "unavailable" });
-      if (!validCapture(body)) return send(422, { code: "invalid_request" });
-      const created = new Date().toISOString();
-      const results = body.items.map((item, index) => {
-        state.turns.push({ thread_id: body.thread_id, role: item.role, content: item.content });
-        return { index, id: `fixture-turn-${state.turns.length}`, status: "stored" };
-      });
-      return send(state.captureStatus, {
-        request_id: `fixture-request-${state.requests.length}`, kind: "insert", status: "succeeded",
-        created_at: created, completed_at: created, deadline_at: Date.now() / 1000 + 30, attempts: 1,
-        result: { items: results, count: results.length, succeeded: results.length, failed: 0, unknown: 0 },
-      });
-    }
-    if (path === "/inference/memory/hook/search") {
+    if (path === "/inference/memory/search" && req.method === "POST") {
       if (!validSearch(body)) return send(422, { code: "invalid_request" });
       const items = state.memories.slice(0, body.top_k ?? 10);
       return send(200, { items, count: items.length });
@@ -150,16 +144,22 @@ export async function mockGateway(t, options = {}) {
         return send(prior.status, prior.value);
       }
       if (state.insertStatus) return send(state.insertStatus, { error: "fixture-provider-secret" });
+      if (body?.extract !== false && state.captureStatus >= 300) return send(state.captureStatus, { error: "unavailable" });
       if (!validInsertion(body)) return send(422, { code: "invalid_request" });
       state.insertions.push({ body, key });
       const created = new Date().toISOString();
       const envelope = { request_id: `fixture-request-${state.requests.length}`, kind: "insert", created_at: created, attempts: 1 };
-      const value = body.extract === false
-        ? { ...envelope, status: "succeeded", completed_at: created,
-          result: { items: body.items.map((_, index) => ({ index, id: `fixture-fact-${state.insertions.length}-${index}`, status: "stored" })),
-            count: body.items.length, succeeded: body.items.length, failed: 0, unknown: 0 } }
-        : { ...envelope, status: "queued" };
-      const status = body.extract === false ? 201 : 202;
+      // Captured and imported turns get the gateway's tracked envelope, as /hook/capture returned.
+      const results = body.extract === false
+        ? body.items.map((_, index) => ({ index, id: `fixture-fact-${state.insertions.length}-${index}`, status: "stored" }))
+        : body.items.map((item, index) => {
+          state.turns.push({ thread_id: body.thread_id, role: item.role, content: item.content });
+          return { index, id: `fixture-turn-${state.turns.length}`, status: "stored" };
+        });
+      const value = { ...envelope, status: "succeeded", completed_at: created,
+        ...(body.extract === false ? {} : { deadline_at: Date.now() / 1000 + 30 }),
+        result: { items: results, count: results.length, succeeded: results.length, failed: 0, unknown: 0 } };
+      const status = body.extract === false ? 201 : state.captureStatus;
       if (key) state.idempotent.set(key, { raw, status, value });
       return send(status, value);
     }

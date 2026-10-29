@@ -6,15 +6,33 @@ import { MemoryHouseError } from './errors.mjs';
 import { inspectDirectorySync } from './state.mjs';
 
 export { MemoryHouseError } from './errors.mjs';
-const AUTH_FIELDS = ['tenantId', 'clientId', 'scope', 'redirectUri'];
+const AUTH_FIELDS = ['tenantId', 'clientId', 'scope', 'mcpScope', 'redirectUri'];
+// Without a configured tenant, mh-login discovers it from the gateway's sign-in challenge.
+const OPTIONAL_AUTH_FIELDS = new Set(['tenantId']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const GUID = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
+const SCOPE = /^(?:https:\/\/|api:\/\/)[a-z\d._:/-]+\/[a-z\d._-]+$/i;
+const DOMAIN = /^(?=.{4,253}$)(?:[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?\.)+[a-z]{2,63}$/i;
+// Multi-tenant authorities cannot sign in guests from personal accounts, and they would let any tenant's
+// account satisfy the token tenant check.
+const SHARED_AUTHORITIES = new Set(['common', 'organizations', 'consumers']);
+
+export const isTenantGuid = value => typeof value === 'string' && GUID.test(value);
+export const isTenantDomain = value => typeof value === 'string' && !SHARED_AUTHORITIES.has(value.toLowerCase()) && DOMAIN.test(value);
+
+export function validateTenantSetting(value) {
+  if (value === null || value === undefined || isTenantGuid(value) || isTenantDomain(value)) return;
+  throw new MemoryHouseError('INVALID_ENTRA_CONFIG', typeof value === 'string' && SHARED_AUTHORITIES.has(value.toLowerCase())
+    ? 'deployment.json entra.tenantId must name one tenant; common, organizations and consumers are not supported. Omit it to discover the gateway tenant.'
+    : 'deployment.json entra.tenantId must be a tenant GUID or verified domain, or be omitted to discover the gateway tenant.');
+}
 
 export function validateEntraConfig(config) {
   const invalid = message => new MemoryHouseError('INVALID_ENTRA_CONFIG', message);
-  const guid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
-  if (!guid.test(config.tenantId ?? '') || !guid.test(config.clientId ?? '')
-    || typeof config.scope !== 'string' || !/^(?:https:\/\/|api:\/\/)[a-z\d._:/-]+\/[a-z\d._-]+$/i.test(config.scope)) {
-    throw invalid('Configure the tenant, registered public-client ID and gateway scope in deployment.json.');
+  validateTenantSetting(config.tenantId);
+  if (!GUID.test(config.clientId ?? '') || typeof config.scope !== 'string' || !SCOPE.test(config.scope)
+    || typeof config.mcpScope !== 'string' || !SCOPE.test(config.mcpScope)) {
+    throw invalid('Configure the registered public-client ID, gateway scope and MCP scope in deployment.json.');
   }
   let url;
   try { url = new URL(config.redirectUri); } catch { throw invalid('Configure the registered loopback redirect URI.'); }
@@ -85,13 +103,14 @@ export function loadConfig(options = {}) {
     const value = deployment.entra[name];
     if (value === null || value === undefined || value === '') {
       auth[name] = null;
-      publisherMissing.push(`entra.${name}`);
+      if (!OPTIONAL_AUTH_FIELDS.has(name)) publisherMissing.push(`entra.${name}`);
     } else if (typeof value !== 'string' || value !== value.trim() || value.length > 4096 || /[\x00-\x1f\x7f]/.test(value)) {
       throw new MemoryHouseError('INVALID_DEPLOYMENT', `deployment.json entra.${name} must be public text without control characters.`);
     } else {
       auth[name] = value;
     }
   }
+  validateTenantSetting(auth.tenantId);
   if (!publisherMissing.length) validateEntraConfig(auth);
   const allowInsecureLocalhost = env.MH_ALLOW_INSECURE_LOCALHOST === '1';
   const url = assertSafeUrl(deployment.gatewayBase, { allowInsecureLocalhost });
@@ -106,7 +125,7 @@ export function loadConfig(options = {}) {
   if (stateDir === parse(stateDir).root) throw new MemoryHouseError('INVALID_CONFIG', 'The Memory House state directory cannot be a filesystem root.');
   inspectDirectorySync(stateDir);
   return Object.freeze({
-    gatewayBase, hookBase: `${gatewayBase}/hook`, mcpUrl: `${gatewayBase}/mcp/`,
+    gatewayBase, mcpUrl: `${gatewayBase}/mcp/`,
     stateDir, authStatePath: join(stateDir, 'auth.json'), lockPath: join(stateDir, 'auth.json.lock'),
     cachePath: join(stateDir, 'msal-cache.json.enc'), cacheLockPath: join(stateDir, 'msal-cache.lock'),
     auth: Object.freeze(auth), ...auth, publisherMissing: Object.freeze(publisherMissing),

@@ -84,7 +84,7 @@ function failureKind(error) {
   if (['azure_cli_auth_required', 'azure_cli_not_found', 'azure_cli_unavailable', 'azure_cli_timeout',
     'azure_cli_output_invalid', 'azure_cli_token_invalid', 'invalid_auth_state'].includes(code)) return code;
   if (['auth_required', 'auth_expired', 'not_authenticated', 'unauthorized', 'no_token',
-    'not_signed_in', 'login_required', 'invalid_credentials', 'gateway_mismatch', 'refresh_expired'].includes(code)) return 'auth';
+    'not_signed_in', 'login_required', 'invalid_credentials', 'gateway_mismatch', 'refresh_expired', 'tenant_changed'].includes(code)) return 'auth';
   if (['invalid_response', 'invalid_json', 'invalid_token_response', 'schema_error'].includes(code)
     || error instanceof SyntaxError) return 'schema';
   if (['AbortError', 'TimeoutError'].includes(error?.name) || code === 'request_timeout') return 'timeout';

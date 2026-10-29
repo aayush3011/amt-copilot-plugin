@@ -14,11 +14,13 @@ folder that contains this SKILL.md:
 node "<folder containing this SKILL.md>/../../runtime/auth.mjs" logout
 ```
 
-It revokes this device's hook token at the gateway and clears the local sign-in shared by the
-user's Memory House apps on this device, after which capture and recall stop. It prints one
-JSON line. Report the outcome in one sentence. If remote revocation failed, say that local
-credentials were cleared but revocation could not be confirmed; previously issued access
-tokens may remain valid until expiry. Never display credentials, and do not sign the user back in.
+It writes a credential-free disabled preference shared by Memory House apps using this
+state directory, after which new plugin capture, recall, canvas and header requests stop.
+It deletes the plugin's protected MSAL cache and obsolete plugin token files, but does not
+revoke Entra tokens or sign out other applications. In-flight requests or host-cached headers can
+remain authorized until their access tokens expire. Reconnect MCP to drop cached headers.
+It prints one JSON line. Report the outcome in one sentence, including that the plugin cache
+was removed. Never display credentials or sign the user back in.
 
 In Claude Code and Codex this also disconnects the Memory House MCP tools. In Copilot it does
 not sign the app out of the Memory House MCP server; the app manages that sign-in.

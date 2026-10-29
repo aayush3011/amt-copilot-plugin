@@ -9,6 +9,9 @@ Setup takes about five minutes and is a one-time thing per machine.
 ## Before you start
 
 - The **GitHub Copilot app** (desktop).
+- Node.js 20+, a browser and OS-protected credential storage: Windows PowerShell/DPAPI,
+  an unlocked macOS Keychain, or Linux secret-tool with an unlocked Secret Service.
+  Azure CLI is not required. Copilot's MCP OAuth session remains separate.
 - No Azure subscription, no local database, and no config files. The plugin talks to a hosted
   gateway; nothing memory-related runs on your machine except the small recall and capture hooks.
 
@@ -304,19 +307,29 @@ the troubleshooting entry if you want the details.
    listed. You should not be asked to sign in again.
 
 
-## Step 5: Enroll this device
+## Step 5: Sign in for hooks and canvas
 
 Open a **new** chat and run:
 
 ```text
-/mh-login
+/memory-house:mh-login
 ```
 
-The agent fetches a short-lived enrollment code and redeems it for you. It should finish by saying it is signed in, without showing you a code or asking you to run anything.
+The helper opens Microsoft's sign-in page in your browser. Select your account
+and complete credentials/MFA there, never in chat. Existing Microsoft browser
+sign-in may avoid another password prompt. Allow up to three minutes.
 
-```text
-Signed in to Memory House. Capture and recall are now active on this device.
-```
+The plugin stores an encrypted MSAL cache in `~/.memory-house/msal-cache.json.enc`,
+protected by your OS. Hooks reuse cached access tokens and renew silently on
+demand near expiry; they never open a browser. You do not manually generate
+tokens for each call. If tenant policy requires interaction, run `mh-login` again.
+`mh-status` checks silent acquisition and may refresh over the network.
+`mh-logout` disables the plugin and deletes its protected token cache, leaving
+Copilot's separate MCP sign-in unchanged.
+
+The reused public client must be configured for the gateway permissions and
+loopback redirect. See the [authentication requirements](README.md#sign-in-list-search-remember).
+
 
 ## Step 6: Open the memory canvas
 
@@ -440,27 +453,18 @@ object ID to a team.
 
 ### Capture is not working or the canvas asks you to sign in
 
-1. Run `/mh-login` once.
+1. Run `/memory-house:mh-login` and complete Microsoft browser sign-in.
 2. Send one ordinary prompt.
-3. Inspect the hook log:
+3. Inspect the host's hook diagnostics. `ENTRA_AUTH_REQUIRED` means explicit
+   sign-in/consent is needed. `SECURE_CACHE_UNAVAILABLE` means OS credential
+   protection is unavailable or locked; Linux requires secret-tool.
+   `NOT_SIGNED_IN` after logout requires explicit `mh-login`.
+   HTTP 401/403 requires checking gateway audience, tenant, delegated permissions
+   and public-client consent. Failed capture is not replayed.
 
-   ```bash
-   cat ~/.copilot/amt/hook.log
-   ```
 
-Useful log entries:
-
-- `login:auto:ok` means device enrollment completed.
-- `capture:agent:ok:201` means an agent turn was ingested successfully.
-- `skipped:no-hook-token:<reason>` means the hook had no usable token, and the reason says why.
-  `not signed in` means you never enrolled, `refresh rejected` means the device was signed out
-  and needs `/mh-login` again, and `refresh unreachable` means the gateway was not reachable
-  and the next prompt will retry on its own.
-- No log file means the hooks did not load. Missing `jq` on `PATH` is the most common cause.
-
-If the agent prints an enrollment code, do not copy or share it. Reinstall the latest plugin
-version and restart Copilot; the current plugin redeems that credential locally and redacts it
-from the response.
+Enrollment is no longer supported. If an older tool prints an enrollment code,
+do not copy or share it; update the plugin and restart the session.
 
 ### A plugin feature is "not available in this workspace"
 
@@ -542,7 +546,10 @@ Check that:
 
 ### You signed in with the wrong account
 
-Run `/mh-logout`, then `/mh-login` again with the intended Microsoft account.
+Run `/memory-house:mh-login` and select the intended Microsoft account in
+the browser. This replaces the plugin's selected account and invalidates
+long-lived clients' cached tokens. Copilot MCP OAuth must be changed separately;
+other applications' sign-ins are not modified.
 
 ### The plugin looks outdated after an update
 

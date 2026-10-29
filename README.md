@@ -4,11 +4,12 @@
 GitHub Copilot.**
 
 Add this repository as a marketplace, install **Memory House**, and sign in with
-Microsoft. The application selects its native adapter from the same installed
+Microsoft Entra ID in your browser. The application selects its native adapter from the same installed
 plugin. The memory tools come from the deployed Memory House MCP server, which
 every app reaches by URL; the plugin adds native capture hooks, skills, the
 Copilot app canvas and a small sign-in helper. No clone, build, ZIP selection,
-global CLI, or per-project hook installation is required for users.
+local dependency installation or per-project hook installation is required for users.
+Azure CLI is not required.
 
 **Repository:** <https://github.com/aayush3011/amt-copilot-plugin>
 
@@ -20,8 +21,9 @@ the host executes capture hooks.
 ## Verified CLI support
 
 Observed on 2026-09-16, when the plugin still ran its own local MCP server. The
-remote MCP server and the hook-based sign-in described below have not yet been
-re-verified live in Claude Code and Codex.
+remote MCP server and protected-cache browser sign-in described below have not yet been
+re-verified live against the deployed gateway. The historical results are not
+evidence that the configured public client has consent for the new gateway scope.
 
 | Host version | Plugin MCP tools | Automatic per-turn capture from the plugin |
 | --- | --- | --- |
@@ -43,9 +45,10 @@ support with model-selected `add_memory` calls.** See
 
 ## Install in your application
 
-Requires a current supported desktop/local plugin host and Node.js 20+ available
-to its processes. Your organization must permit the plugin, the remote Memory
-House MCP server, and conversation capture.
+Requires a current supported desktop/local plugin host, Node.js 20+, a browser and
+OS credential protection: Windows PowerShell/DPAPI, an unlocked macOS Keychain,
+or Linux `secret-tool` with an unlocked Secret Service (for example GNOME Keyring).
+Your organization must permit the plugin, remote MCP server and conversation capture.
 
 | Application | Add this repository, then install Memory House |
 | --- | --- |
@@ -73,33 +76,50 @@ your local sign-in.
 
 ## Sign in, list, search, remember
 
-Every app reaches the same deployed MCP server (`.../inference/memory/mcp/`);
-how it signs in differs:
+Run **`mh-login`** using the host-specific command below. It opens Microsoft's
+sign-in page in your system browser. Select your account and complete credentials
+and MFA there, never in chat. An existing Microsoft browser session may avoid
+another password prompt. The helper waits up to three minutes.
 
-- **GitHub Copilot: two sign-ins.** The app signs in to the MCP server with
-  Microsoft itself, using the standard MCP sign-in the gateway advertises, and
-  keeps that token. Run **`mh-login`** for the plugin's hooks and canvas: the
-  agent calls the remote `enroll_hook_capture` tool once, and the plugin's
-  post-tool hook redeems the returned one-time code and replaces the tool result
-  before the model sees it.
-- **Claude Code and Codex: one sign-in.** Run **`mh-login`**; the agent runs the
-  plugin's sign-in helper, which opens Microsoft sign-in in your browser. That
-  sign-in serves the hooks and the MCP tools: before connecting, each app runs a
-  plugin command that adds the plugin's token to its requests. Their own MCP
-  sign-in can't be used, because Microsoft rejects the `resource` value they send
-  (`AADSTS9010010`). See
-  [maintainer documentation](docs/maintaining.md#remote-mcp-server-and-sign-in).
+The plugin uses authorization code + PKCE and stores the full MSAL token cache,
+including renewal state, in `~/.memory-house/msal-cache.json.enc`. Windows uses
+DPAPI for the current OS user; macOS/Linux encrypt the file with a key stored in
+Keychain/Secret Service. No plaintext fallback is allowed. Treat the encrypted
+file as sensitive; do not share, inspect or copy it between users or machines.
 
-No password, token, or enrollment code goes through chat.
+Background hooks, headers and canvas reuse valid cached tokens. MSAL renews them
+silently on demand near expiry and saves refresh-token rotation. There is no
+timer and no browser prompt from background requests. MFA/Conditional Access,
+revoked sessions or missing consent can require another explicit `mh-login`.
+This is delegated user access, not device identity or permanent app-only access.
 
-**One plugin sign-in serves every host.** Claude Code, Codex and Copilot running
-on the same machine as the same OS user share `~/.memory-house/token.json`.
-Signing in through any one of them connects the others, including the MCP tools
-in Claude Code and Codex; signing out affects them all. Copilot's MCP sign-in is
-its own. Codex's MCP connection always uses `~/.memory-house` and `~/.codex`, so a
-custom `MEMORY_HOUSE_HOME` or `CODEX_HOME` doesn't reach it. Remote/cloud
-sessions, different OS users, or an explicitly different `MEMORY_HOUSE_HOME` use
-separate Memory House state and need their own sign-in.
+**Claude Code and Codex** use the same protected cache for MCP headers. Reconnect
+their MCP server after login. **Copilot manages MCP OAuth independently**;
+its MCP tools still need the app's sign-in. See
+[maintainer documentation](docs/maintaining.md#remote-mcp-server-and-sign-in).
+
+Hosts sharing the same OS user and `~/.memory-house` share plugin authentication.
+`mh-logout` disables new plugin requests using a credential-free `auth.json`
+preference and deletes the protected MSAL cache. It does not revoke Entra tokens
+or sign other applications out. In-flight requests and host-cached MCP headers
+may work until expiry; reconnect MCP after logout. `mh-login` re-enables access.
+Legacy plugin `token.json` files are ignored and removed on explicit login/logout.
+
+Initial `mh-login` is required. Remote/cloud hosts and other OS users need their
+own sign-in and secure OS cache; headless sessions cannot start browser sign-in.
+Codex's header helper normally receives only HOME and PATH: custom `CODEX_HOME`
+and `MEMORY_HOUSE_HOME` may not reach it. Use the default state directory or
+host-supported environment forwarding. Never copy credentials into the plugin.
+
+**Gateway prerequisite:** MISE and the gateway must accept the plugin's Entra
+tokens for the `https://dbinference.azure.com` resource on MCP, hook capture/search
+and canvas routes. The API registration must expose delegated permissions and
+allow/consent public client `45cdeed7-4e4e-481d-9f00-6708c0631565`, with the registered
+redirect `http://127.0.0.1:33418`. The public-client registration must support
+authorization code + PKCE without a secret. `.default` requests configured
+permissions, not a permission named `.default`. An administrator must verify
+audience, issuer/tenant, lifetime and required `scp`/authorization policy. This
+plugin change does not reconfigure the gateway or prove deployment readiness.
 
 | Host | Sign in | Sign out | Status | Search / remember |
 | --- | --- | --- | --- | --- |
@@ -116,7 +136,7 @@ differ: ChatGPT's desktop skill picker uses `@`.
 
 All six skills are discoverable. Login and logout still require an explicit
 user request, and the host's tool approval remains in effect. `mh-logout`,
-`mh-status` and, in Claude Code and Codex, `mh-login` run the plugin's
+`mh-status` and `mh-login` run the plugin's
 `runtime/auth.mjs` helper; none of them touches Copilot's own MCP sign-in.
 After an update, restart the session so both the skills and MCP connection are
 refreshed.
@@ -134,7 +154,7 @@ Then ask:
 
 The tools come from the remote Memory House MCP server: `get_memories`,
 `search_memories`, `add_memory`, `get_memory`, `get_memory_history`, summaries,
-write-status tools, `whoami`, `enroll_hook_capture`, and `delete_memory` /
+write-status tools, `whoami`, and `delete_memory` /
 `delete_all_memories`. Tool names may carry the app's plugin or server
 namespace. Identity comes from your authenticated sign-in, never from a
 model-supplied user, tenant, or endpoint. The skills tell the agent to delete
@@ -232,8 +252,7 @@ allows sending conversation text to your Memory House deployment.
   start. Do not compensate by reading bundles or credentials, launching extra
   servers manually, or calling the gateway directly.
 - **Codex hooks need review:** run `/hooks`, review Memory House's session-start,
-  user-prompt, stop and post-tool hooks, and trust those definitions. The
-  post-tool hook only completes `mh-login`. Do not bypass hook trust or install
+  user-prompt and stop hooks, and trust those definitions. Do not bypass hook trust or install
   duplicate user/project hooks.
 - **Canvas missing in the Copilot app:** start a new session after installing
   or updating, and check that the `plugin:memory-house:memory-canvas`
@@ -245,15 +264,22 @@ allows sending conversation text to your Memory House deployment.
   `codex plugin remove memory-house@memory-house-marketplace`, then optionally
   `codex plugin marketplace remove memory-house-marketplace`. This does not
   erase previously captured memories or sign the other apps out.
-- **Sign-in required/expired:** run `mh-login`; `mh-status` is local-only and
-  never returns credentials. In Copilot, sign in to the MCP tools again when the
-  app asks.
-- **Sign-in port occupied:** the sign-in helper listens on
-  `http://127.0.0.1:33418` for Microsoft's reply. Finish or close another active
-  Memory House sign-in and retry; the plugin does not choose another port.
-- **`mh-login` result shows a code:** the post-tool hook did not run (for
-  example, Codex hooks not yet trusted). Do not copy the code; fix the hook and
-  run `mh-login` again.
+- **Sign-in required/expired:** run `mh-login` and complete Microsoft browser sign-in.
+  `mh-status` checks silent acquisition and may refresh over the network. Conditional
+  Access, revoked sessions or missing consent require user/admin intervention;
+  hooks never prompt. Copilot's MCP tools may separately ask you to sign in.
+- **Protected cache unavailable:** unlock Keychain/Secret Service. Linux requires
+  `secret-tool` (often supplied by `libsecret-tools`); Windows requires PowerShell
+  and DPAPI. No plaintext fallback is supported. Never paste cache contents into chat.
+- **Token acquisition timed out:** check connectivity and the OS credential store.
+  Network/cache operations default to 10 seconds (`MEMORY_HOUSE_AUTH_TIMEOUT_MS`,
+  maximum 30 seconds); hooks cap them at 5 seconds and header helpers at 7 seconds.
+- **Gateway returns 401/403:** verify the API resource, delegated permissions,
+  public-client consent and gateway MISE/authorization policies. Changing the
+  header alone cannot make an unconfigured gateway accept the token.
+
+- **An old tool shows an enrollment code:** do not copy or share it. Update
+  the plugin and restart the session; enrollment is no longer supported.
 - **Publisher configuration error:** contact the publisher rather than entering
   registration settings or credentials in chat.
 - **Claude “Credit balance is too low” with a Pro subscription:** check Claude's
@@ -265,10 +291,9 @@ allows sending conversation text to your Memory House deployment.
   `subscriptionType` (here, `"pro"`); `loggedIn: true` alone was misleading.
   Respect managed login policy. This is separate from Memory House's Microsoft
   sign-in and required no plugin, gateway, or billing-plan change.
-- **Sign out:** use `mh-logout`. This clears the shared local credentials and
-  attempts refresh-token revocation without opening a browser, which also
-  disconnects the MCP tools in Claude Code and Codex. Existing access tokens
-  remain subject to their issued expiry. Copilot manages its own MCP sign-in.
+- **Sign out:** use `mh-logout` to disable new plugin requests and delete the protected
+  cache. Copilot manages its MCP sign-in independently. Reconnect
+  Claude/Codex MCP to drop cached headers. Existing tokens are not revoked.
 
 The single installable payload is **`plugin/`**. All three marketplace catalogs
 stay at the repository root and select `./plugin`; the GitHub URL and install

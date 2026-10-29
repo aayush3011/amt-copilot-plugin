@@ -774,22 +774,22 @@ const enrollmentCalls = {
     replaced: message => ({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedMCPToolOutput: { content: [{ type: 'text', text: message }] } } }),
   },
 };
-const replacementText = output => JSON.stringify(output).match(/Memory House sign-in[^"]*/)?.[0] ?? '';
+const replacementText = output => JSON.stringify(output).match(/Enrollment authentication[^"]*/)?.[0] ?? '';
 
 for (const [harness, call] of Object.entries(enrollmentCalls)) {
-  test(`${harness}: the post-tool hook redeems the enrollment code and hides it from the model`, async t => {
+  test(`${harness}: obsolete enrollment results are discarded without redemption`, async t => {
     const s = await setup(t);
     const output = await s.call({ harness, event: 'post-tool', payload: call.payload });
-    assert.deepEqual(s.redeems, [enrollmentCode]);
+    assert.deepEqual(s.redeems, []);
     assert.deepEqual(output, call.replaced(replacementText(output)));
-    assert.match(replacementText(output), /completed on this device/);
+    assert.match(replacementText(output), /no longer supported/);
     assert.doesNotMatch(JSON.stringify(output), /fixture-sensitive-code/);
     assert.ok(s.logs.every(line => !line.includes(enrollmentCode)));
     assert.equal(s.captures.length + s.searches.length, 0);
   });
 }
 
-test('copilot: sign-in reads the code when the app joins the text and structured result with a blank line', async t => {
+test('copilot: obsolete enrollment results are hidden even when the app joins multiple text blocks', async t => {
   // Copilot 1.0.95 hands post-tool hooks the MCP text, a blank line, then the structured-content JSON.
   const s = await setup(t);
   const serverText = `{"enrollment_code": "${enrollmentCode}", "expires_in": 300}`;
@@ -798,31 +798,31 @@ test('copilot: sign-in reads the code when the app joins the text and structured
     toolResult: { textResultForLlm: `${serverText}\n\n${enrollmentText}`, binaryResultsForLlm: [], resultType: 'success' },
   };
   const output = await s.call({ harness: 'copilot', event: 'post-tool', payload });
-  assert.deepEqual(s.redeems, [enrollmentCode]);
-  assert.match(output.modifiedResult.textResultForLlm, /completed on this device/);
+  assert.deepEqual(s.redeems, []);
+  assert.match(output.modifiedResult.textResultForLlm, /no longer supported/);
   assert.doesNotMatch(JSON.stringify(output) + s.logs.join('\n'), /fixture-sensitive-code/);
   const unreadable = await s.call({
     harness: 'copilot', event: 'post-tool',
     payload: { ...payload, toolResult: { textResultForLlm: '{"expires_in": 300}\n\nnot json', resultType: 'success' } },
   });
-  assert.match(unreadable.modifiedResult.textResultForLlm, /could not read the enrollment code/);
-  assert.deepEqual(s.redeems, [enrollmentCode]);
+  assert.match(unreadable.modifiedResult.textResultForLlm, /no longer supported/);
+  assert.deepEqual(s.redeems, []);
 });
 
-test('sign-in still hides the code when redemption fails, the code is missing, or the call is a subagent', async t => {
+test('obsolete enrollment is never redeemed, even with missing codes or subagent calls', async t => {
   const failing = await setup(t, { client: { async redeem() { throw Object.assign(new Error('fixture-sensitive-code rejected'), { status: 401 }); } } });
   const failed = await failing.call({ harness: 'codex', event: 'post-tool', payload: enrollmentCalls.codex.payload });
-  assert.match(failed.reason, /did not finish/);
+  assert.match(failed.reason, /no longer supported/);
   assert.doesNotMatch(JSON.stringify(failed) + failing.logs.join('\n'), /fixture-sensitive-code/);
   const s = await setup(t);
   const missing = await s.call({
     harness: 'claude', event: 'post-tool',
     payload: { ...enrollmentCalls.claude.payload, tool_response: [{ type: 'text', text: '{"expires_in":300}' }] },
   });
-  assert.match(replacementText(missing), /could not read the enrollment code/);
+  assert.match(replacementText(missing), /no longer supported/);
   const subagent = await s.call({ harness: 'copilot', event: 'post-tool', payload: { ...enrollmentCalls.copilot.payload, agent_id: 'helper' } });
-  assert.match(subagent.modifiedResult.textResultForLlm, /completed on this device/);
-  assert.deepEqual(s.redeems, [enrollmentCode]);
+  assert.match(subagent.modifiedResult.textResultForLlm, /no longer supported/);
+  assert.deepEqual(s.redeems, []);
 });
 
 test('native hooks never redeem a same-named tool from another server or forward tool results', async t => {

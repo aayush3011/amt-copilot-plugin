@@ -9,6 +9,7 @@ import test from 'node:test';
 import { buildRuntime } from '../scripts/build.mjs';
 import { fixtureDeployment } from './helpers/deployment.mjs';
 import { isolatedEnvironment, rootSnapshot } from './helpers/runtime.mjs';
+import { seedEntraSession } from './helpers/entra.mjs';
 import { mockGateway } from './helpers/gateway.mjs';
 import { connectCodexAppServer } from './helpers/codex.mjs';
 import { PLUGIN_ROOT, MARKETPLACE_FILES, PACKAGE_FILES, verifyPayload } from '../scripts/package-files.mjs';
@@ -22,13 +23,6 @@ const HOSTS = {
   codex: { catalog: '.agents/plugins/marketplace.json', manifest: '.codex-plugin/plugin.json', variable: 'PLUGIN_ROOT', directory: '.codex' },
   copilot: { catalog: '.github/plugin/marketplace.json', manifest: 'plugin.json', variable: 'PLUGIN_ROOT', directory: '.github' },
 };
-// Each app's name for the remote enroll_hook_capture tool; Claude prefixes plugin servers.
-const ENROLLMENT_TOOLS = {
-  claude: 'mcp__plugin_memory-house_memory-house__enroll_hook_capture',
-  codex: 'mcp__memory-house__enroll_hook_capture',
-  copilot: 'memory-house-enroll_hook_capture',
-};
-
 async function discover(root, host) {
   const spec = HOSTS[host];
   const catalog = await json(join(dirname(root), spec.catalog));
@@ -61,15 +55,14 @@ async function discover(root, host) {
   assert.deepEqual(Object.keys(server).sort(), ['headersHelper', 'http_headers_helper', 'type', 'url']);
   assert.equal(server.type, 'http');
   assert.equal(server.url, `${gatewayBase}/mcp/`);
-  // Claude and Codex send the plugin's hook token through these launchers; Copilot signs in itself.
+  // Claude and Codex send cached Entra tokens through these launchers; Copilot signs in itself.
   assert.match(server.headersHelper, /process\.env\.CLAUDE_PLUGIN_ROOT,'runtime\/auth\.mjs'.* -- headers$/);
   assert.ok(server.http_headers_helper.includes(`['${manifest.version}','local']`));
   assert.ok(server.http_headers_helper.includes("'memory-house-marketplace','memory-house',v,'runtime','auth.mjs'"));
   const events = host === 'copilot'
     ? ['sessionStart', 'userPromptSubmitted', 'userPromptTransformed', 'postToolUse', 'agentStop', 'sessionEnd']
-    : ['SessionStart', 'UserPromptSubmit', 'Stop', 'PostToolUse'];
+    : ['SessionStart', 'UserPromptSubmit', 'Stop'];
   assert.deepEqual(Object.keys(hooks.hooks), events);
-  if (host !== 'copilot') assert.equal(hooks.hooks.PostToolUse[0].matcher, ENROLLMENT_TOOLS[host]);
   for (const entries of Object.values(hooks.hooks)) {
     assert.equal(entries.length, 1);
     const handlers = entries[0].hooks ?? entries;
@@ -119,24 +112,11 @@ async function hook(host, event, payload, env, root, shell = process.platform ==
   return { ...response, parsed };
 }
 
-function enrollmentCall(host) {
-  const text = JSON.stringify({ enrollment_code: 'fixture-enrollment', expires_in: 300 });
-  if (host === 'copilot') {
-    // Copilot 1.0.95 joins the MCP text and its structured-content JSON with a blank line.
-    return ['postToolUse', { sessionId: 'login', toolName: ENROLLMENT_TOOLS.copilot, toolResult: { resultType: 'success', textResultForLlm: `${text}\n\n${text}` } }];
-  }
-  return ['PostToolUse', {
-    session_id: 'login', hook_event_name: 'PostToolUse', tool_name: ENROLLMENT_TOOLS[host], tool_input: {},
-    tool_response: host === 'claude' ? [{ type: 'text', text }] : { content: [{ type: 'text', text }] },
-  }];
-}
-
-// Sign in the way the mh-login skill does: the remote tool's result reaches the app's post-tool hook.
 async function signIn(host, env, root) {
-  const [event, payload] = enrollmentCall(host);
-  const result = await hook(host, event, payload, env, root);
-  assert.match(result.stdout, /completed on this device/);
-  assert.doesNotMatch(result.stdout, /fixture-enrollment/);
+  await seedEntraSession(env, await json(join(root, 'deployment.json')));
+  const result = await run(process.execPath, [join(root, 'runtime/auth.mjs'), 'status'], { env, cwd: env.HOME, timeout: 15_000 });
+  assert.equal(JSON.parse(result.stdout).signedIn, true);
+  assert.doesNotMatch(result.stdout, /fixture-access/);
   return result;
 }
 
@@ -179,7 +159,7 @@ test('payload checks reject extra maintainer files and empty directories', async
 test('packaged mh commands match their directories, the remote MCP tools and the sign-in helper', async t => {
   const root = await rootSnapshot(t);
   assert.deepEqual((await readdir(join(root, 'skills'))).sort(), ['mh-login', 'mh-logout', 'mh-memory', 'mh-show', 'mh-status', 'use-memory']);
-  for (const [name, tool] of [['mh-login', 'enroll_hook_capture'], ['mh-logout', 'runtime/auth.mjs'], ['mh-status', 'runtime/auth.mjs'], ['mh-memory', 'search_memories'], ['mh-show', 'get_memories'], ['use-memory', 'search_memories']]) {
+  for (const [name, tool] of [['mh-login', 'runtime/auth.mjs'], ['mh-logout', 'runtime/auth.mjs'], ['mh-status', 'runtime/auth.mjs'], ['mh-memory', 'search_memories'], ['mh-show', 'get_memories'], ['use-memory', 'search_memories']]) {
     const source = await readFile(join(root, 'skills', name, 'SKILL.md'), 'utf8');
     assert.match(source, new RegExp(`^name: ${name}$`, 'm'));
     assert.ok(source.includes(`\`${tool}\``));
@@ -187,7 +167,7 @@ test('packaged mh commands match their directories, the remote MCP tools and the
     if (['mh-login', 'mh-logout'].includes(name)) assert.match(source, /only for an explicit user request/);
   }
   const loginSkill = await readFile(join(root, 'skills/mh-login/SKILL.md'), 'utf8');
-  assert.match(loginSkill, /Never quote, repeat, summarize or display an enrollment code/);
+  assert.match(loginSkill, /Never display, read or copy access tokens/);
   assert.match(loginSkill, /runtime\/auth\.mjs" login/);
   for (const name of ['mh-logout', 'mh-status']) {
     const source = await readFile(join(root, 'skills', name, 'SKILL.md'), 'utf8');
@@ -224,7 +204,6 @@ test('included runtime is reproducible, license-complete and in the Git-publisha
   }
   const notices = await readFile(join(PLUGIN_ROOT, 'runtime/THIRD_PARTY_NOTICES.txt'), 'utf8');
   for (const dependency of manifest.dependencies) assert.ok(notices.includes(`${dependency.name}@${dependency.version}`));
-  // Microsoft sign-in is bundled for Claude and Codex; the MCP server is remote, so no MCP SDK is.
   assert.ok(manifest.dependencies.some(value => value.name === '@azure/msal-node'));
   assert.equal(manifest.dependencies.some(value => value.name.startsWith('@modelcontextprotocol/')), false);
   assert.equal(Object.keys(manifest.sources).some(path => path.startsWith('/')), false);
@@ -233,7 +212,7 @@ test('included runtime is reproducible, license-complete and in the Git-publisha
   assert.equal(ignored.stdout, '');
 });
 
-test('each host signs in through its post-tool hook without exposing the enrollment code', async t => {
+test('each host verifies cached Entra authentication without sending enrollment requests', async t => {
   const gateway = await mockGateway(t);
   const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
   for (const host of Object.keys(HOSTS)) {
@@ -242,21 +221,11 @@ test('each host signs in through its post-tool hook without exposing the enrollm
     await signIn(host, env, root);
     assert.equal((await authStatus(env, root)).signedIn, true);
   }
-  assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/hook/redeem')).length, 3);
+  assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/hook/redeem')).length, 0);
   assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/mcp/')).length, 0);
 });
 
-test('the bundled login helper signs in through Microsoft and the gateway', async t => {
-  const gateway = await mockGateway(t);
-  const env = await isolatedEnvironment(t);
-  const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
-  const probe = fileURLToPath(new URL('./helpers/native-auth-probe.mjs', import.meta.url));
-  await run(process.execPath, [probe, join(root, 'runtime/auth.mjs')], { env, cwd: env.HOME, timeout: 15_000 });
-  assert.equal((await authStatus(env, root)).signedIn, true);
-  assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/hook/redeem')).length, 1);
-});
-
-test('the Claude and Codex header launchers find the plugin and send the shared hook token', async t => {
+test('the Claude and Codex header launchers find the plugin and send the cached Entra token', async t => {
   const gateway = await mockGateway(t);
   const env = await isolatedEnvironment(t);
   const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
@@ -272,7 +241,7 @@ test('the Claude and Codex header launchers find the plugin and send the shared 
     return JSON.parse(response.stdout);
   };
   const claude = () => launch(server.headersHelper, { CLAUDE_PLUGIN_ROOT: root });
-  // Codex passes its helper only HOME and PATH (plus the fixture's loopback allowance here).
+  // Codex normally passes only HOME and PATH; the fixture also needs loopback allowance.
   const codexEnv = {
     HOME: env.HOME, PATH: env.PATH, USERPROFILE: env.USERPROFILE, MH_ALLOW_INSECURE_LOCALHOST: '1',
     ...(env.SystemRoot ? { SystemRoot: env.SystemRoot } : {}),
@@ -287,8 +256,8 @@ test('the Claude and Codex header launchers find the plugin and send the shared 
   assert.deepEqual(await claude(), {});
   assert.deepEqual(await codex(), {});
   await signIn('copilot', env, root);
-  assert.deepEqual(await claude(), { Authorization: 'HookToken fixture-access-1' });
-  assert.deepEqual(await codex(), { Authorization: 'HookToken fixture-access-1' });
+  assert.deepEqual(await claude(), { Authorization: 'Bearer fixture-access-1' });
+  assert.deepEqual(await codex(), { Authorization: 'Bearer fixture-access-1' });
 });
 
 test('one sign-in serves recall and capture in every host', async t => {
@@ -316,7 +285,7 @@ test('one sign-in serves recall and capture in every host', async t => {
     const finalText = { last_assistant_message: 'I will use concise examples.' };
     assert.deepEqual((await hook(host, stopEvent, { ...sessionPayload, turn_id: 'turn-1', ...finalText }, env, root)).parsed, {});
   }
-  assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/redeem')).length, 1);
+  assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/redeem')).length, 0);
   assert.equal(gateway.state.turns.filter(turn => turn.role === 'agent').length, 3);
   assert.equal(new Set(gateway.state.turns.map(turn => turn.thread_id)).size, 3);
 });
@@ -388,7 +357,7 @@ test('native argv and shell paths are literal on POSIX and PowerShell, including
 
 test('publisher defaults and sign-in cannot be overridden through environment variables', async t => {
   const env = await isolatedEnvironment(t);
-  const root = await rootSnapshot(t);
+  const root = await rootSnapshot(t, { deployment: fixtureDeployment() });
   const overrides = { ...env, MEMORY_HOUSE_GATEWAY: 'http://127.0.0.1:9', MEMORY_HOUSE_ENTRA_CLIENT_ID: 'wrong', AMT_ACCESS_TOKEN: 'fake-secret' };
   const { stdout } = await run(process.execPath, [join(root, 'runtime/auth.mjs'), 'status'], { env: overrides, cwd: env.HOME, timeout: 15_000 });
   assert.equal(JSON.parse(stdout).signedIn, false);
@@ -412,7 +381,7 @@ test('rebuilds refuse locally edited or unrecognized generated files', async t =
   assert.equal(await readFile(join(unknown, 'my-file.txt'), 'utf8'), 'keep');
 });
 
-test('available Claude CLI validates, installs and connects the remote MCP server with the hook token in an isolated profile', async t => {
+test('available Claude CLI validates, installs and connects the remote MCP server with a cached Entra token in an isolated profile', async t => {
   const env = {
     ...await isolatedEnvironment(t), DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', GIT_CONFIG_NOSYSTEM: '1',
@@ -444,11 +413,11 @@ test('available Claude CLI validates, installs and connects the remote MCP serve
   await assert.rejects(access(join(installedRoot, 'node_modules')), { code: 'ENOENT' });
   await assert.rejects(access(join(installedRoot, 'package-lock.json')), { code: 'ENOENT' });
   assert.equal((await authStatus(env, installedRoot)).signedIn, false);
-  // After the plugin's sign-in, Claude's header helper connects the remote MCP server with the hook token.
+  // After sign-in, Claude's header helper connects the remote MCP server with the cached Entra token.
   await signIn('claude', env, root);
   const listed = await run('claude', ['mcp', 'list'], { env, cwd: env.HOME, timeout: 60_000 });
   assert.match(listed.stdout, /plugin:memory-house:memory-house: .*\(HTTP\) - ✔ Connected/);
-  assert.ok(gateway.state.requests.some(request => request.path === '/inference/memory/mcp/' && request.authorization === 'HookToken fixture-access-1'));
+  assert.ok(gateway.state.requests.some(request => request.path === '/inference/memory/mcp/' && request.authorization === 'Bearer fixture-access-1'));
 });
 
 test('available Copilot CLI registers the native catalog and installs exactly one root plugin in isolation', async t => {
@@ -473,7 +442,7 @@ test('available Copilot CLI registers the native catalog and installs exactly on
   assert.match(mcp.stdout, /Source: Plugin/);
 });
 
-test('available Codex registers the remote MCP server, six named skills and four native hooks beside the legacy Copilot root', async t => {
+test('available Codex registers the remote MCP server, six named skills and three native hooks beside the legacy Copilot root', async t => {
   const env = { ...await isolatedEnvironment(t), GIT_CONFIG_NOSYSTEM: '1' };
   await mkdir(env.CODEX_HOME, { recursive: true });
   const available = spawnSync('codex', ['plugin', '--help'], { env, cwd: env.HOME, stdio: 'ignore', timeout: 20_000 });
@@ -491,8 +460,7 @@ test('available Codex registers the remote MCP server, six named skills and four
   assert.equal(entries.length, 1);
   assert.deepEqual(entries[0].warnings, []);
   const hooks = entries[0].hooks.filter(value => value.pluginId === 'memory-house@memory-house-marketplace');
-  assert.deepEqual(hooks.map(value => value.eventName).sort(), ['postToolUse', 'sessionStart', 'stop', 'userPromptSubmit']);
-  assert.equal(hooks.find(value => value.eventName === 'postToolUse').matcher, ENROLLMENT_TOOLS.codex);
+  assert.deepEqual(hooks.map(value => value.eventName).sort(), ['sessionStart', 'stop', 'userPromptSubmit']);
   const hookPath = await realpath(join(installedRoot, '.codex/plugin-hooks.json'));
   for (const value of hooks) {
     assert.equal(value.source, 'plugin');

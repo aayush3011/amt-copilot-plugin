@@ -81,6 +81,8 @@ function failureKind(error) {
   const status = error?.status ?? error?.statusCode;
   if (status === 401 || status === 403) return 'auth';
   const code = typeof error?.code === 'string' ? error.code.toLowerCase() : '';
+  if (['azure_cli_auth_required', 'azure_cli_not_found', 'azure_cli_unavailable', 'azure_cli_timeout',
+    'azure_cli_output_invalid', 'azure_cli_token_invalid', 'invalid_auth_state'].includes(code)) return code;
   if (['auth_required', 'auth_expired', 'not_authenticated', 'unauthorized', 'no_token',
     'not_signed_in', 'login_required', 'invalid_credentials', 'gateway_mismatch', 'refresh_expired'].includes(code)) return 'auth';
   if (['invalid_response', 'invalid_json', 'invalid_token_response', 'schema_error'].includes(code)
@@ -389,56 +391,14 @@ function contextOutput(harness, event, context) {
   return names[event] ? { hookSpecificOutput: { hookEventName: names[event], additionalContext: context } } : {};
 }
 
-// The exact names apps give this plugin's remote `enroll_hook_capture` tool: Copilot, Codex,
-// and Claude (which prefixes plugin servers). A same-named tool from another server never matches.
+// Discard obsolete enrollment results without ever redeeming or exposing their credentials.
 const ENROLLMENT_TOOLS = new Set([
   'memory-house-enroll_hook_capture',
   'mcp__memory-house__enroll_hook_capture',
   'mcp__plugin_memory-house_memory-house__enroll_hook_capture',
 ]);
-const ENROLLMENT_MESSAGES = Object.freeze({
-  signedIn: 'Memory House sign-in completed on this device. The enrollment code was used and must not be shown. '
-    + 'Tell the user: Signed in to Memory House. Capture and recall are now active on this device.',
-  missing: 'Memory House sign-in could not read the enrollment code. Call enroll_hook_capture once more. '
-    + 'Never display enrollment codes.',
-  failed: 'Memory House sign-in did not finish: the enrollment code was invalid, expired, or could not be redeemed. '
-    + 'Call enroll_hook_capture one more time. Never display enrollment codes.',
-});
-
 function isEnrollmentTool(payload) {
   return ENROLLMENT_TOOLS.has(firstField(payload, ['tool_name', 'toolName']));
-}
-
-function enrollmentCode(value, depth = 0) {
-  if (depth > 4) return null;
-  if (typeof value === 'string') {
-    if (Buffer.byteLength(value, 'utf8') > 64 * 1024) return null;
-    // Copilot can join the MCP text and its structured-content JSON with a blank line, which is not
-    // one JSON document, so each block is also tried on its own.
-    const blocks = value.split(/\r?\n[ \t]*\r?\n/);
-    for (const block of blocks.length > 1 ? [value, ...blocks.slice(0, 16)] : [value]) {
-      let parsed;
-      try { parsed = JSON.parse(block); } catch { continue; }
-      const code = enrollmentCode(parsed, depth + 1);
-      if (code) return code;
-    }
-    return null;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 16)) {
-      const code = enrollmentCode(item, depth + 1);
-      if (code) return code;
-    }
-    return null;
-  }
-  if (!isObject(value)) return null;
-  if (typeof value.enrollment_code === 'string' && value.enrollment_code) return value.enrollment_code;
-  for (const key of ['structuredContent', 'structured_content', 'content', 'text', 'textResultForLlm', 'text_result_for_llm', 'result']) {
-    if (!has(value, key)) continue;
-    const code = enrollmentCode(value[key], depth + 1);
-    if (code) return code;
-  }
-  return null;
 }
 
 // Each app's way to replace a tool result before the model sees it. Codex does not support
@@ -451,23 +411,6 @@ function replacedToolResult(harness, payload, message) {
   const replacement = Array.isArray(original) ? content
     : isObject(original) && Array.isArray(original.content) ? { content } : message;
   return { hookSpecificOutput: { hookEventName: 'PostToolUse', updatedMCPToolOutput: replacement } };
-}
-
-async function completeEnrollment(harness, payload, client, log) {
-  const code = enrollmentCode(firstField(payload, ['tool_response', 'toolResponse', 'toolResult', 'tool_result']));
-  if (!code) {
-    log('login:failed:code-missing');
-    return replacedToolResult(harness, payload, ENROLLMENT_MESSAGES.missing);
-  }
-  try {
-    if (typeof client?.redeem !== 'function') throw new Error('missing-client');
-    await client.redeem(code);
-  } catch (error) {
-    log(`login:failed:${failureKind(error)}`);
-    return replacedToolResult(harness, payload, ENROLLMENT_MESSAGES.failed);
-  }
-  log('login:completed');
-  return replacedToolResult(harness, payload, ENROLLMENT_MESSAGES.signedIn);
 }
 
 function topKValue(value, log) {
@@ -709,9 +652,9 @@ export async function runHook(options = {}) {
   const { harness, event, payload, client, env = process.env, logger, now = Date.now, topK } = isObject(options) ? options : {};
   const log = diagnosticLogger(logger);
   const normalized = normalizeHook({ harness, event, payload });
-  // Sign-in must hide the enrollment code even for a payload that would otherwise be skipped.
   if (normalized.event === 'post-tool' && isObject(payload) && isEnrollmentTool(payload)) {
-    return completeEnrollment(normalized.harness, payload, client, log);
+    log('login:obsolete-enrollment-ignored');
+    return replacedToolResult(normalized.harness, payload, 'Enrollment authentication is no longer supported. Run mh-login for Microsoft sign-in. Never display enrollment credentials.');
   }
   if (normalized.skipReason) {
     log(`skipped:${normalized.skipReason}`);

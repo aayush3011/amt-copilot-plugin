@@ -35,8 +35,8 @@ async function signedIn(t, gateway, { signIn = true } = {}) {
   const home = await mkdtemp(join(tmpdir(), 'memory-house-canvas-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   const config = loadConfig({ home, deployment: fixtureDeployment(gateway.base), env: { MH_ALLOW_INSECURE_LOCALHOST: '1' } });
-  const client = createClient({ config });
-  if (signIn) await client.redeem('fixture-enrollment');
+  const client = createClient({ config, acquireToken: async () => ({ accessToken: 'fixture-access-1', expiresAt: Math.floor(Date.now() / 1000) + 3600 }) });
+  if (!signIn) await client.logout();
   return { home, client, gateway: createGateway({ client }) };
 }
 
@@ -93,7 +93,7 @@ test('canvas data lists personal memories and every readable hierarchy node by p
   assert.deepEqual(listing[0].query, [['page_size', '50']]);
   for (const path of ['/inference/memory/whoami', '/inference/memory/v1/me/reach']) {
     const call = gateway.state.requests.find(entry => entry.path === path);
-    assert.match(call.authorization, /^HookToken fixture-access-/);
+    assert.match(call.authorization, /^Bearer fixture-access-/);
   }
 });
 

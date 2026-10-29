@@ -225,7 +225,7 @@ test('each host verifies cached Entra authentication without sending enrollment 
   assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/mcp/')).length, 0);
 });
 
-test('the Claude and Codex header launchers find the plugin and send the cached Entra token', async t => {
+test('the Claude and Codex header launchers find the plugin and send the cached MCP-audience Entra token', async t => {
   const gateway = await mockGateway(t);
   const env = await isolatedEnvironment(t);
   const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
@@ -256,8 +256,8 @@ test('the Claude and Codex header launchers find the plugin and send the cached 
   assert.deepEqual(await claude(), {});
   assert.deepEqual(await codex(), {});
   await signIn('copilot', env, root);
-  assert.deepEqual(await claude(), { Authorization: 'Bearer fixture-access-1' });
-  assert.deepEqual(await codex(), { Authorization: 'Bearer fixture-access-1' });
+  assert.deepEqual(await claude(), { Authorization: 'Bearer fixture-mcp-access-1' });
+  assert.deepEqual(await codex(), { Authorization: 'Bearer fixture-mcp-access-1' });
 });
 
 test('one sign-in serves recall and capture in every host', async t => {
@@ -417,7 +417,7 @@ test('available Claude CLI validates, installs and connects the remote MCP serve
   await signIn('claude', env, root);
   const listed = await run('claude', ['mcp', 'list'], { env, cwd: env.HOME, timeout: 60_000 });
   assert.match(listed.stdout, /plugin:memory-house:memory-house: .*\(HTTP\) - ✔ Connected/);
-  assert.ok(gateway.state.requests.some(request => request.path === '/inference/memory/mcp/' && request.authorization === 'Bearer fixture-access-1'));
+  assert.ok(gateway.state.requests.some(request => request.path === '/inference/memory/mcp/' && request.authorization === 'Bearer fixture-mcp-access-1'));
 });
 
 test('available Copilot CLI registers the native catalog and installs exactly one root plugin in isolation', async t => {

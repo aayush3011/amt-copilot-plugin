@@ -12,7 +12,9 @@ node "<folder containing this SKILL.md>/../../runtime/auth.mjs" status
 
 It verifies silent MSAL token acquisition from the protected cache, which may refresh over the network,
 and prints one JSON line. Report whether the plugin is signed in
-(`signedIn`) and, if so, its current access-token expiry (`accessExpiresAt`, in Unix seconds).
+(`signedIn`), the Microsoft Entra tenant it uses (`tenantId`), and, if signed in, its current
+access-token expiry (`accessExpiresAt`, in Unix seconds). A `TENANT_CHANGED` reason means the
+deployment's tenant changed since sign-in; suggest mh-login.
 Microsoft Entra/MSAL handles renewal; this expiry is not a promise of unattended access. Do not show
 credentials or deployment URLs. Being signed in does not prove that this app runs the capture
 hooks; refer to the documented support limits rather than claiming automatic capture.

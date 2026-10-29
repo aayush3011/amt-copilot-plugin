@@ -13,9 +13,11 @@ node "<folder containing this SKILL.md>/../../runtime/auth.mjs" login
 ```
 
 The helper opens Microsoft's sign-in page in the system browser and waits up to three
-minutes for the loopback callback. Allow up to four minutes for the command. Tell the
+minutes for the loopback callback. If Memory House tool access was not approved yet,
+Microsoft opens one more browser step for the same account, which also waits up to three
+minutes. Allow up to seven minutes for the command. Tell the
 user to select their account and complete any credentials/MFA only in that Microsoft
-window. Never ask for a password, MFA response, authorization code or token in chat.
+window, and to approve Memory House tool access with the same account if asked. Never ask for a password, MFA response, authorization code or token in chat.
 Existing Microsoft browser sessions may avoid another credential prompt.
 
 On success it enables this plugin and saves an OS-protected MSAL cache for reuse and
@@ -29,6 +31,10 @@ enrollment credentials. Do not call `enroll_hook_capture`: that flow is no longe
 On `signedIn: true`, reply:
 
 `Signed in to Memory House with Microsoft Entra ID.`
+
+If `mcpReady` is false, add that Claude Code and Codex Memory House tools are not
+available until the user approves tool access with the same account by running mh-login
+again. Hooks and canvas still work. Do not show `mcpReason` details beyond its code.
 
 Hooks and canvas now use the protected cache without opening a browser. Claude Code and Codex use the same session
 for MCP headers; reconnect the server or start a new session. Copilot manages its MCP

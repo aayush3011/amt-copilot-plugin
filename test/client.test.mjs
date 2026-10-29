@@ -49,11 +49,14 @@ test('capture and search expose only narrow request bodies and Bearer authentica
   const f = await fixture(t);
   await f.signIn();
   const inserted = { request_id: 'request-1', kind: 'insert', status: 'succeeded', result: { items: [{ index: 0, id: 'turn-1', status: 'stored' }] } };
-  f.handler(url => json(url.endsWith('/capture') ? inserted : { items: [], count: 0 }, url.endsWith('/capture') ? 201 : 200));
+  f.handler(url => json(url.endsWith('/memory') ? inserted : { items: [], count: 0 }, url.endsWith('/memory') ? 201 : 200));
   assert.deepEqual(await f.client.capture({ thread_id: 'test', role: 'agent', content: 'A note.', tenant_id: 'ignored' }), inserted);
   assert.deepEqual(await f.client.search('query', 3), { items: [], count: 0 });
   assert.deepEqual(JSON.parse(f.calls[0].body), { extract: true, thread_id: 'test', items: [{ role: 'agent', content: 'A note.' }] });
   assert.deepEqual(JSON.parse(f.calls[1].body), { query: 'query', top_k: 3 });
+  // HookToken-only /hook/* routes are not used: Entra-authenticated capture and search use the data routes.
+  assert.deepEqual(f.calls.map(call => [call.method, call.url]), [
+    ['POST', `${f.config.gatewayBase}/memory`], ['POST', `${f.config.gatewayBase}/search`]]);
   await f.client.search('query', 50);
   assert.equal(JSON.parse(f.calls[2].body).top_k, 50);
   assert.ok(f.calls.every(call => call.headers.Authorization === 'Bearer fake-access-1'));

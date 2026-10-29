@@ -129,12 +129,13 @@ test('browser cancellation, bind failure and timeout clean up without leaking pr
 test('interactive sign-in persists encrypted state, silent renewal persists refresh rotation, logout deletes it', async t => {
   const config = await callbackConfig(t);
   const protectedCache = protection(config);
-  let serialized = 'initial', silent = 0, interactive = 0;
+  let serialized = 'initial', interactive = 0;
+  const silent = [];
   const cache = { deserialize: value => { serialized = value; }, serialize: () => serialized,
     getAccountByHomeId: async homeAccountId => ({ homeAccountId }) };
   const pca = { getTokenCache: () => cache, getAuthCodeUrl: async request => authUrl(request),
     acquireTokenByCode: async () => { interactive++; serialized = 'fixture-refresh-original'; return result(config); },
-    acquireTokenSilent: async () => { silent++; serialized = 'fixture-refresh-rotated'; return result(config); } };
+    acquireTokenSilent: async request => { silent.push(request.scopes); serialized = 'fixture-refresh-rotated'; return result(config); } };
   const options = { protection: protectedCache, createApplication: () => pca };
   await assert.rejects(acquireEntraToken(config, options), { code: 'ENTRA_AUTH_REQUIRED' });
   await acquireEntraToken(config, { ...options, interactive: true, openBrowser: async url => {
@@ -146,7 +147,8 @@ test('interactive sign-in persists encrypted state, silent renewal persists refr
   assert.doesNotMatch(JSON.stringify(encrypted), /fixture-refresh|fixture-access/);
   assert.equal(JSON.parse(await protectedCache.unprotect(encrypted)).cache, 'fixture-refresh-rotated');
   assert.equal(interactive, 1);
-  assert.equal(silent, 1);
+  // Sign-in silently adds the MCP scope from the same account; the background call uses the gateway scope.
+  assert.deepEqual(silent, [[config.mcpScope], [config.scope]]);
   await createClient({ config }).logout();
   await assert.rejects(access(config.cachePath), { code: 'ENOENT' });
 });
@@ -281,4 +283,91 @@ test('legacy credentials are ignored and removed only on explicit login or logou
   await writeFile(legacy, 'legacy-secret');
   await client.logout();
   await assert.rejects(access(legacy), { code: 'ENOENT' });
+});
+
+test('real MSAL returns the cached MCP-audience token for headers without network or browser access', async t => {
+  const { env } = await setup(t);
+  const config = await seedEntraSession(env);
+  const value = await acquireEntraToken(config, { env, resource: 'mcp',
+    fetch: () => assert.fail('cached MCP token must not need the network'),
+    openBrowser: () => assert.fail('background acquisition must never prompt') });
+  assert.equal(value.accessToken, 'fixture-mcp-access-1');
+  assert.equal((await acquireEntraToken(config, { env })).accessToken, 'fixture-access-1');
+  await assert.rejects(acquireEntraToken(config, { env, resource: 'other' }), { code: 'INVALID_CONFIG' });
+  await assert.rejects(acquireEntraToken(config, { env, resource: 'mcp', interactive: true }), { code: 'INVALID_CONFIG' });
+  await assert.rejects(acquireEntraToken({ ...config, tenantId: 'contoso.onmicrosoft.com' }, { env }), { code: 'INVALID_ENTRA_CONFIG' });
+});
+
+test('sign-in adds the MCP scope silently, or through one consent step for the same account', async t => {
+  const config = await callbackConfig(t);
+  const protectedCache = protection(config);
+  const account = { homeAccountId: 'fixture-account', username: 'fixture@example.test' };
+  const signIn = async ({ silentMcp = false, consentAccount = account, consent = 'code=fixture-code' } = {}) => {
+    const requests = [], removed = [];
+    let hops = 0;
+    const pca = {
+      getTokenCache: () => ({ deserialize() {}, serialize: () => '{}', getAccountByHomeId: async id => ({ homeAccountId: id }),
+        removeAccount: async value => { removed.push(value.homeAccountId); } }),
+      getAuthCodeUrl: async request => { requests.push(request); return authUrl(request); },
+      acquireTokenByCode: async request => ({ ...result(config), account: request.scopes[0] === config.mcpScope ? consentAccount : account }),
+      acquireTokenSilent: async request => {
+        assert.deepEqual(request.scopes, [config.mcpScope]);
+        if (silentMcp) return { ...result(config), account };
+        throw Object.assign(new Error('provider-secret'), { errorCode: 'invalid_grant' });
+      },
+    };
+    const value = await acquireEntraToken(config, { protection: protectedCache, createApplication: () => pca, interactive: true,
+      openBrowser: async url => {
+        const state = new URL(url).searchParams.get('state');
+        await fetch(`${config.redirectUri}?state=${state}&${hops++ === 0 ? 'code=fixture-code' : consent}`);
+      } });
+    const stored = JSON.parse(await protectedCache.unprotect(JSON.parse(await readFile(config.cachePath, 'utf8'))));
+    return { value, requests, removed, stored };
+  };
+
+  const silent = await signIn({ silentMcp: true });
+  assert.equal(silent.value.mcpReady, true);
+  assert.deepEqual(silent.requests.map(request => [request.scopes, request.prompt]), [[[config.scope], 'select_account']]);
+
+  const consented = await signIn();
+  assert.equal(consented.value.mcpReady, true);
+  assert.equal(consented.value.accessToken, 'fixture-access-1');
+  assert.deepEqual(consented.requests[1].scopes, [config.mcpScope]);
+  assert.equal(consented.requests[1].loginHint, 'fixture@example.test');
+  assert.equal(consented.requests[1].prompt, undefined);
+
+  // The gateway sign-in stands when MCP consent uses another account or is declined.
+  const other = await signIn({ consentAccount: { homeAccountId: 'other-account', username: 'other@example.test' } });
+  assert.deepEqual([other.value.mcpReady, other.value.mcpReason], [false, 'ENTRA_ACCOUNT_MISMATCH']);
+  assert.deepEqual(other.removed, ['other-account']);
+  assert.equal(other.stored.accountId, 'fixture-account');
+  const declined = await signIn({ consent: 'error=access_denied' });
+  assert.deepEqual([declined.value.mcpReady, declined.value.mcpReason], [false, 'ENTRA_LOGIN_FAILED']);
+  assert.equal(declined.stored.accountId, 'fixture-account');
+  assert.doesNotMatch(JSON.stringify(declined.value), /provider-secret/);
+});
+
+test('explicit sign-in replaces a cache from another tenant; background use still rejects it', async t => {
+  const config = await callbackConfig(t);
+  const protectedCache = protection(config);
+  await mkdir(config.stateDir);
+  await writeFile(config.cachePath, JSON.stringify(await protectedCache.protect(JSON.stringify({
+    context: JSON.stringify(['55555555-5555-5555-5555-555555555555', config.clientId, config.scope]), accountId: 'old-account', cache: '{"old":1}',
+  }))));
+  const deserialized = [];
+  const pca = {
+    getTokenCache: () => ({ deserialize: value => deserialized.push(value), serialize: () => '{}', getAccountByHomeId: async id => ({ homeAccountId: id }) }),
+    getAuthCodeUrl: async request => authUrl(request),
+    acquireTokenByCode: async () => result(config),
+    acquireTokenSilent: async () => result(config),
+  };
+  const options = { protection: protectedCache, createApplication: () => pca };
+  await assert.rejects(acquireEntraToken(config, options), { code: 'INVALID_CACHE' });
+  await acquireEntraToken(config, { ...options, interactive: true, openBrowser: async url => {
+    await fetch(`${config.redirectUri}?state=${new URL(url).searchParams.get('state')}&code=fixture-code`);
+  } });
+  assert.deepEqual(deserialized, []);
+  const stored = JSON.parse(await protectedCache.unprotect(JSON.parse(await readFile(config.cachePath, 'utf8'))));
+  assert.equal(stored.context, JSON.stringify([config.tenantId, config.clientId, config.scope]));
+  assert.equal(stored.accountId, 'fixture-account');
 });

@@ -79,7 +79,17 @@ your local sign-in.
 Run **`mh-login`** using the host-specific command below. It opens Microsoft's
 sign-in page in your system browser. Select your account and complete credentials
 and MFA there, never in chat. An existing Microsoft browser session may avoid
-another password prompt. The helper waits up to three minutes.
+another password prompt. The helper waits up to three minutes. If Memory House
+tool access (the MCP scope) has not been approved yet, Microsoft opens one more
+browser step for the same account; Entra cannot request the gateway's `.default`
+scope and the MCP permission together.
+
+The tenant comes from `entra.tenantId` in `deployment.json` (a tenant GUID or
+verified domain). Without it, `mh-login` reads the gateway's unauthenticated
+`401` challenge (`WWW-Authenticate: Bearer authorization_uri="https://login.microsoftonline.com/<tenant>"`),
+accepts only one tenant GUID on that Microsoft host, and records it for later
+requests. A pinned tenant that differs from the gateway's challenge fails sign-in.
+`common`, `organizations` and `consumers` are not supported.
 
 The plugin uses authorization code + PKCE and stores the full MSAL token cache,
 including renewal state, in `~/.memory-house/msal-cache.json.enc`. Windows uses
@@ -93,7 +103,9 @@ timer and no browser prompt from background requests. MFA/Conditional Access,
 revoked sessions or missing consent can require another explicit `mh-login`.
 This is delegated user access, not device identity or permanent app-only access.
 
-**Claude Code and Codex** use the same protected cache for MCP headers. Reconnect
+**Claude Code and Codex** use the same protected cache for MCP headers, with a
+separate token for the MCP scope (`entra.mcpScope`), because the hosted MCP server
+accepts only its own audience. Hooks and canvas use the gateway scope. Reconnect
 their MCP server after login. **Copilot manages MCP OAuth independently**;
 its MCP tools still need the app's sign-in. See
 [maintainer documentation](docs/maintaining.md#remote-mcp-server-and-sign-in).
@@ -112,8 +124,9 @@ and `MEMORY_HOUSE_HOME` may not reach it. Use the default state directory or
 host-supported environment forwarding. Never copy credentials into the plugin.
 
 **Gateway prerequisite:** MISE and the gateway must accept the plugin's Entra
-tokens for the `https://dbinference.azure.com` resource on MCP, hook capture/search
-and canvas routes. The API registration must expose delegated permissions and
+tokens for the `https://dbinference.azure.com` resource on capture (`POST /memory`),
+search (`POST /search`) and canvas routes, and the MCP server must accept tokens for
+`api://inference-service-mcp/Logs.Read`. The HookToken-only `/hook/*` routes are no longer used. The API registration must expose delegated permissions and
 allow/consent public client `45cdeed7-4e4e-481d-9f00-6708c0631565`, with the registered
 redirect `http://127.0.0.1:33418`. The public-client registration must support
 authorization code + PKCE without a secret. `.default` requests configured

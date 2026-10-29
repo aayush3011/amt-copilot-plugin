@@ -37,7 +37,7 @@ test('headers and status reuse the protected MSAL session; failures keep stdout 
   assert.deepEqual(await s.run('headers'), {});
   assert.ok(s.errors.length);
   await seedEntraSession(s.env);
-  assert.equal((await s.run('headers')).Authorization.split(' ')[1], 'fixture-access-1');
+  assert.equal((await s.run('headers')).Authorization.split(' ')[1], 'fixture-mcp-access-1');
   assert.equal((await s.run('status')).signedIn, true);
   assert.ok(s.output.every(line => /^\{.*\}\n$/.test(line)));
   assert.doesNotMatch(s.errors.join(''), /fixture-access|fixture-refresh/);

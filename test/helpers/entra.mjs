@@ -11,7 +11,7 @@ export function fixtureIdToken(config, now = Math.floor(Date.now() / 1000)) {
 }
 
 export async function seedEntraSession(env, deployment = fixtureDeployment(), accessToken = 'fixture-access-1',
-  { expired = false, refreshToken } = {}) {
+  { expired = false, refreshToken, mcpAccessToken = 'fixture-mcp-access-1' } = {}) {
   const config = loadConfig({ env, deployment });
   const accountId = `fixture-user.${config.tenantId}`;
   const environment = 'login.microsoftonline.com';
@@ -24,13 +24,14 @@ export async function seedEntraSession(env, deployment = fixtureDeployment(), ac
         local_account_id: 'fixture-user', username: 'fixture@example.test', authority_type: 'MSSTS',
       },
     },
-    AccessToken: {
-      [`${accountId}-${environment}-accesstoken-${config.clientId}-${config.tenantId}-${config.scope}--`]: {
+    // One cached access token per audience: the gateway scope for hooks and canvas, the MCP scope for headers.
+    AccessToken: Object.fromEntries([[config.scope, accessToken], [config.mcpScope, mcpAccessToken]].map(([target, secret]) => [
+      `${accountId}-${environment}-accesstoken-${config.clientId}-${config.tenantId}-${target}--`.toLowerCase(), {
         home_account_id: accountId, environment, credential_type: 'AccessToken', client_id: config.clientId,
-        secret: accessToken, realm: config.tenantId, target: config.scope, token_type: 'Bearer',
+        secret, realm: config.tenantId, target, token_type: 'Bearer',
         cached_at: String(now - 3600), expires_on: String(now + (expired ? -10 : 3600)), extended_expires_on: String(now + (expired ? -10 : 3600)),
       },
-    },
+    ])),
     IdToken: {
       [`${accountId}-${environment}-idtoken-${config.clientId}-${config.tenantId}--`]: {
         home_account_id: accountId, environment, credential_type: 'IdToken', client_id: config.clientId,

@@ -45,6 +45,15 @@ export async function mockGateway(t, options = {}) {
     // The unauthenticated 401 challenge that names the gateway tenant; null omits the header.
     challenge: 'Bearer authorization_uri="https://login.microsoftonline.com/33333333-3333-3333-3333-333333333333"',
     captureStatus: 201,
+    captureDelayMs: 0,
+    // A problem+json error for every capture, such as { status: 409, code: "reset_in_progress", retry_after: 5 }.
+    captureProblem: null,
+    // Captures whose turns contain this text get a conflict raised before the request finishes (409 problem+json).
+    conflictContent: null,
+    // Turns that contain this text fail to store, like the engine's failed writes. A request that stored none
+    // finishes as failed with no error of its own: the gateway answers with the request's record (503). One
+    // that stored some is partial (207). Either result is replayed for the same Idempotency-Key.
+    failContent: null,
     listingStatus: 200,
     listingResponse: null,
     cursors: new Map(),
@@ -136,6 +145,15 @@ export async function mockGateway(t, options = {}) {
       return send(200, { nodes: state.nodes, principals_resolved_at: new Date().toISOString(), version: 1 });
     }
     if (path === "/inference/memory/memory" && req.method === "POST") {
+      // A slow gateway, for checking that hooks never wait on the capture request.
+      if (state.captureDelayMs) await new Promise(resolve => setTimeout(resolve, state.captureDelayMs));
+      if (state.captureProblem) {
+        const { status, ...problem } = state.captureProblem;
+        res.writeHead(status, { "Content-Type": "application/problem+json",
+          ...(problem.retry_after === undefined ? {} : { "Retry-After": String(problem.retry_after) }) });
+        res.end(JSON.stringify({ type: "about:blank", title: "Conflict", status, ...problem }));
+        return;
+      }
       const key = req.headers["idempotency-key"];
       if (key !== undefined && (typeof key !== "string" || !key || key.length > 256)) return send(422, { code: "invalid_request" });
       if (key && state.idempotent.has(key)) {
@@ -144,6 +162,28 @@ export async function mockGateway(t, options = {}) {
         return send(prior.status, prior.value);
       }
       if (state.insertStatus) return send(state.insertStatus, { error: "fixture-provider-secret" });
+      const contains = text => typeof text === "string" && Array.isArray(body?.items)
+        && body.items.some(item => typeof item?.content === "string" && item.content.includes(text));
+      if (contains(state.conflictContent)) {
+        res.writeHead(409, { "Content-Type": "application/problem+json", "Retry-After": "5" });
+        res.end(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, code: "reset_in_progress", retry_after: 5 }));
+        return;
+      }
+      if (contains(state.failContent)) {
+        const items = body.items.map((item, index) => {
+          if (typeof item?.content === "string" && item.content.includes(state.failContent)) {
+            return { index, id: `fixture-unstored-${index}`, status: "failed", error: { code: "internal_error", message: "fixture-provider-secret" } };
+          }
+          state.turns.push({ thread_id: body.thread_id, role: item.role, content: item.content });
+          return { index, id: `fixture-turn-${state.turns.length}`, status: "stored" };
+        });
+        const succeeded = items.filter(item => item.status === "stored").length;
+        const record = { request_id: `fixture-request-${state.requests.length}`, kind: "insert", status: succeeded ? "partial" : "failed",
+          result: { items, count: items.length, succeeded, failed: items.length - succeeded, unknown: 0 }, replayed: false };
+        const status = succeeded ? 207 : 503;
+        if (key) state.idempotent.set(key, { raw, status, value: { ...record, replayed: true } });
+        return send(status, record);
+      }
       if (body?.extract !== false && state.captureStatus >= 300) return send(state.captureStatus, { error: "unavailable" });
       if (!validInsertion(body)) return send(422, { code: "invalid_request" });
       state.insertions.push({ body, key });

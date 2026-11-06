@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { loadConfig } from '../../src/config.mjs';
 import { createCacheProtection } from '../../src/cache-protection.mjs';
 import { atomicJson, ensureDirectory } from '../../src/state.mjs';
@@ -11,7 +12,7 @@ export function fixtureIdToken(config, now = Math.floor(Date.now() / 1000)) {
 }
 
 export async function seedEntraSession(env, deployment = fixtureDeployment(), accessToken = 'fixture-access-1',
-  { expired = false, refreshToken, mcpAccessToken = 'fixture-mcp-access-1' } = {}) {
+  { expired = false, refreshToken, mcpAccessToken = 'fixture-mcp-access-1', recordSignIn = false, recordAccount = true } = {}) {
   const config = loadConfig({ env, deployment });
   const accountId = `fixture-user.${config.tenantId}`;
   const environment = 'login.microsoftonline.com';
@@ -50,5 +51,12 @@ export async function seedEntraSession(env, deployment = fixtureDeployment(), ac
   await atomicJson(config.cachePath, await createCacheProtection(config, { env }).protect(JSON.stringify({
     context: JSON.stringify([config.tenantId, config.clientId, config.scope]), accountId, cache,
   })));
+  // mh-login also records the sign-in and, since 0.15.0, its account; hooks queue turns only under a recorded sign-in.
+  if (recordSignIn) {
+    await atomicJson(config.authStatePath, {
+      version: 1, disabled: false, generation: randomUUID(), tenantId: config.tenantId.toLowerCase(), tenantSetting: config.tenantId,
+      ...(recordAccount ? { objectId: 'fixture-user', captureEpoch: randomUUID() } : {}),
+    });
+  }
   return config;
 }

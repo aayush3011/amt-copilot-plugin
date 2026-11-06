@@ -16,7 +16,7 @@ node "<folder containing this SKILL.md>/../../runtime/auth.mjs" logout
 
 It writes a credential-free disabled preference shared by Memory House apps using this
 state directory, after which new plugin capture, recall, canvas and header requests stop.
-It deletes the plugin's protected MSAL cache and obsolete plugin token files, but does not
+It deletes the plugin's protected MSAL cache, unsent captured turns and obsolete plugin token files, but does not
 revoke Entra tokens or sign out other applications. In-flight requests or host-cached headers can
 remain authorized until their access tokens expire. Reconnect MCP to drop cached headers.
 It prints one JSON line. Report the outcome in one sentence, including that the plugin cache

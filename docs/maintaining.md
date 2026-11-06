@@ -46,7 +46,8 @@ turn and final agent turn in the main conversation. Their capture calls do not a
 important material; the AMT backend handles extraction, consolidation and
 discarding. `add_memory` is only an explicit user-requested one-off write, never
 a substitute for the hook stream or an importance-based extra write. Existing
-credential/runtime filtering and best-effort delivery still apply.
+credential/runtime filtering applies, and delivery goes through the durable queue
+described in [Capture queue and recall](#capture-queue-and-recall).
 
 Claude uses its native manifest rather than `plugin.json` for components.
 Codex selects `.codex-plugin/plugin.json` beside the nonportable Copilot root.
@@ -60,6 +61,12 @@ checked against the installed package before running. Claude and Copilot use
 direct executable/argv hooks. Codex uses a fixed Node launcher that
 reads the host-exported root variable without interpolating paths into shell
 code, including on Windows.
+
+Claude and Codex register session start, prompt, stop and session end hooks;
+Copilot also registers prompt transform and post-tool. Session end has a short
+host budget (Claude 1.5 seconds unless a hook asks for more, this one 5; Codex
+at most 3), so it only clears session state and starts the background capture
+sender.
 
 Official contracts:
 [Claude native manifests](https://code.claude.com/docs/en/plugins-reference),
@@ -127,7 +134,8 @@ cache (including refresh-token rotation) is persisted under a cross-process lock
 Within one client, acquisition is deduplicated and tokens are kept until expiry
 skew. Logout/account-switch generations invalidate other long-lived clients.
 Interaction-required results tell the user to run `mh-login`; background hooks,
-headers and canvas never open a browser. Rejected gateway requests are not retried.
+headers and canvas never open a browser. Gateway requests are not retried, except
+captured turns, which the capture queue resends.
 
 **Persistent cache.** `~/.memory-house/msal-cache.json.enc` contains an encrypted
 MSAL cache plus the selected account and effective-tenant/client/scope context.
@@ -167,9 +175,11 @@ browser step (two steps when MCP consent is missing).
 - **Copilot** continues to manage its MCP OAuth independently.
 
 **Status/logout.** Status checks silent acquisition without exposing credentials;
-it can renew over the network. Logout writes the disabled preference and new
-generation to `auth.json`, deletes the encrypted MSAL cache under its lock, and
-removes obsolete token files. It does not revoke issued tokens or affect other
+it can renew over the network. Login also records the account's object ID and a
+capture epoch in `auth.json` (see [Capture queue and recall](#capture-queue-and-recall)).
+Logout writes the disabled preference and new generation to `auth.json`, deletes
+the encrypted MSAL cache under its lock, removes obsolete token files and deletes
+queued captures. It does not revoke issued tokens or affect other
 apps' sign-ins. In-flight requests/host-cached headers may work until expiry;
 reconnect MCP to drop cached headers. Explicit `mh-login` is required initially
 and after logout; an existing Azure CLI session is not imported.
@@ -231,6 +241,10 @@ Search allows `top_k` up to 50 and queries up to 16 KiB. The agent gets only
 each memory's content, in AMT's order, without scores.
 Listing pages with `page_size` and `cursor` instead of `recent_k`, `scopes`
 and `truncated`; the plugin now applies the default of 50 itself.
+Version 0.15.0 queues captured turns durably and sends them from a background
+process, captures a long prompt whole as ordered parts, and searches automatically
+only on the first prompt for 10 results with type, date and conflict notes; see
+[Capture queue and recall](#capture-queue-and-recall). It has not been verified live.
 Hook discovery, native trust and real capture are distinct checks.
 
 **Copilot CLI 1.0.81-4:** real Microsoft sign-in, search, explicit insertion,
@@ -285,7 +299,8 @@ host state was not established as the cause. The adapter emits safe stderr
 diagnostics for skips and transport/authentication failures, then fails open.
 Whether those diagnostics are visible in ordinary chat depends on the host;
 there is no persistent capture-health indicator. Better user-visible
-observability is a follow-up, not an excuse to add replay or deduplication.
+observability is a follow-up. (The durable capture queue added later was a
+separate design decision, not a fix for this anomaly.)
 An initial post-relocation Copilot run similarly logged transient transport
 failures before a subsequent complete two-turn run passed. The early observer
 did not record an HTTP receipt for those failures; neither a gateway failure
@@ -349,11 +364,177 @@ cannot override these settings. Changing deployments is a publisher operation:
 update `deployment.json` and `mcp.json` together and publish an updated package.
 The registered public client and callback must match the browser flow above.
 Plugin state includes the encrypted MSAL cache, credential-free disabled
-preference and hook context, using safe atomic writes and locks.
+preference, hook context and the encrypted capture queue, using safe atomic
+writes and locks.
 Hosts need the same OS user and plugin state to share access;
 different users, remote machines and explicit state overrides are separate.
 `MEMORY_HOUSE_AUTH_TIMEOUT_MS` bounds network/cache operations (default 10000, max 30000);
 hook/header entry points impose their own shorter caps.
+
+## Capture queue and recall
+
+**Queue.** Hooks never send a captured turn themselves. `src/capture-queue.mjs`
+seals each turn and writes it as one file in `<state>/capture-queue/`, named by a
+16-digit sequence number that only grows (plus a random suffix, so two writers
+never share a name), then starts the background sender
+(`runtime/flush.mjs`) as a detached process with no stdio and returns. The
+sender can outlive the hook, so host timeouts (Copilot asks for under 5 seconds)
+never cut a send short.
+
+- **Protection.** Turn text, thread ID and account binding are sealed with the
+  sign-in cache's device key (`createCacheProtection` with purpose `capture-queue`):
+  DPAPI with its own entropy on Windows, AES-256-GCM with the Keychain/Secret
+  Service key and separate associated data elsewhere, so neither ciphertext opens as
+  the other. Signing in again leaves that key alone, so turns sealed before stay
+  readable. The plaintext header holds only hashes of the gateway, thread and
+  account binding. The directory and files use the state helpers: owned 0700/0600,
+  no links followed, atomic writes. On Windows each seal and open is one short
+  PowerShell call, so a long prompt starts one per part and a large backlog drains
+  at about one turn per call.
+- **Order.** The sender groups turns by conversation (thread) and sends each
+  conversation's turns in sequence order, up to 50 turns and 240 KiB per request.
+  A conversation stops at its first failure, so a later turn is never sent while an
+  earlier one is queued.
+- **Records and keys.** Before sending, the sender records the batch (its files and
+  its `Idempotency-Key`) in `sending-<thread hash>.json`, one record per
+  conversation. A later run resends exactly that batch with that key first, so a
+  gateway that accepted the earlier attempt replays it instead of storing the turns
+  twice. A key is `mh-capture-<sha256>` of the batch's turn IDs and how many of
+  their requests already finished as failed, so the same attempt always has the
+  same key and each retry after a finished failure a new one. After a success the
+  turns, then the record, are removed; a record whose turns are partly gone means
+  the batch was accepted and the sender stopped while removing it, so the rest is
+  removed without sending. After a partial result the record is first replaced by
+  one that also names the stored turns, so a sender stopped while settling it
+  removes those turns rather than sending them again.
+- **Failures.** The client reads what an error body says (at most 64 KiB, never its
+  text): a problem+json `code` and retry delay, or, for a request the engine
+  finished as failed, the gateway's copy of the request's record (`request_id` and
+  `status: "failed"`, returned as 409, 404, 504 or 503) and its `error.code` if it
+  has one. When every write failed, the usual case, it has none, only failed items.
+  - A finished failure is replayed for its key for 24 hours, so retrying it under
+    that key cannot succeed. With `reset_superseded` a memory reset (delete all)
+    superseded the turns, and they are dropped. Otherwise each turn of the batch
+    counts the failed request in its header (`failedRequests`, and `firstFailedAt`
+    for the first) and, after the conversation's wait, is retried alone under a new
+    key (recorded first). A turn is dropped once its requests have finished as
+    failed under at least two keys and at least an hour after the first, so a
+    storage incident does not drop turns, while one bad turn holds up its
+    conversation for only about an hour. A clock set back restarts that hour, and a
+    sender stopped between a failed request and updating its turns may leave that
+    failure uncounted, which delays the drop by one retry.
+  - A success can be partial. With 207 (`status: "partial"`) the engine stored some
+    turns of the batch, and the others failed or their outcome is unknown
+    (`result.items[]`, by `index` and `status`). The stored turns are removed; each
+    other turn, including any the result does not report as stored, counts a
+    finished failure as above. A 202 (`queued` or `running`) means another attempt
+    with the same key is still running, so nothing is taken for stored and the same
+    batch and key are sent again after the conversation's wait, when the engine
+    returns the result.
+  - A 409 without a finished record is not a refusal. `idempotency_conflict` means
+    this key was used for these turns before, so the batch is treated as delivered;
+    any other (`reset_in_progress`, `stale_generation`, `stale_reset`, or none) is
+    raised before the request finishes, so the same batch and key are retried later,
+    because the engine resumes a partly stored batch only under its original key.
+    Other server errors without a record are retried the same way.
+  - HTTP 400, 413 and 422 refuse a batch: its turns are resent one at a time, each
+    recorded the same way, and only a refused turn is dropped.
+  - A server error, a conflict, a finished or partial failure, or a request still
+    running stops only its conversation: the others are still sent in the same
+    run, and that conversation alone waits 30 seconds, doubling with its own
+    consecutive failures up to 10 minutes, or longer when `Retry-After` asks for it.
+    Sign-in, network, timeout, rate limiting (429) and credential-store failures
+    would meet every conversation, so they stop the run and every conversation
+    waits the same way. `status.json` holds these waits (failure count, retry time
+    and kind, by conversation hash; no content).
+  - A hook that queued a turn starts a sender unless its own conversation waits;
+    other hooks start one only once some wait is over; session start and end always
+    do, and their sender retries every conversation. A session start or end that
+    finds a sender running leaves it that request in `force.json`, which that
+    sender takes at its next pass (or the next sender, if this one stops first).
+    Otherwise a sender skips the conversations still waiting. A new sign-in ignores
+    earlier waits.
+- **At least once.** A turn is never dropped for a transient failure, so it can
+  rarely reach the gateway twice: when a recorded batch that the gateway did accept
+  loses a turn (damaged or expired) before its retry, the rest are sent again under
+  a new key; if two processes take over the same stale lock at once; when a batch
+  whose response was lost is resent more than 24 hours later, because the engine
+  remembers an `Idempotency-Key` for 24 hours; and when a failed or partial result
+  reports a turn's outcome unknown (its write may still have landed), since that
+  turn is resent under a new key.
+- **Transient failures keep turns.** A credential store that is locked or
+  unavailable, a file read error, or sign-in state that cannot be read stops the
+  run with the turns kept. A turn that fails to open is tried again once the store
+  opens a fresh test value, and is dropped only if it still fails.
+- **One sender.** `flush.lock` is a lease touched before each request; a sender
+  that crashed loses it after 2 minutes. After releasing it the sender checks for
+  turns queued since it listed the queue, so a hook that saw the lease held never
+  strands its turn. A sender also exits after 5 minutes.
+- **Bounds.** At most 200 turns and 4 MiB; the oldest make room, except the batches
+  being sent. Turns older than 7 days, damaged turns and stray temporary files are
+  removed.
+- **Account.** Turns belong to the signed-in account. `mh-login` records the
+  account's object ID (from the MSAL account: its ID token's `oid`, else its local
+  account ID) and a random capture epoch in `auth.json`. A sign-in with the same
+  tenant and object ID while still signed in, for example after the sign-in
+  expired, keeps the epoch; another account or tenant, or any sign-in after a
+  sign-out, starts a new one. Each turn is bound to a hash of tenant, object ID and
+  epoch (`client.captureIdentity()`, local only), so turns survive a new sign-in
+  with the same account, and a sign-out ends them even if its queue deletion
+  failed or was done by an older plugin version. A sign-in recorded by an earlier
+  version has no object ID, so nothing proves whose turns were queued under it:
+  they are never sent. The sender discards them and records the cached Microsoft
+  account once (`client.recordAccount()`), holding the sign-in lock so that no
+  `mh-login` is changing the cache meanwhile, with a new generation so that every
+  client drops tokens it cached before; turns queued after that are bound to that
+  account. In practice the first turn or two after updating from an earlier
+  version, or after an earlier version's `mh-login`, are not captured. Nothing is
+  queued on a device that never signed in. The hook checks the binding again under the
+  queue lock just before writing, so a logout that already deleted the queue is
+  not undone. When sending, the client refuses a batch if the
+  binding changed, or if its token is not for the recorded account (a token whose
+  account is unknown included): `mh-login` replaces the MSAL cache before it records
+  the new sign-in, so for a moment a token can belong to the next account.
+  `mh-logout` deletes the queue, waiting for the queue lock (at most its 10-second
+  TTL); the sender discards turns bound to another account or queued before a
+  sign-out.
+- **Long prompts.** A cleaned prompt over 32 KiB is queued, in one locked write, as
+  consecutive user turns of at most 32 KiB, each starting with
+  `[Part 2 of 4 of one long message]`. Cuts fall after a line break (else a space)
+  within the last 1 KiB of a part, never inside a character. A prompt over about
+  248 KiB, the most that always fits in 8 parts, keeps its start and end around
+  `[N characters cut from the middle of this message]`. Agent replies still keep
+  their first 32 KiB, and the search query is unchanged. Memory House extracts
+  turns in batches of up to 7,000 tokens and extracts a larger turn on its own.
+- **Diagnostics.** Hooks log `capture:<role>:queued` (`:queued:<n>-parts` for a
+  long prompt), `:skipped:not-signed-in` or `:failed:queue-<reason>` and
+  `capture:sender-started`; the sender has no output.
+
+**Recall.**
+
+- Automatic recall asks for 10 results (`MEMORY_HOUSE_TOP_K` overrides, up to 20)
+  on the first nonempty, cleaned user prompt. Session start only retries capture;
+  it does not search with a generic startup query.
+- The query is the whole cleaned prompt up to 16 KiB; a longer prompt keeps its
+  first and last 8 KiB around `[...]`.
+- Every host records the first prompt in permission-restricted per-session state.
+  The one search attempt is recorded before the request, so empty results or errors
+  do not cause repeated automatic searches. Later recall uses the hosted MCP
+  `search_memories` tool at the agent's discretion.
+- Claude and Codex search in the first prompt hook. Copilot defers to the first
+  prompt's transform, or post-tool if no transform ran; VS Code uses post-tool.
+  Copilot caches the sanitized reference block so repeated transforms do not search
+  again. Cached results are bound to the sign-in generation and are not reused
+  after logout, another sign-in, or an unreadable sign-in state. The query and
+  block are cleared on stop or a subsequent prompt and become
+  unusable after an hour. The consumed-session marker survives that expiry and
+  resume/compaction; session end removes it. State is bounded to 128 sessions,
+  evicting the oldest when full. Lost or evicted state can permit a new initial
+  search. Legacy per-prompt state is treated as an already-started session.
+- Each memory renders as `- [type, YYYY-MM-DD] text`, with each
+  `conflicts_with` entry (at most 5, then a count) as `  - Conflicts with
+  [YYYY-MM-DD]: text`. Text is filtered and escaped like before. A memory is
+  included whole or skipped if it does not fit in the 8 KiB block; nothing is cut.
 
 ## Supported listing
 
@@ -372,8 +553,10 @@ error rather than an empty result.
 
 The payload skills are `mh-login`, `mh-logout`, `mh-status`, `mh-memory`,
 `mh-show` and `use-memory`; each directory and frontmatter name matches.
-`use-memory` asks the agent to call `search_memories` before starting a task, as
-`main` did, so recall is visible as a tool call besides the hooks' injected context. All are available for discovery.
+`use-memory` asks the agent to call `search_memories` when past preferences,
+decisions, fixes or commands could help, before repeating investigation, or when
+a topic change needs context not already available. It does not mandate a
+duplicate lookup after the initial hook search. All are available for discovery.
 Login/logout descriptions and instructions require an explicit user request;
 the skill itself does not pre-approve its tools. `mh-login`, `mh-logout`
 and `mh-status` all run `runtime/auth.mjs`, so the host's
@@ -521,7 +704,7 @@ npm run check:publisher
 `plugin/runtime/` is intentionally **not gitignored**. Publish its generated
 JavaScript, `THIRD_PARTY_NOTICES.txt`, and `manifest.json` together with the
 native payload and the three root catalogs.
-The runtime holds the hooks, the canvas and the sign-in helper. It bundles
+The runtime holds the hooks, the background capture sender, the canvas and the sign-in helper. It bundles
 MSAL for the helper's Microsoft sign-in, but no MCP SDK, because the MCP server
 is remote. A fresh cached installation needs no `node_modules`, unpublished npm
 package, lifecycle script, network dependency installer, or files outside the
@@ -545,13 +728,14 @@ and the exact payload inventory under `plugin/`. They exercise the native
 hook commands for each app, the bundled auth helper with a synthetic protected
 MSAL cache (real DPAPI on Windows, isolated fake OS stores on macOS/Linux),
 both header launchers (including Codex's minimal environment),
-shared cached authentication, plugin-cache logout, recall and capture, and command
+shared cached authentication, plugin-cache logout, recall and capture through the
+detached background sender (including a gateway outage and a slow gateway), and command
 execution without source `node_modules`, all against a loopback gateway
 fixture. The available Claude CLI strictly validates and installs the payload
 and root catalog in an isolated fake profile, then connects the remote server
 with a fixture Bearer token through its header helper. The available Copilot CLI
 registers the native catalog, installs its payload and loads the remote server.
-The available Codex CLI installs the same snapshot and asserts that all three
+The available Codex CLI installs the same snapshot and asserts that all four
 hooks are discovered as plugin-scoped and untrusted beside the legacy Copilot
 root, and that it registers the remote server; its helper can't authenticate
 against the plain-HTTP fixture because Codex withholds the fixture's loopback
@@ -576,14 +760,14 @@ directory, which is not shipped by this
 repository. Claude, Codex and Copilot were checked in throwaway profiles.
 
 Copilot's event log can still be flushing when its stop hook fires. The adapter
-waits up to one second for the final transcript text, then makes at most one
-capture request. This is bounded local transcript reading, not a capture queue,
-idempotency mechanism, or network replay.
+waits up to one second for the final transcript text, then queues the final
+answer once. This is bounded local transcript reading; delivery and retries belong
+to the capture queue.
 
 The default automated suite must not read a real app profile, sign in to a production tenant, send
 real conversations, or install a plugin into an active user profile. Loopback
-HTTP fixtures explicitly use `MH_ALLOW_INSECURE_LOCALHOST=1`. Capture is
-best-effort and is never automatically replayed. The live checks above were
+HTTP fixtures explicitly use `MH_ALLOW_INSECURE_LOCALHOST=1`. Only the capture
+queue resends anything, and tests drive it against loopback fixtures. The live checks above were
 separate, explicitly authorized operations; they are not run by `npm test`.
 
 ## Publication

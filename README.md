@@ -156,8 +156,9 @@ refreshed.
 **`mh-show`** (`/memory-house:mh-show` in Copilot) opens the Memory House canvas
 in the GitHub Copilot app; other hosts get a text listing of recent memories.
 **`use-memory`** has no command: the agent loads it during real work and calls
-`search_memories` before starting a task, so the query and the returned memories
-show up as a tool call.
+`search_memories` when earlier preferences, decisions, fixes or commands could help
+and the memories already in context are insufficient. These on-demand searches
+show up as tool calls.
 
 Then ask:
 
@@ -193,8 +194,8 @@ call `add_memory` just because something seems important. The skills have the
 agent store the request as a fact (`extract: false`).
 
 **Remembering is asynchronous.** Acceptance is not a promise that the note is
-already searchable. Capture is best-effort: no queue, automatic replay, or new
-deduplication contract is added.
+already searchable. An explicit `add_memory` write is not queued or retried
+automatically; only hook capture is (see [Automatic memory](#automatic-memory)).
 
 ## Memory House canvas (GitHub Copilot app)
 
@@ -228,18 +229,61 @@ Deleting and promoting memories are not available from the panel.
 
 ## Automatic memory
 
-**Hooks are the capture path, where admitted by the host.** They attempt to send every user
-turn and every final agent turn in the main conversation to Memory House/AMT,
+**Hooks are the capture path, where admitted by the host.** They capture every user
+turn and every final agent turn in the main conversation for Memory House/AMT,
 without waiting for the model to call a tool or decide that a turn is important.
 The **AMT backend core** decides what to extract, consolidate, or discard.
-Capture is best-effort when sign-in, networking, or host payloads are unavailable.
 
-The adapters declare startup and per-prompt recall for Claude Code and Codex.
+**Capture never holds up a prompt, and a failed send is not lost.** A hook adds the
+turn to a local queue and returns; a background process sends it. If sending
+fails (offline, gateway errors, expired sign-in), the turns stay queued and are
+retried by later hooks and at session start and end, waiting 30 seconds after a
+failure and up to 10 minutes after repeated failures. A conversation's turns are
+always sent in order, several in one request when they have piled up. The queue:
+
+- is `~/.memory-house/capture-queue/`, one file per turn, encrypted with the same
+  OS protection as the sign-in cache (DPAPI, Keychain or Secret Service);
+- holds at most 200 turns and 4 MiB, dropping the oldest first, and drops turns
+  older than 7 days;
+- accepts turns only while this device is signed in, and keeps them for the
+  signed-in account (its tenant and user object ID). Signing in again with the
+  same account, for example after the sign-in expired, keeps them; another account
+  or tenant, or `mh-logout`, discards them. A sign-in made with an earlier version
+  did not record its account, so the first turn or two after updating are not
+  captured while the plugin records it.
+
+A turn the gateway refuses outright (for example as invalid) is dropped, not retried.
+A turn that Memory House keeps failing to store, on at least two attempts over more
+than an hour, is dropped too, so it cannot hold up its conversation for long, and a
+problem in one conversation does not hold up the others. When Memory House stores
+only some of the turns sent together, only the others are sent again. Turns still
+being sent when all memories are deleted are dropped rather than stored afterwards.
+A turn is never lost to a temporary failure, but it can rarely be stored twice.
+
+**Long prompts are captured whole.** A prompt over 32 KiB, such as a long pasted log,
+becomes up to 8 consecutive user turns, each starting with a marker such as
+`[Part 2 of 4 of one long message]` and cut at a line break where possible. A
+prompt over about 248 KiB keeps its start and end, with a note of how many
+characters were cut from the middle. Agent replies keep their first 32 KiB.
+
+**Recall** automatically asks for 10 memories on the session's first user prompt,
+not at the session-start event (`MEMORY_HOUSE_TOP_K`, 1 to 20, changes this).
+The search query is the whole prompt, or its start and end beyond 16 KiB.
+Each memory shows its type and date. A memory that conflicts with another
+also lists the other version with its date, so the agent sees both. Later prompts
+do not trigger another automatic search, even if the first search fails or
+returns no results. The agent can call the hosted
+`search_memories` tool when it needs more context. Resume and compaction of the
+same session do not restart automatic recall.
+Memories are shown whole: one that does not fit in the 8 KiB block is left out
+rather than cut off.
+
+Claude Code and Codex inject the initial memories through their first prompt hook.
 Codex's native legacy manifest exposes its plugin hooks for review with `/hooks`;
-the earlier portable manifest prevented their discovery. Claude's startup,
-per-prompt recall and final-answer capture were verified with its native hooks.
-Copilot recalls at
-startup and during prompt transformation, with post-tool fallback.
+the earlier portable manifest prevented their discovery.
+Copilot injects during the first prompt's transformation, with a post-tool fallback
+when no transform ran; VS Code uses that first-prompt post-tool path. Repeated
+Copilot transforms reuse the initial results without another search.
 
 The automatic stream contains original user text and final assistant answers,
 not tool outputs or private reasoning. Common credentials and runtime envelopes are filtered.
@@ -265,7 +309,7 @@ allows sending conversation text to your Memory House deployment.
   start. Do not compensate by reading bundles or credentials, launching extra
   servers manually, or calling the gateway directly.
 - **Codex hooks need review:** run `/hooks`, review Memory House's session-start,
-  user-prompt and stop hooks, and trust those definitions. Do not bypass hook trust or install
+  user-prompt, stop and session-end hooks, and trust those definitions. Do not bypass hook trust or install
   duplicate user/project hooks.
 - **Canvas missing in the Copilot app:** start a new session after installing
   or updating, and check that the `plugin:memory-house:memory-canvas`

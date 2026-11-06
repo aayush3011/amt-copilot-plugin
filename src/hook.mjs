@@ -4,8 +4,8 @@ import { createClient } from './client.mjs';
 import { runHook, normalizeEvent } from './hooks.mjs';
 
 const EVENTS = {
-  claude: ['session-start', 'user-prompt', 'assistant-stop', 'post-tool'],
-  codex: ['session-start', 'user-prompt', 'assistant-stop', 'post-tool'],
+  claude: ['session-start', 'user-prompt', 'assistant-stop', 'post-tool', 'session-end'],
+  codex: ['session-start', 'user-prompt', 'assistant-stop', 'post-tool', 'session-end'],
   copilot: ['session-start', 'user-prompt', 'prompt-transform', 'assistant-stop', 'post-tool', 'session-end'],
 };
 

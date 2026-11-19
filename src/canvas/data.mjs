@@ -1,11 +1,14 @@
-// Memory House canvas data: the caller's memories from GET /memories, labelled and grouped by
-// the hierarchy nodes in GET /v1/me/reach, plus the identity from GET /whoami. All calls use the
-// plugin's cached Entra authentication; nothing here stores credentials.
+// Memory House canvas data: the caller's memories from GET /memories, labelled and grouped by the
+// Learning Spaces they can read. GET /whoami lists those Spaces (read_spaces) and GET /v1/spaces/{id}
+// names each one. All calls use the plugin's cached Entra authentication; nothing here stores credentials.
 import { createClient, MEMORY_LIST_LIMITS, MEMORY_TYPES, sendRequest } from '../client.mjs';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value, max = 4096) => (typeof value === 'string' && value.length <= max ? value : null);
+// Shared Learning Spaces have node:<id> IDs, which their memories carry as space_key.
 const NODE_PREFIX = 'node:';
+// whoami lists at most 20 readable Spaces; this bounds the lookups if a gateway lists more.
+const MAX_SPACES = 50;
 const MAX_TIMEOUT_MS = 300_000;
 
 export const CANVAS_DEFAULTS = Object.freeze({ limit: MEMORY_LIST_LIMITS.maxCount });
@@ -39,45 +42,57 @@ export function normalizeFilters(filters = {}) {
 
 function validWho(data) {
   if (!isObject(data) || !text(data.principal, 512)) return null;
-  return { principal: data.principal, tenant: text(data.tenant_id, 512) };
+  const spaces = Array.isArray(data.read_spaces) ? data.read_spaces.filter(space => text(space, 256)) : [];
+  return { principal: data.principal, tenant: text(data.tenant_id, 512), readSpaces: [...new Set(spaces)] };
 }
 
-function validNodes(data) {
-  if (!isObject(data) || !Array.isArray(data.nodes)) return null;
-  return data.nodes.flatMap(node => {
-    if (!isObject(node) || !text(node.id, 256)?.startsWith(NODE_PREFIX) || !text(node.name, 1024)) return [];
-    return [{
-      id: node.id,
-      name: node.name,
-      path: text(node.path, 8192) ?? node.name,
-      parentId: text(node.parent_id, 256),
-      description: text(node.description, 4096),
-    }];
+// One GET /v1/spaces/{id} response, in the shape the tree uses; path joins the names from the root.
+function validSpace(data, id) {
+  if (!isObject(data) || data.id !== id || !text(data.name, 1024)) return null;
+  return {
+    id,
+    name: data.name,
+    path: text(data.path, 8192) ?? data.name,
+    parentId: text(data.parent_id, 256),
+    description: text(isObject(data.metadata) ? data.metadata.description : null, 4096),
+  };
+}
+
+/** Names the shared Spaces whoami lists; a Space that fails to load is counted, not fatal. */
+async function loadSpaces(gateway, who) {
+  const ids = who.readSpaces.filter(id => id.startsWith(NODE_PREFIX)).slice(0, MAX_SPACES);
+  const loaded = await Promise.allSettled(
+    ids.map(id => gateway.json(`/v1/spaces/${encodeURIComponent(id)}`, { operation: 'space' })));
+  const spaces = loaded.flatMap((result, index) => {
+    const space = result.status === 'fulfilled' ? validSpace(result.value.data, ids[index]) : null;
+    return space ? [space] : [];
   });
+  return { spaces, missing: ids.length - spaces.length };
 }
 
 /**
  * Load one canvas snapshot. A listing failure (including "not signed in") rejects; a failed
- * identity or hierarchy read only adds a warning so memories still render.
+ * identity or Space read only adds a warning so memories still render.
  */
 export async function loadCanvasData(gateway, filters = {}) {
   const selected = normalizeFilters(filters);
-  const [listing, who, reach] = await Promise.allSettled([
+  const identity = gateway.json('/whoami', { operation: 'identity' }).then(response => validWho(response.data));
+  const [listing, who, named] = await Promise.allSettled([
     gateway.client.getMemories({
       recent_k: selected.limit,
       memory_types: selected.memoryTypes,
       include_superseded: selected.includeSuperseded,
     }),
-    gateway.json('/whoami', { operation: 'identity' }),
-    gateway.json('/v1/me/reach', { operation: 'hierarchy' }),
+    identity,
+    identity.then(caller => (caller ? loadSpaces(gateway, caller) : null)),
   ]);
   if (listing.status === 'rejected') throw listing.reason;
   const warnings = [];
-  const identity = who.status === 'fulfilled' ? validWho(who.value.data) : null;
-  if (!identity) warnings.push('Your signed-in identity could not be loaded.');
-  const nodes = reach.status === 'fulfilled' ? validNodes(reach.value.data) : null;
-  if (!nodes) warnings.push('The hierarchy could not be loaded, so shared memories are shown by node ID.');
-  return shapeCanvasData({ who: identity, nodes: nodes ?? [], listing: listing.value, filters: selected, warnings });
+  const caller = who.status === 'fulfilled' ? who.value : null;
+  if (!caller) warnings.push('Your signed-in identity could not be loaded, so shared memories are shown by Space ID.');
+  const spaces = named.status === 'fulfilled' && named.value ? named.value : { spaces: [], missing: 0 };
+  if (spaces.missing) warnings.push('Some Learning Spaces could not be loaded, so their memories are shown by Space ID.');
+  return shapeCanvasData({ who: caller, nodes: spaces.spaces, listing: listing.value, filters: selected, warnings });
 }
 
 function displayPath(path) {
@@ -92,7 +107,9 @@ function memoryText(item) {
 }
 
 function shapeRecord(item, nodes, principal) {
-  const scope = typeof item.scope_key === 'string' ? item.scope_key : '';
+  // Learning Spaces records carry space_key; records from earlier stores call it scope_key.
+  const scope = typeof item.space_key === 'string' ? item.space_key
+    : typeof item.scope_key === 'string' ? item.scope_key : '';
   const node = nodes.get(scope);
   const personal = scope.startsWith('user:') && (!principal || scope === principal);
   const kind = personal ? 'personal' : node ? 'node' : scope.startsWith(NODE_PREFIX) ? 'unlisted' : 'other';

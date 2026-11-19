@@ -238,7 +238,7 @@ ${REVIEW_PANEL}
     const other = data.rows.filter(row => row.kind === 'unlisted' || row.kind === 'other');
     let html = '<div class="tree-section">Personal</div>' + (personal.length ? personal.map(button).join('') : '<div class="hint">No personal scope yet.</div>');
     html += '<div class="tree-section">Shared hierarchy</div>' + (shared.length ? shared.map(button).join('')
-      : '<div class="hint">You are not a member or curator of any hierarchy node yet.</div>');
+      : '<div class="hint">You are not a member of any Learning Space yet.</div>');
     if (other.length) html += '<div class="tree-section">Other scopes</div>' + other.map(button).join('');
     return html;
   }

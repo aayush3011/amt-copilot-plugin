@@ -57,10 +57,11 @@ export async function mockGateway(t, options = {}) {
     listingStatus: 200,
     listingResponse: null,
     cursors: new Map(),
-    whoami: { principal: "user:fixture", tenant_id: "tenant-fixture", agent_id: null, groups: [], roles: [], read_scopes: ["user:fixture"] },
+    whoami: { principal: "user:fixture", tenant_id: "tenant-fixture", agent_id: null, groups: [], roles: [], read_spaces: ["user:fixture"] },
     whoamiStatus: 200,
-    nodes: [],
-    reachStatus: 200,
+    // Learning Spaces served by GET /v1/spaces/{id}.
+    spaces: [],
+    spaceStatus: 200,
     insertions: [],
     insertStatus: null,
     idempotent: new Map(),
@@ -274,9 +275,11 @@ export async function mockGateway(t, options = {}) {
     if (path === "/inference/memory/whoami" && req.method === "GET") {
       return state.whoamiStatus === 200 ? send(200, state.whoami) : send(state.whoamiStatus, { error: "fixture-provider-secret" });
     }
-    if (path === "/inference/memory/v1/me/reach" && req.method === "GET") {
-      if (state.reachStatus !== 200) return send(state.reachStatus, { error: "fixture-provider-secret" });
-      return send(200, { nodes: state.nodes, principals_resolved_at: new Date().toISOString(), version: 1 });
+    const space = /^\/inference\/memory\/v1\/spaces\/([^/]+)$/.exec(path);
+    if (space && req.method === "GET") {
+      if (state.spaceStatus !== 200) return send(state.spaceStatus, { error: "fixture-provider-secret" });
+      const found = state.spaces.find(item => item.id === decodeURIComponent(space[1]));
+      return found ? send(200, found) : send(404, { code: "not_found" });
     }
     if (path === "/inference/memory/memory" && req.method === "POST") {
       // A slow gateway, for checking that hooks never wait on the capture request.

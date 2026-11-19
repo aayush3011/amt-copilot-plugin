@@ -6,6 +6,7 @@ import { runAuthCommand } from '../src/auth.mjs';
 import { fixtureDeployment } from './helpers/deployment.mjs';
 import { seedEntraSession } from './helpers/entra.mjs';
 import { isolatedEnvironment } from './helpers/runtime.mjs';
+import { TELEMETRY_NOTICE, TELEMETRY_NOTICE_VERSION } from '../src/telemetry.mjs';
 
 async function setup(t) {
   const env = await isolatedEnvironment(t);
@@ -29,6 +30,7 @@ test('only explicit login requests interactive authentication and never exposes 
   assert.equal(value.signedIn, true);
   assert.equal(value.source, 'entra');
   assert.match(s.errors.join(''), /browser.*never enter credentials in chat/);
+  assert.ok(s.errors[0].includes(TELEMETRY_NOTICE));
   assert.doesNotMatch(s.output.join(''), /fixture-access|refreshToken/);
 });
 
@@ -60,4 +62,24 @@ test('helper usage and authentication failures are explicit and sanitized', asyn
   const result = await s.run('login', { acquireToken: async () => { throw new Error('fixture-provider-secret'); } });
   assert.ok(result.error);
   assert.doesNotMatch(s.output.join(''), /fixture-provider-secret/);
+});
+
+test('telemetry commands expose the notice and allow explicit re-enable without an approval flag', async t => {
+  const s = await setup(t);
+  assert.deepEqual(await s.run('telemetry-notice'), { notice_version: TELEMETRY_NOTICE_VERSION, notice: TELEMETRY_NOTICE });
+  assert.equal((await s.run('telemetry-enable')).error.code, 'NOT_SIGNED_IN');
+  await seedEntraSession(s.env, fixtureDeployment(), 'fixture-access-1', { recordSignIn: true });
+  const enrollment = { available: true, enrolled: false, epoch: 0, notice_version: null,
+    current_notice_version: TELEMETRY_NOTICE_VERSION, enrolled_at: null, retention_days: 60, deletion: null };
+  const methods = [];
+  const fetch = async (url, options) => {
+    methods.push(options.method);
+    if (options.method === 'POST') Object.assign(enrollment, { enrolled: true, epoch: 1,
+      notice_version: TELEMETRY_NOTICE_VERSION, enrolled_at: new Date().toISOString() });
+    return new Response(JSON.stringify(enrollment));
+  };
+  assert.equal((await s.run('telemetry-enable', { fetch })).enrolled, true);
+  assert.deepEqual(methods, ['GET', 'POST']);
+  assert.ok(s.output.every(line => /^\{.*\}\n$/.test(line)));
+  assert.doesNotMatch(s.output.join(''), /fixture-access|fixture-refresh/);
 });

@@ -49,12 +49,18 @@ async function discover(root, host) {
   assert.equal(manifest.mcpServers, './mcp.json');
   const hooks = await json(join(pluginRoot, manifest.hooks));
   const mcp = await json(join(pluginRoot, manifest.mcpServers));
-  const { gatewayBase } = await json(join(pluginRoot, 'deployment.json'));
+  const { gatewayBase, mcpUrl, entra } = await json(join(pluginRoot, 'deployment.json'));
   assert.deepEqual(Object.keys(mcp.mcpServers), ['memory-house']);
   const server = mcp.mcpServers['memory-house'];
-  assert.deepEqual(Object.keys(server).sort(), ['headersHelper', 'http_headers_helper', 'type', 'url']);
+  assert.deepEqual(Object.keys(server).sort(), ['auth', 'headersHelper', 'http_headers_helper',
+    'oauthClientId', 'oauthGrantType', 'oauthPublicClient', 'oauthScopes', 'type', 'url']);
   assert.equal(server.type, 'http');
-  assert.equal(server.url, `${gatewayBase}/mcp/`);
+  assert.equal(server.url, mcpUrl ?? `${gatewayBase}/mcp/`);
+  assert.equal(server.oauthClientId, entra.clientId);
+  assert.equal(server.oauthPublicClient, true);
+  assert.deepEqual(server.oauthScopes, [entra.mcpScope]);
+  assert.equal(server.oauthGrantType, 'authorization_code');
+  assert.deepEqual(server.auth, { redirectPort: 33418 });
   // Claude and Codex send cached Entra tokens through these launchers; Copilot signs in itself.
   assert.match(server.headersHelper, /process\.env\.CLAUDE_PLUGIN_ROOT,'runtime\/auth\.mjs'.* -- headers$/);
   assert.ok(server.http_headers_helper.includes(`['${manifest.version}','local']`));
@@ -159,6 +165,34 @@ test('every root catalog selects the same curated payload and precisely its nati
   assert.equal((await json(join(ROOT, 'package.json'))).workspaces, undefined);
 });
 
+test('publisher checks accept separate MCP endpoints and reject mismatched native transport URLs', async t => {
+  const env = await isolatedEnvironment(t);
+  const root = await rootSnapshot(t);
+  const repository = dirname(root);
+  for (const path of ['scripts/check-publisher.mjs', 'scripts/package-files.mjs', 'src/config.mjs', 'src/state.mjs', 'src/errors.mjs']) {
+    await mkdir(dirname(join(repository, path)), { recursive: true });
+    await cp(join(ROOT, path), join(repository, path));
+  }
+  const check = () => run(process.execPath, [join(repository, 'scripts/check-publisher.mjs')],
+    { env, cwd: repository, timeout: 15_000 });
+  await check();
+  const deployment = await json(join(root, 'deployment.json'));
+  deployment.mcpUrl = 'https://mcp.example/mcp/memoryhouse';
+  await writeFile(join(root, 'deployment.json'), JSON.stringify(deployment));
+  await assert.rejects(check(), error => /mcp\.json must point.*mcpUrl/.test(error.stderr));
+  const mcp = await json(join(root, 'mcp.json'));
+  mcp.mcpServers['memory-house'].url = deployment.mcpUrl;
+  await writeFile(join(root, 'mcp.json'), JSON.stringify(mcp));
+  await check();
+  for (const host of Object.keys(HOSTS)) await discover(root, host);
+  const server = mcp.mcpServers['memory-house'];
+  for (const override of [{ oauthClientId: 'wrong-client' }, { oauthScopes: [deployment.entra.scope] },
+    { oauthPublicClient: false }, { oauthGrantType: 'client_credentials' }, { auth: { redirectPort: 0 } }]) {
+    await writeFile(join(root, 'mcp.json'), JSON.stringify({ mcpServers: { 'memory-house': { ...server, ...override } } }));
+    await assert.rejects(check(), error => /publisher public client, MCP scope/.test(error.stderr));
+  }
+});
+
 test('the published payload contains exactly runtime content and no empty or linked entries', async () => {
   const manifest = await json(join(PLUGIN_ROOT, 'runtime/manifest.json'));
   const actual = await verifyPayload([...Object.keys(manifest.outputs), 'manifest.json']);
@@ -179,8 +213,8 @@ test('payload checks reject extra maintainer files and empty directories', async
 
 test('packaged mh commands match their directories, the remote MCP tools and the sign-in helper', async t => {
   const root = await rootSnapshot(t);
-  assert.deepEqual((await readdir(join(root, 'skills'))).sort(), ['mh-login', 'mh-logout', 'mh-memory', 'mh-show', 'mh-status', 'use-memory']);
-  for (const [name, tool] of [['mh-login', 'runtime/auth.mjs'], ['mh-logout', 'runtime/auth.mjs'], ['mh-status', 'runtime/auth.mjs'], ['mh-memory', 'search_memories'], ['mh-show', 'get_memories'], ['use-memory', 'search_memories']]) {
+  assert.deepEqual((await readdir(join(root, 'skills'))).sort(), ['mh-login', 'mh-logout', 'mh-memory', 'mh-show', 'mh-status', 'mh-telemetry', 'use-memory']);
+  for (const [name, tool] of [['mh-login', 'runtime/auth.mjs'], ['mh-logout', 'runtime/auth.mjs'], ['mh-status', 'runtime/auth.mjs'], ['mh-telemetry', 'runtime/auth.mjs'], ['mh-memory', 'search_memories'], ['mh-show', 'get_memories'], ['use-memory', 'search_memories']]) {
     const source = await readFile(join(root, 'skills', name, 'SKILL.md'), 'utf8');
     assert.match(source, new RegExp(`^name: ${name}$`, 'm'));
     assert.ok(source.includes(`\`${tool}\``));
@@ -202,6 +236,12 @@ test('packaged mh commands match their directories, the remote MCP tools and the
   assert.match(memorySkill, /Fetch further pages only when the user explicitly asks/);
   assert.match(memorySkill, /`delete_all_memories`\)\. Use them only when the user explicitly asks/);
   const showSkill = await readFile(join(root, 'skills/mh-show/SKILL.md'), 'utf8');
+  const telemetrySkill = await readFile(join(root, 'skills/mh-telemetry/SKILL.md'), 'utf8');
+  assert.match(telemetrySkill, /no\s+opt-in approval is required/);
+  assert.match(telemetrySkill, /Never run enable just because the user signs in/);
+  assert.match(telemetrySkill, /runtime\/auth\.mjs" telemetry-enable/);
+  assert.doesNotMatch(telemetrySkill, /--accept-notice=/);
+  assert.match(telemetrySkill, /unconfirmed server opt-out as pending/);
   assert.match(showSkill, /`open_canvas` with `canvasId` set to `memory-house`/);
   assert.match(showSkill, /`instanceId` set to\s+`memory-house-main`/);
   assert.match(showSkill, /do not invoke it unless\s+the user asks/);
@@ -331,6 +371,87 @@ test('one sign-in serves recall and capture in every host', async t => {
   assert.ok(searches.every(request => request.body.top_k === 10));
   assert.equal(gateway.state.turns.filter(turn => turn.role === 'agent').length, 3);
   assert.equal(new Set(gateway.state.turns.map(turn => turn.thread_id)).size, 3);
+});
+
+test('bundled minimum recall length keeps each host armed and supports disabling the gate', async t => {
+  const gateway = await mockGateway(t, { telemetry: true });
+  const env = await isolatedEnvironment(t);
+  const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
+  await signIn('copilot', env, root);
+  const searches = () => gateway.state.requests.filter(request => request.path.endsWith('/search'));
+  for (const host of Object.keys(HOSTS)) {
+    const before = searches().length;
+    const promptEvent = host === 'copilot' ? 'userPromptSubmitted' : 'UserPromptSubmit';
+    const payload = { session_id: `minimum-${host}`, prompt: 'x'.repeat(19) };
+    const short = await hook(host, promptEvent, payload, env, root);
+    assert.deepEqual(short.parsed, {});
+    assert.match(short.stderr, /recall:skipped:short-prompt/);
+    if (host === 'copilot') {
+      for (let i = 0; i < 2; i++) {
+        assert.deepEqual((await hook(host, 'userPromptTransformed',
+          { ...payload, transformedPrompt: payload.prompt }, env, root)).parsed, {});
+      }
+      assert.deepEqual((await hook(host, 'postToolUse', payload, env, root)).parsed, {});
+    }
+    assert.equal(searches().length, before);
+    const next = { ...payload, prompt: 'x'.repeat(20) };
+    let response = await hook(host, promptEvent, next, env, root);
+    if (host === 'copilot') response = await hook(host, 'userPromptTransformed',
+      { ...next, transformedPrompt: next.prompt }, env, root);
+    assert.match(JSON.stringify(response.parsed), /concise TypeScript examples/);
+    assert.equal(searches().length, before + 1);
+    assert.equal(searches().at(-1).body.query, 'x'.repeat(20));
+    await settled(env, () => gateway.state.telemetryEvents.length === (before + 1) * 2);
+  }
+  const payload = { session_id: 'minimum-disabled', prompt: 'continue' };
+  const disabled = { ...env, MEMORY_HOUSE_MIN_RECALL_CHARS: '0' };
+  await hook('copilot', 'userPromptSubmitted', payload, disabled, root);
+  const response = await hook('copilot', 'userPromptTransformed',
+    { ...payload, transformedPrompt: payload.prompt }, disabled, root);
+  assert.match(response.parsed.modifiedTransformedPrompt, /concise TypeScript examples/);
+  assert.equal(searches().at(-1).body.query, 'continue');
+  await settled(env, () => gateway.state.telemetryEvents.length === 8);
+});
+
+test('bundled default-on recall and detached metadata delivery preserve durable opt-out', async t => {
+  const gateway = await mockGateway(t, { telemetry: true });
+  const env = await isolatedEnvironment(t);
+  const root = await rootSnapshot(t, { deployment: fixtureDeployment(gateway.base) });
+  await signIn('copilot', env, root);
+  const command = async (...args) => JSON.parse((await run(process.execPath, [join(root, 'runtime/auth.mjs'), ...args],
+    { env, cwd: env.HOME, timeout: 15_000 })).stdout);
+  assert.equal((await command('telemetry-status')).enrolled, true);
+  const notice = await command('telemetry-notice');
+  assert.equal(notice.notice_version, '2026-11-06.3');
+  assert.match(notice.notice, /60 days/);
+  assert.equal(gateway.state.requests.filter(request => request.path.endsWith('/telemetry/enrollment') && request.method === 'POST').length, 0);
+  gateway.state.telemetryDelayMs = 6000;
+  const payload = { session_id: 'telemetry-native', prompt: 'A private first prompt.', turn_id: 'turn-1' };
+  await hook('copilot', 'userPromptSubmitted', payload, env, root);
+  const started = Date.now();
+  const first = await hook('copilot', 'userPromptTransformed', { ...payload, transformedPrompt: payload.prompt }, env, root);
+  assert.ok(Date.now() - started < gateway.state.telemetryDelayMs, 'Recall must not await the metadata endpoint.');
+  assert.match(first.parsed.modifiedTransformedPrompt, /concise TypeScript examples/);
+  const second = await hook('copilot', 'userPromptTransformed', { ...payload, transformedPrompt: payload.prompt }, env, root);
+  assert.deepEqual(second.parsed, first.parsed);
+  await settled(env, () => gateway.state.telemetryEvents.length === 2);
+  const events = gateway.state.telemetryEvents;
+  const delivery = events.find(event => event.path.endsWith('/delivery')).body;
+  assert.deepEqual(delivery.items, [{ rank: 1, supplied: 'full' }]);
+  assert.equal(delivery.budget_bytes, 8192);
+  assert.equal(delivery.epoch, 1);
+  assert.doesNotMatch(JSON.stringify(events), /private first prompt|concise TypeScript|fixture-memory/);
+  const search = gateway.state.requests.find(request => request.path.endsWith('/search'));
+  assert.equal(search.headers['x-memory-house-client'], 'amt-copilot-plugin/0.15.0; trigger=auto_recall_first_prompt');
+  assert.equal(search.headers['x-memory-house-request'], `${delivery.client_request_id}; attempt=1`);
+  assert.equal((await command('telemetry-disable')).enrolled, false);
+  assert.equal((await command('telemetry-status')).queued_events, 0);
+  assert.equal(gateway.state.telemetryEvents.length, 2, 'Opt-out preserves previously recorded metadata.');
+  const after = { ...payload, session_id: 'telemetry-after-opt-out' };
+  await hook('copilot', 'userPromptSubmitted', after, env, root);
+  await hook('copilot', 'userPromptTransformed', { ...after, transformedPrompt: after.prompt }, env, root);
+  await settled(env, () => gateway.state.turns.length === 2);
+  assert.equal(gateway.state.telemetryEvents.length, 2, 'Opt-out prevents recording new metadata.');
 });
 
 test('all three native hooks capture ordinary user and agent turns without explicit memory tool calls', async t => {
@@ -721,15 +842,16 @@ test('available Copilot CLI registers the native catalog and installs exactly on
   assert.match(listed.stdout, /memory-house-marketplace/);
   assert.equal((listed.stdout.match(/0\.15\.0/g) ?? []).length, 1, listed.stdout);
   const skills = await run('copilot', ['skill', 'list'], { env, cwd: env.HOME, timeout: 30_000 });
-  for (const name of ['mh-login', 'mh-logout', 'mh-status', 'mh-memory', 'mh-show', 'use-memory']) assert.match(skills.stdout, new RegExp(`\\b${name}\\b`));
+  for (const name of ['mh-login', 'mh-logout', 'mh-status', 'mh-memory', 'mh-show', 'mh-telemetry', 'use-memory']) assert.match(skills.stdout, new RegExp(`\\b${name}\\b`));
   // Copilot ignores the Claude and Codex launcher fields and signs in to the remote server itself.
   const mcp = await run('copilot', ['mcp', 'get', 'memory-house'], { env, cwd: env.HOME, timeout: 30_000 });
   assert.match(mcp.stdout, /Type: http/);
-  assert.match(mcp.stdout, /URL: https:\/\/[^\s]+\/inference\/memory\/mcp\//);
+  const deployment = await json(join(root, 'deployment.json'));
+  assert.ok(mcp.stdout.includes(`URL: ${deployment.mcpUrl ?? `${deployment.gatewayBase}/mcp/`}`));
   assert.match(mcp.stdout, /Source: Plugin/);
 });
 
-test('available Codex registers the remote MCP server, six named skills and four native hooks beside the legacy Copilot root', async t => {
+test('available Codex registers the remote MCP server, seven named skills and four native hooks beside the legacy Copilot root', async t => {
   const env = { ...await isolatedEnvironment(t), GIT_CONFIG_NOSYSTEM: '1' };
   await mkdir(env.CODEX_HOME, { recursive: true });
   const available = spawnSync('codex', ['plugin', '--help'], { env, cwd: env.HOME, stdio: 'ignore', timeout: 20_000 });
@@ -767,7 +889,7 @@ test('available Codex registers the remote MCP server, six named skills and four
   const ownSkills = skills.data.flatMap(entry => entry.skills.filter(skill => skill.pluginId === 'memory-house@memory-house-marketplace'));
   assert.deepEqual(ownSkills.map(skill => skill.name).sort(), [
     'memory-house:mh-login', 'memory-house:mh-logout', 'memory-house:mh-memory', 'memory-house:mh-show', 'memory-house:mh-status',
-    'memory-house:use-memory',
+    'memory-house:mh-telemetry', 'memory-house:use-memory',
   ]);
   assert.ok(ownSkills.every(skill => skill.enabled));
 });

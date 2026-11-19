@@ -9,6 +9,7 @@ import {
   runHook, sanitizeMessage, stripMemoryContext, truncateMiddleUtf8, truncateUtf8,
 } from '../src/hooks.mjs';
 import { QUEUE_LIMITS, flushCaptures, queueDirectory } from '../src/capture-queue.mjs';
+import { flushTelemetry, telemetryCommand, TELEMETRY_NOTICE, TELEMETRY_NOTICE_VERSION } from '../src/telemetry.mjs';
 
 const fixtureRoot = new URL('./fixtures/harnesses/', import.meta.url);
 const native = Object.fromEntries(await Promise.all(
@@ -26,6 +27,14 @@ const sealing = {
   async protect(text) { return { version: 1, scheme: 'fixture', data: Buffer.from(text).toString('base64') }; },
   async unprotect(value) { return Buffer.from(value.data, 'base64').toString('utf8'); },
 };
+
+test('telemetry notice, explicit skill commands and marked confirmations never become capture content', () => {
+  for (const text of [TELEMETRY_NOTICE, '/memory-house:mh-telemetry enable', '$memory-house:mh-telemetry status',
+    '<memory-house-telemetry>Collection disabled.</memory-house-telemetry>',
+    '<memory-house-feedback>This result harmed the task.</memory-house-feedback>',
+    '<memory-house-review>Current memory contents, not a new conversation turn.</memory-house-review>']) assert.equal(sanitizeMessage(text), '');
+  assert.equal(sanitizeMessage(`Actual work.\n${TELEMETRY_NOTICE}`), 'Actual work.');
+});
 
 async function setup(t, options = {}) {
   const dir = join('test', `.hooks-runtime-${randomUUID()}`);
@@ -75,10 +84,160 @@ function contextOf(output) {
     ?? output.modifiedTransformedPrompt ?? '';
 }
 
+test('initial Copilot delivery is recorded once; cached transforms and later turns do not emit fresh retrieval telemetry', async t => {
+  const telemetry = [];
+  const requests = [];
+  const s = await setup(t);
+  Object.assign(s.client, {
+    async search(query, topK, options) {
+      requests.push(options);
+      return { items: [{ rank: 1, content: memory }], retrieval: {
+        id: 'ret_01JC3K00000000000000000000', recording: 'recorded', epoch: 1,
+      } };
+    },
+    async telemetrySubmit(kind, body) { telemetry.push({ kind, body }); },
+  });
+  await s.call({ harness: 'copilot', event: 'user-prompt', payload: native.copilot.userPrompt });
+  assert.equal(requests.length, 0);
+  const first = await s.call({ harness: 'copilot', event: 'prompt-transform', payload: native.copilot.promptTransform });
+  const second = await s.call({ harness: 'copilot', event: 'prompt-transform', payload: native.copilot.promptTransform });
+  assert.deepEqual(first, second);
+  await flushTelemetry({ client: s.client });
+  assert.deepEqual(telemetry.map(event => event.kind), ['delivery', 'outcome']);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].trigger, 'auto_recall_first_prompt');
+  assert.equal(telemetry[0].body.client_request_id, requests[0].requestId);
+  assert.equal(telemetry[0].body.supplied_bytes,
+    Buffer.byteLength(first.modifiedTransformedPrompt.slice(first.modifiedTransformedPrompt.indexOf('<memory-house-context>'))));
+  assert.doesNotMatch(JSON.stringify(telemetry), /focused tests/);
+  await s.call({ harness: 'copilot', event: 'user-prompt', payload: { session_id: 'same-session', prompt: 'A new task.' } });
+  await flushTelemetry({ client: s.client });
+  assert.equal(telemetry.length, 2);
+});
+
 async function stateFiles(setup) {
   const root = join(setup.client.config.stateDir, 'hook-context');
   return (await readdir(root)).filter(name => name.endsWith('.json')).map(name => join(root, name));
 }
+
+for (const [harness, delivery] of [
+  ['claude', 'user-prompt'], ['codex', 'user-prompt'],
+  ['copilot', 'prompt-transform'], ['copilot', 'post-tool'], ['vscode', 'post-tool'],
+]) {
+  test(`${harness}/${delivery}: short prompts leave recall armed until 20 cleaned characters`, async t => {
+    let time = Date.now();
+    const s = await setup(t, { now: () => time });
+    const send = async text => {
+      const payload = { session_id: 'short-then-qualified', prompt: text };
+      const output = await s.call({ harness, event: 'user-prompt', payload });
+      if (delivery === 'user-prompt') return output;
+      const deferred = { ...payload, transformedPrompt: text };
+      const first = await s.call({ harness, event: delivery, payload: deferred });
+      assert.deepEqual(await s.call({ harness, event: delivery, payload: deferred }), delivery === 'prompt-transform' ? first : {});
+      if (harness === 'copilot') assert.deepEqual(await s.call({ harness, event: 'post-tool', payload }), {});
+      return first;
+    };
+    for (const text of ['thank you?', 'what to do next?', 'explain more', 'continue', 'x'.repeat(19), ' \n\t ',
+      `<system_notification>${'wrapper '.repeat(30)}</system_notification>\n${'x'.repeat(19)}`]) {
+      assert.deepEqual(await send(text), {});
+      assert.equal(s.searches.length, 0);
+      assert.deepEqual(await stateFiles(s), []);
+      await s.call({ harness, event: 'assistant-stop', payload: { session_id: 'short-then-qualified', last_assistant_message: answer } });
+    }
+    assert.ok(s.captures.some(turn => turn.content === 'continue'), 'Length gate must not disable capture.');
+    assert.match(s.logs.join('\n'), /recall:skipped:short-prompt/);
+    // Neither stop, resume nor the old cache TTL consumes an as-yet-unattempted search.
+    time += 2 * HOOK_LIMITS.stateTtlMs;
+    await s.call({ harness, event: 'session-start', payload: { session_id: 'short-then-qualified' } });
+    const qualifying = ` \n<system_notification>runtime wrapper</system_notification>${'x'.repeat(20)} \t`;
+    assert.match(contextOf(await send(qualifying)), /small, focused tests/);
+    assert.deepEqual(s.searches, [{ query: 'x'.repeat(20), topK: 10 }]);
+    assert.deepEqual(await send('A later qualifying request must not search again.'), {});
+    assert.equal(s.searches.length, 1);
+  });
+}
+
+test('minimum recall characters count Unicode code points after cleaning, not bytes or UTF-16 units', async t => {
+  const s = await setup(t);
+  for (const [index, unit] of ['é', '界', '😺'].entries()) {
+    const session_id = `unicode-${index}`;
+    assert.deepEqual(await s.call({ harness: 'claude', event: 'user-prompt',
+      payload: { session_id, prompt: ` \t${unit.repeat(19)}\n ` } }), {});
+    assert.equal(s.searches.length, index);
+    assert.match(contextOf(await s.call({ harness: 'claude', event: 'user-prompt',
+      payload: { session_id, prompt: ` \t${unit.repeat(20)}\n ` } })), /small, focused tests/);
+    assert.equal(s.searches.at(-1).query, unit.repeat(20));
+  }
+});
+
+test('minimum recall setting supports zero and custom thresholds, rejects invalid values explicitly', async t => {
+  const s = await setup(t);
+  for (const [index, value] of ['0', '1', '5', '20', '21', '-1', '1.5', '', 'bad', '9007199254740992'].entries()) {
+    const min = ['0', '1', '5', '20', '21'].includes(value) ? Number(value) : 20;
+    const env = { MEMORY_HOUSE_MIN_RECALL_CHARS: value };
+    const payload = { session_id: `setting-${index}`, prompt: ' \n\t ' };
+    const searches = s.searches.length;
+    assert.deepEqual(await s.call({ harness: 'codex', event: 'user-prompt', payload, env }), {});
+    if (min > 1) {
+      assert.deepEqual(await s.call({ harness: 'codex', event: 'user-prompt',
+        payload: { ...payload, prompt: 'x'.repeat(min - 1) }, env }), {});
+    }
+    assert.equal(s.searches.length, searches);
+    await s.call({ harness: 'codex', event: 'user-prompt',
+      payload: { ...payload, prompt: 'x'.repeat(Math.max(1, min)) }, env });
+    assert.equal(s.searches.length, searches + 1);
+  }
+  assert.match(s.logs.join('\n'), /recall:invalid-min-chars:using-default/);
+});
+
+test('Copilot transform-only entry skips short originals repeatedly and honors the setting', async t => {
+  const s = await setup(t);
+  const payload = { session_id: 'transform-only', prompt: 'continue',
+    transformedPrompt: 'A very long runtime transformation must not qualify a short original prompt.' };
+  for (let i = 0; i < 3; i++) {
+    assert.deepEqual(await s.call({ harness: 'copilot', event: 'prompt-transform', payload }), {});
+    assert.deepEqual(await s.call({ harness: 'copilot', event: 'post-tool', payload }), {});
+  }
+  assert.equal(s.searches.length, 0);
+  await s.call({ harness: 'copilot', event: 'prompt-transform',
+    payload: { ...payload, prompt: 'x'.repeat(20) } });
+  assert.equal(s.searches.length, 1);
+  assert.equal(s.searches[0].query, 'x'.repeat(20));
+  await s.call({ harness: 'copilot', event: 'prompt-transform',
+    payload: { ...payload, session_id: 'disabled-rule' }, env: { MEMORY_HOUSE_MIN_RECALL_CHARS: '0' } });
+  assert.equal(s.searches.at(-1).query, 'continue');
+});
+
+test('short-prompt skips emit no telemetry; subsequent empty recall reports no supplied content', async t => {
+  const s = await setup(t);
+  const events = [];
+  s.client.config.lockTimeoutMs = 1000;
+  s.client.telemetryEnrollment = async () => ({ available: true, enrolled: true, epoch: 1,
+    notice_version: null, current_notice_version: TELEMETRY_NOTICE_VERSION, enrolled_at: null,
+    retention_days: 60, deletion: null });
+  s.client.telemetrySubmit = async (kind, body) => events.push({ kind, body });
+  await telemetryCommand(s.client, 'status');
+  s.client.search = async query => {
+    s.searches.push(query);
+    return { items: [], retrieval: { id: 'ret_01JC3K00000000000000000000', recording: 'recorded', epoch: 1 } };
+  };
+  const payload = { session_id: 'telemetry-short', prompt: 'continue' };
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload });
+  await s.call({ harness: 'vscode', event: 'post-tool', payload });
+  await flushTelemetry({ client: s.client });
+  assert.deepEqual(events, []);
+  assert.equal(s.searches.length, 0);
+  await s.call({ harness: 'vscode', event: 'user-prompt', payload: { ...payload, prompt: 'x'.repeat(20) } });
+  assert.deepEqual(await s.call({ harness: 'vscode', event: 'post-tool', payload }), {});
+  await flushTelemetry({ client: s.client });
+  assert.equal(s.searches.length, 1);
+  assert.deepEqual(events.map(event => event.kind), ['delivery', 'outcome']);
+  assert.deepEqual(events[0].body.items, []);
+  assert.equal(events[0].body.supplied_bytes, 0);
+  assert.equal(events[1].body.final_outcome, 'empty');
+  assert.equal(events[1].body.attempts, 1);
+  assert.match(s.logs.join('\n'), /recall:empty/);
+});
 
 for (const harness of ['claude', 'codex', 'copilot', 'vscode']) {
   test(`${harness}: startup waits for a user prompt without search or capture`, async t => {
@@ -508,7 +667,7 @@ test('state cap evicts old queries rather than accumulating capture records', as
   for (let index = 0; index < HOOK_LIMITS.stateEntries + 3; index++) {
     await s.call({
       harness: 'vscode', event: 'user-prompt',
-      payload: { session_id: `session-${index}`, prompt: `Request ${index}` },
+      payload: { session_id: `session-${index}`, prompt: `Investigate request ${index}.` },
     });
   }
   assert.ok((await stateFiles(s)).length <= HOOK_LIMITS.stateEntries);

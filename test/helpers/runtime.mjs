@@ -51,7 +51,9 @@ export async function rootSnapshot(t, { deployment, name = 'installed plugin' } 
     await writeFile(join(root, 'deployment.json'), JSON.stringify(deployment));
     // Point the remote MCP entry at the fixture gateway too, so native apps never reach the real one.
     const mcp = JSON.parse(await readFile(join(root, 'mcp.json'), 'utf8'));
-    mcp.mcpServers['memory-house'].url = `${deployment.gatewayBase.replace(/\/+$/, '')}/mcp/`;
+    mcp.mcpServers['memory-house'].url = deployment.mcpUrl ?? `${deployment.gatewayBase.replace(/\/+$/, '')}/mcp/`;
+    mcp.mcpServers['memory-house'].oauthClientId = deployment.entra.clientId;
+    mcp.mcpServers['memory-house'].oauthScopes = [deployment.entra.mcpScope];
     await writeFile(join(root, 'mcp.json'), JSON.stringify(mcp));
   }
   return root;

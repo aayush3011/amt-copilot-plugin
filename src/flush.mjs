@@ -7,6 +7,7 @@ import { createCacheProtection } from './cache-protection.mjs';
 import { flushCaptures, launchFlushProcess } from './capture-queue.mjs';
 import { createClient } from './client.mjs';
 import { loadConfig } from './config.mjs';
+import { flushTelemetry } from './telemetry.mjs';
 
 const DEADLINE_MS = 5 * 60 * 1000;
 
@@ -19,12 +20,16 @@ export async function runFlushProcess({ pluginRoot = dirname(dirname(fileURLToPa
       authTimeoutMs: Math.min(configured.authTimeoutMs, 10_000),
       lockTimeoutMs: Math.min(configured.lockTimeoutMs, 10_000),
     };
-    return await flushCaptures({
-      client: createClient({ config, env }),
+    const client = createClient({ config, env });
+    // TODO(dogfood-feedback): Review the internal telemetry sender integration before
+    // external customer release; it may change or be removed independently of capture delivery.
+    const [capture] = await Promise.all([flushCaptures({
+      client,
       protectionFor: identity => createCacheProtection({ ...config, tenantId: identity.tenantId }, { env, purpose: 'capture-queue' }),
       relaunch: () => launchFlushProcess({ env, force }),
       force,
-    });
+    }), flushTelemetry({ client, log: message => process.stderr.write(`memory-house:${message}\n`) })]);
+    return capture;
   } catch {
     return null;
   }

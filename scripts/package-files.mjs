@@ -17,6 +17,7 @@ export const PACKAGE_FILES = Object.freeze([
   'com.github.copilot/extensions/memory-canvas/extension.mjs',
   'skills/mh-memory/SKILL.md', 'skills/mh-login/SKILL.md',
   'skills/mh-logout/SKILL.md', 'skills/mh-status/SKILL.md', 'skills/mh-show/SKILL.md',
+  'skills/mh-telemetry/SKILL.md',
   'skills/use-memory/SKILL.md',
 ]);
 

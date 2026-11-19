@@ -42,12 +42,14 @@ async function dependencyNotices(inputs) {
 
 async function generatedRuntime() {
   const target = join(PLUGIN_ROOT, 'runtime');
+  const { version } = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
   const bundled = await build({
     absWorkingDir: ROOT, entryPoints: { hook: 'src/hook.mjs', auth: 'src/auth.mjs', canvas: 'src/canvas/index.mjs', flush: 'src/flush.mjs' },
     bundle: true, splitting: true, format: 'esm', platform: 'node', target: 'node20',
     nodePaths: [join(ROOT, '.maintainer', 'node_modules')],
     outdir: target, outExtension: { '.js': '.mjs' }, chunkNames: 'shared-[hash]',
     write: false, metafile: true, logLevel: 'silent', legalComments: 'eof', minify: true,
+    define: { __MEMORY_HOUSE_VERSION__: JSON.stringify(version) },
     banner: { js: "import { createRequire as __mhCreateRequire } from 'node:module'; const require = __mhCreateRequire(import.meta.url);" },
   });
   const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]));

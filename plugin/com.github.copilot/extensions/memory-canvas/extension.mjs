@@ -12,7 +12,7 @@ await joinSession({
     createCanvas({
       id: 'memory-house',
       displayName: 'Memory House',
-      description: 'Browse your Memory House memories by personal scope and hierarchy node, and import local Copilot or Claude history.',
+      description: 'Browse memories, review recent recalls and submit ratings, control dogfooding telemetry, or import local Copilot and Claude history.',
       actions: [
         {
           name: 'refresh',

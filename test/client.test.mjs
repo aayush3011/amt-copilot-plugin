@@ -66,9 +66,28 @@ test('capture and search expose only narrow request bodies and Bearer authentica
   await f.client.search('query', 50);
   assert.equal(JSON.parse(f.calls[2].body).top_k, 50);
   assert.ok(f.calls.every(call => call.headers.Authorization === 'Bearer fake-access-1'));
-  assert.deepEqual(Object.keys(f.client).sort(), ['capture', 'captureIdentity', 'config', 'getAccessToken', 'getMemories', 'login', 'logout', 'recordAccount', 'search', 'status']);
+  assert.deepEqual(Object.keys(f.client).sort(), ['capture', 'captureIdentity', 'config', 'getAccessToken', 'getMemories', 'login', 'logout', 'recordAccount', 'search', 'status', 'telemetryEnrollment', 'telemetryReview', 'telemetrySubmit']);
   await f.client.search('query');
   assert.equal(JSON.parse(f.calls[3].body).top_k, 5);
+});
+
+test('separate MCP configuration keeps REST requests and token audiences independent', async t => {
+  const f = await fixture(t, { deployment: { ...fixtureDeployment(), mcpUrl: 'https://mcp.example/mcp/memoryhouse' } });
+  const resources = [];
+  const client = createClient({ ...f.options, acquireToken: async (_config, { resource }) => {
+    resources.push(resource);
+    return { accessToken: `fake-${resource}`, expiresAt: Math.floor(epoch / 1000) + 3600 };
+  } });
+  f.handler(() => json({ items: [], count: 0 }));
+  assert.equal(await client.getAccessToken('mcp'), 'fake-mcp');
+  await client.search('query');
+  assert.deepEqual(resources, ['mcp', 'gateway']);
+  assert.equal(f.calls[0].url, `${f.config.gatewayBase}/search`);
+  assert.equal(f.calls[0].headers.Authorization, 'Bearer fake-gateway');
+  for (const mcpUrl of ['http://remote.example/mcp', 'https://user:secret@mcp.example/mcp', 'https://mcp.example/?token=secret']) {
+    assert.throws(() => createClient({ ...f.options, config: { ...f.config, mcpUrl } }), error =>
+      ['INVALID_GATEWAY', 'INSECURE_GATEWAY'].includes(error.code));
+  }
 });
 
 test('batched capture keeps turn order, carries an idempotency key and is bound to the queuing account', async t => {

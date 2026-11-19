@@ -6,7 +6,14 @@ description: Sign in to Memory House in the Microsoft browser window, only when 
 Use this skill only for an explicit user request to sign in to Memory House.
 Host tool approval still applies; an expired session does not authorize interactive sign-in.
 
-Run `runtime/auth.mjs` in the installed plugin, two folders above this SKILL.md:
+Before signing in, run `runtime/auth.mjs` with `telemetry-notice` in the installed plugin,
+two folders above this SKILL.md. Show the returned notice verbatim in a
+`<memory-house-telemetry>` block. Internal dogfooding telemetry is on by default
+unless the account has opted out; this is disclosure, not a request for opt-in approval.
+Explain that `mh-telemetry` can turn collection off, and the canvas has the same control.
+Never re-enable an existing opt-out as part of signing in.
+
+Then run:
 
 ```bash
 node "<folder containing this SKILL.md>/../../runtime/auth.mjs" login

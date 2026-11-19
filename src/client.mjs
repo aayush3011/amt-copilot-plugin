@@ -5,6 +5,8 @@ import { atomicJson, ensureDirectory, inspect, owned, readState as readFile, rem
 import { acquireEntraToken, clearEntraCache } from './entra.mjs';
 import { resolveLoginTenant } from './tenant.mjs';
 import { clearCaptureQueue } from './capture-queue.mjs';
+import { clearTelemetry, telemetryAllowed, validTelemetryEvent, validateEnrollment } from './telemetry.mjs';
+import { validFeedback, validRetrievalId } from './feedback.mjs';
 
 export { MemoryHouseError } from './config.mjs';
 
@@ -16,6 +18,8 @@ const CAPTURE_LIMITS = Object.freeze({ threadBytes: 256, requestBytes: 256 * 102
 const CURSOR_CHARS = 8192;
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
 const OBJECT_ID = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
+const CLIENT_VERSION = typeof __MEMORY_HOUSE_VERSION__ === 'string' ? __MEMORY_HOUSE_VERSION__ : 'source';
+const CANVAS_CLIENT_HEADER = `amt-copilot-plugin/${CLIENT_VERSION}; trigger=user_command`;
 
 function fail(code, message, details) {
   return new MemoryHouseError(code, message, details);
@@ -243,8 +247,9 @@ export async function sendRequest({
 export function createClient(options = {}) {
   const config = Object.freeze({ ...(options.config ?? loadConfig(options)) });
   const safeBase = assertSafeUrl(config.gatewayBase, config).href.replace(/\/$/, '');
+  const safeMcpUrl = assertSafeUrl(config.mcpUrl, config).href;
   if (safeBase !== config.gatewayBase
-      || config.mcpUrl !== `${safeBase}/mcp/` || config.authStatePath !== join(config.stateDir, 'auth.json')
+      || config.mcpUrl !== safeMcpUrl || config.authStatePath !== join(config.stateDir, 'auth.json')
       || config.lockPath !== `${config.authStatePath}.lock`
       || config.cachePath !== join(config.stateDir, 'msal-cache.json.enc')
       || config.cacheLockPath !== join(config.stateDir, 'msal-cache.lock')
@@ -426,10 +431,13 @@ export function createClient(options = {}) {
       await removeFile(join(config.stateDir, 'token.json'));
       // Turns queued under this sign-in must never be sent after it ends.
       const queueCleared = await clearCaptureQueue(config.stateDir).then(() => true, () => false);
+      const telemetryCleared = await clearTelemetry(config).then(() => true, () => false);
       return { signedOut: true,
         message: `Memory House disabled and its sign-in cache removed${queueCleared ? ', and any unsent captured turns discarded'
           : '. Unsent captured turns could not be removed now; they are never sent and are discarded the next time a Memory House hook runs'}. `
-          + 'Copilot MCP sign-in is unchanged; in-flight tokens remain valid until expiry.' };
+          + 'Copilot MCP sign-in is unchanged; in-flight tokens remain valid until expiry. '
+          + (telemetryCleared ? 'Local queued telemetry was discarded. ' : 'Local telemetry cleanup failed; old-account events will not be sent. ')
+          + 'Signing out is not server telemetry opt-out; use telemetry-disable before signing out to stop server collection.' };
     });
   }
 
@@ -497,15 +505,108 @@ export function createClient(options = {}) {
     });
   }
 
-  async function search(query, topK = 5) {
+  async function search(query, topK = 5, { requestId = randomUUID(), attempt = 1, trigger = 'api', binding } = {}) {
     text(query, 'query', SEARCH_LIMITS.queryBytes);
     if (!Number.isSafeInteger(topK) || topK < 1 || topK > SEARCH_LIMITS.maxTopK) {
       throw fail('INVALID_PAYLOAD', 'topK must be an integer from 1 to 50.');
     }
-    const token = await getAccessToken();
-    const { data } = await requestUrl(`${config.gatewayBase}/search`, { body: { query, top_k: topK }, token, operation: 'search' });
+    if (typeof requestId !== 'string' || !UUID.test(requestId) || requestId !== requestId.toLowerCase() || !Number.isInteger(attempt) || attempt < 1 || attempt > 20
+      || !['auto_recall_first_prompt', 'agent_tool', 'user_command', 'api'].includes(trigger)) {
+      throw fail('INVALID_PAYLOAD', 'Search correlation must use a UUID, bounded attempt and supported trigger.');
+    }
+    const token = await boundToken(binding);
+    const { data } = await requestUrl(`${config.gatewayBase}/search`, {
+      body: { query, top_k: topK }, token, operation: 'search',
+      // TODO(dogfood-feedback): Review these internal feedback correlation headers before
+      // external customer release; they may change or be removed independently of search.
+      headers: { 'x-memory-house-client': `amt-copilot-plugin/${CLIENT_VERSION}; trigger=${trigger}`,
+        'x-memory-house-request': `${requestId}; attempt=${attempt}` },
+    });
     if (!isObject(data) || !Array.isArray(data.items)) {
       throw fail('INVALID_RESPONSE', 'Memory House search did not return an items array.');
+    }
+    return data;
+  }
+
+  async function boundToken(expected) {
+    const access = await currentAccess();
+    if (expected !== undefined && (signedInObjectId === null || expected !== queueBinding() || access.objectId !== signedInObjectId)) {
+      throw fail('NOT_SIGNED_IN', 'Telemetry or search belongs to another or unverified account; no request was sent.');
+    }
+    return access.accessToken;
+  }
+
+  // TODO(dogfood-feedback): Review internal feedback enrollment APIs before external
+  // customer release; revise or remove as needed, preserving consent safeguards while active.
+  async function telemetryEnrollment(method = 'GET', { binding, noticeVersion, epoch } = {}) {
+    if (!['GET', 'POST', 'DELETE'].includes(method) || !binding
+      || (epoch !== undefined && (!Number.isSafeInteger(epoch) || epoch < 0))
+      || (method === 'POST' && (typeof noticeVersion !== 'string' || noticeVersion.length > 64))) {
+      throw fail('INVALID_PAYLOAD', 'Telemetry enrollment requires a signed-in account and valid preference.');
+    }
+    const token = await boundToken(binding);
+    const suffix = method === 'DELETE' && epoch !== undefined ? `?epoch=${epoch}` : '';
+    const { data } = await requestUrl(`${config.gatewayBase}/telemetry/enrollment${suffix}`, {
+      method, token, operation: 'telemetry enrollment', readProblem: true,
+      ...(method === 'POST' ? { body: { notice_version: noticeVersion, ...(epoch === undefined ? {} : { expected_epoch: epoch }) } } : {}),
+    });
+    return validateEnrollment(data);
+  }
+
+  // TODO(dogfood-feedback): Review internal delivery/outcome APIs before external
+  // customer release; this dogfooding feedback loop may be revised or removed.
+  async function telemetrySubmit(kind, body, { retrievalId, binding, revision } = {}) {
+    if (!validTelemetryEvent(kind, body, retrievalId)) throw fail('INVALID_PAYLOAD', 'Invalid telemetry event.');
+    const token = await boundToken(binding);
+    if (!binding || !await telemetryAllowed(config, binding, body.epoch, revision)) {
+      throw fail('TELEMETRY_STATE_CHANGED', 'Telemetry consent changed; queued metadata was not sent.');
+    }
+    const route = kind === 'outcome' ? '/telemetry/request-outcomes' : `/telemetry/retrievals/${retrievalId}/${kind}`;
+    const { data } = await requestUrl(`${config.gatewayBase}${route}`, { token, body, operation: 'telemetry delivery', readProblem: true,
+      ...(kind === 'invitation' ? { headers: { 'x-memory-house-client': CANVAS_CLIENT_HEADER } } : {}) });
+    if (!isObject(data) || !['recorded', 'duplicate'].includes(data.status) || typeof data.event_id !== 'string'
+      || !UUID.test(data.event_id) || (data.status === 'recorded' && data.event_id !== body.event_id)) {
+      throw fail('INVALID_RESPONSE', 'Memory House did not acknowledge the telemetry event.');
+    }
+    return data;
+  }
+
+  // TODO(dogfood-feedback): Internal review and UI-attested feedback APIs; review
+  // before external customer release and revise or remove as needed.
+  async function telemetryReview(action, { binding, retrievalId, cursor, limit = 20, includeCurrent = false, body, revision } = {}) {
+    if (!binding || !['list', 'detail', 'feedback'].includes(action)
+      || (action !== 'list' && !validRetrievalId(retrievalId))) {
+      throw fail('INVALID_PAYLOAD', 'Review requires a signed-in account and a valid recall.');
+    }
+    let route = '/telemetry/retrievals';
+    if (action === 'list') {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50
+        || (cursor !== undefined && (typeof cursor !== 'string' || !cursor.length || cursor.length > 16384))) {
+        throw fail('INVALID_PAYLOAD', 'Review pagination is invalid.');
+      }
+      const query = new URLSearchParams({ limit: String(limit), ...(cursor === undefined ? {} : { cursor }) });
+      route += `?${query}`;
+    } else {
+      route += `/${retrievalId}`;
+      if (action === 'detail') {
+        if (typeof includeCurrent !== 'boolean') throw fail('INVALID_PAYLOAD', 'Review current-text selection must be a boolean.');
+        route += `?include_current=${includeCurrent}`;
+      } else {
+        if (!validFeedback(body)) throw fail('INVALID_PAYLOAD', 'Feedback must contain only supported ratings and reason codes.');
+        route += '/feedback';
+      }
+    }
+    const token = await boundToken(binding);
+    if (action === 'feedback' && !await telemetryAllowed(config, binding, body.epoch, revision)) {
+      throw fail('TELEMETRY_STATE_CHANGED', 'Local collection is paused or participation changed; feedback was not sent.');
+    }
+    const { data } = await requestUrl(`${config.gatewayBase}${route}`, {
+      method: action === 'feedback' ? 'POST' : 'GET', token, operation: 'recall review', readProblem: true,
+      ...(action === 'feedback' ? { body, headers: { 'x-memory-house-client': CANVAS_CLIENT_HEADER } } : {}),
+    });
+    if (action === 'feedback' && (!isObject(data) || !['recorded', 'duplicate'].includes(data.status)
+      || data.event_id !== body.event_id || !Number.isInteger(data.revision) || data.revision < 0 || data.revision > 20)) {
+      throw fail('INVALID_RESPONSE', 'Memory House did not acknowledge the feedback submission.');
     }
     return data;
   }
@@ -556,5 +657,6 @@ export function createClient(options = {}) {
     }
   }
 
-  return Object.freeze({ config, getAccessToken, login, logout, capture, captureIdentity, recordAccount, search, getMemories, status });
+  return Object.freeze({ config, getAccessToken, login, logout, capture, captureIdentity, recordAccount, search, getMemories, status,
+    telemetryEnrollment, telemetrySubmit, telemetryReview });
 }

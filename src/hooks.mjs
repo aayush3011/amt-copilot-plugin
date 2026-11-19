@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createCacheProtection } from './cache-protection.mjs';
 import { conversationKey, enqueueTurns, launchFlushProcess, queueFailure, startCaptureFlush } from './capture-queue.mjs';
 import { sameFile } from './state.mjs';
+import { recordRecallTelemetry, TELEMETRY_NOTICE, TELEMETRY_OPT_OUT, telemetryPending, telemetrySnapshot } from './telemetry.mjs';
 
 export const HOOK_LIMITS = Object.freeze({
   // One captured turn; a longer prompt is captured as up to messageParts consecutive turns.
@@ -17,6 +18,7 @@ export const HOOK_LIMITS = Object.freeze({
   transcriptBytes: 256 * 1024,
   inputChars: 1024 * 1024,
   defaultTopK: 10,
+  defaultMinRecallChars: 20,
   maxTopK: 20,
   candidateCount: 100,
   conflictCount: 5,
@@ -28,6 +30,7 @@ export const HOOK_LIMITS = Object.freeze({
 });
 
 const HARNESSES = new Set(['claude', 'codex', 'copilot', 'vscode']);
+const REARM_AFTER_SHORT_PROMPT = true;
 const EVENTS = new Map([
   ['sessionstart', 'session-start'],
   ['userprompt', 'user-prompt'],
@@ -45,6 +48,7 @@ const EVENTS = new Map([
 const MEMORY_TAGS = ['memory-house-context', 'memory_house_context'];
 const PRIVATE_TAGS = [
   ...MEMORY_TAGS,
+  'memory-house-telemetry', 'memory-house-feedback', 'memory-house-review',
   'system_notification', 'system-notification', 'system_reminder', 'system-reminder',
   'skill-context', 'skill_context', 'canvas-context', 'canvas_context',
   'system', 'developer', 'system_instruction', 'developer_instruction',
@@ -250,6 +254,8 @@ function cleanMessage(value) {
   if (typeof value !== 'string') return '';
   value = value.slice(0, HOOK_LIMITS.inputChars);
   if (/^\s*(?:The user explicitly invoked the ["']\/[^"']+["'] skill\.|Base directory for this skill:|<command-(?:name|message)\b)/i.test(value)) return '';
+  if (/^\s*(?:\/(?:memory-house:)?mh-telemetry|\$memory-house:mh-telemetry)(?:\s+(?:notice|status|enable|disable))?\s*$/.test(value)) return '';
+  value = value.replaceAll(TELEMETRY_NOTICE, '').replaceAll(TELEMETRY_OPT_OUT, '');
   let clean = cleanControls(stripBlocks(value, PRIVATE_TAGS));
   clean = redactSecrets(clean).trim();
   const remainder = clean.replace(/\[REDACTED\]/g, '')
@@ -263,9 +269,6 @@ export function sanitizeMessage(value, { maxBytes = HOOK_LIMITS.captureBytes } =
     ? Math.min(maxBytes, HOOK_LIMITS.captureBytes) : HOOK_LIMITS.captureBytes;
   return truncateUtf8(cleanMessage(value), limit);
 }
-
-/** The search query: the whole cleaned prompt up to the gateway limit, keeping its start and end. */
-const queryText = value => truncateMiddleUtf8(cleanMessage(value), HOOK_LIMITS.queryBytes);
 
 const PART_RESERVE = 64; // room for a part's marker line
 const BREAK_WINDOW = 1024; // how far back from the limit a part looks for a line break
@@ -501,6 +504,14 @@ function topKValue(value, log) {
   return HOOK_LIMITS.defaultTopK;
 }
 
+function minRecallCharsValue(value, log) {
+  const number = typeof value === 'number' ? value
+    : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
+  if (Number.isSafeInteger(number) && number >= 0) return number;
+  if (value !== undefined) log('recall:invalid-min-chars:using-default');
+  return HOOK_LIMITS.defaultMinRecallChars;
+}
+
 const MEMORY_TYPE = /^[a-z][a-z_-]{0,31}$/i;
 const escapeMemory = (value, indent) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/\n/g, `\n${indent}`);
@@ -534,7 +545,9 @@ function renderMemory(item) {
   const clean = cleanMessage(text);
   if (!clean) return { empty: true };
   const type = item.memory_type ?? item.type;
-  const label = [typeof type === 'string' && MEMORY_TYPE.test(type) ? type.toLowerCase() : '', memoryDate(item.created_at)]
+  const until = memoryDate(item.valid_until);
+  const label = [typeof type === 'string' && MEMORY_TYPE.test(type) ? type.toLowerCase() : '', memoryDate(item.created_at),
+    until ? `until ${until}` : '']
     .filter(Boolean).join(', ');
   let rendered = `- ${label ? `[${label}] ` : ''}${escapeMemory(clean, '  ')}`;
   const conflicts = (Array.isArray(item.conflicts_with) ? item.conflicts_with.slice(0, HOOK_LIMITS.candidateCount) : [])
@@ -546,14 +559,20 @@ function renderMemory(item) {
   if (conflicts.length > HOOK_LIMITS.conflictCount) {
     rendered += `\n  - ${conflicts.length - HOOK_LIMITS.conflictCount} more conflicting versions not shown.`;
   }
-  return { key: memoryKey(item.id, clean), text: rendered };
+  const partial = clean !== text || conflicts.length > HOOK_LIMITS.conflictCount
+    || (Array.isArray(item.conflicts_with) && item.conflicts_with.length !== conflicts.length)
+    || ['name', 'title', 'summary', 'steps', 'events', 'outcome', 'lessons', 'participants', 'structured_summary']
+      .some(key => item[key] !== undefined && item[key] !== null);
+  return { key: memoryKey(item.id, clean), text: rendered, partial };
 }
 
 /**
  * Up to topK results as one reference block. Memories already shown in this session are skipped,
  * and a memory that does not fit is left out whole rather than cut off.
  */
-function referenceContext(result, topK, shown, log) {
+export function referenceContext(result, topK, shown, log) {
+  // TODO(dogfood-feedback): Review per-result presentation accounting before external
+  // customer release; this internal feedback instrumentation may change or be removed, not recall.
   if (!isObject(result) || !Array.isArray(result.items)) {
     log('recall:failed:schema');
     return { ok: false, context: '', keys: [] };
@@ -562,29 +581,41 @@ function referenceContext(result, topK, shown, log) {
   // that order; the vector-only similarity_score must not re-rank them.
   const skip = new Set(shown);
   const keys = [];
+  const presentation = [];
   let context = REFERENCE_HEADER;
   let considered = 0;
   let repeated = 0;
   let oversized = 0;
-  for (const item of result.items.slice(0, HOOK_LIMITS.candidateCount)) {
-    if (considered >= topK) break;
+  for (const [index, item] of result.items.slice(0, HOOK_LIMITS.candidateCount).entries()) {
+    const delivery = { rank: index + 1, supplied: false, omit_reason: 'no_content' };
+    presentation.push(delivery);
+    if (considered >= topK) {
+      delivery.omit_reason = 'top_k';
+      continue;
+    }
     const memory = renderMemory(item);
     if (!memory) {
+      delivery.omit_reason = 'invalid_item';
       log('recall:skipped:invalid-item');
       continue;
     }
     if (memory.empty) continue;
     considered++;
     if (skip.has(memory.key)) {
+      delivery.omit_reason = 'duplicate_in_session';
       repeated++;
       continue;
     }
     const piece = `${keys.length ? '\n' : ''}${memory.text}`;
     if (Buffer.byteLength(context + piece + REFERENCE_FOOTER, 'utf8') > HOOK_LIMITS.contextBytes) {
+      delivery.omit_reason = 'budget';
       oversized++;
       continue;
     }
     context += piece;
+    delivery.supplied = true;
+    if (memory.partial) delivery.partial = true;
+    delete delivery.omit_reason;
     keys.push(memory.key);
     skip.add(memory.key);
   }
@@ -592,18 +623,19 @@ function referenceContext(result, topK, shown, log) {
   if (repeated) log(`recall:skipped:already-shown:${repeated}`);
   if (!keys.length) {
     if (!repeated && !oversized) log('recall:empty');
-    return { ok: true, context: '', keys: [] };
+    return { ok: true, context: '', keys: [], presentation };
   }
-  return { ok: true, context: context + REFERENCE_FOOTER, keys };
+  return { ok: true, context: context + REFERENCE_FOOTER, keys, presentation };
 }
 
-async function recall(client, query, topK, log, shown = []) {
+async function recall(client, query, topK, log, metadata, shown = []) {
   if (!query) return { ok: false, context: '', keys: [] };
   try {
-    return referenceContext(await client.search(query, topK), topK, shown, log);
+    const result = await client.search(query, topK, metadata);
+    return { ...referenceContext(result, topK, shown, log), result };
   } catch (error) {
     log(`recall:failed:${failureKind(error)}`);
-    return { ok: false, context: '', keys: [] };
+    return { ok: false, context: '', keys: [], error };
   }
 }
 
@@ -660,6 +692,9 @@ function captureQueue(normalized, client, { env, clock, log, protection, launchF
           conversation: normalized.threadId ? conversationKey(config.gatewayBase, normalized.threadId) : null,
           launch: options => (launchFlush ? launchFlush(options) : launchFlushProcess({ env, ...options })),
         });
+        if (!started && await telemetryPending(client, clock)) {
+          await (launchFlush ? launchFlush({ force }) : launchFlushProcess({ env, force }));
+        }
         if (started) log('capture:sender-started');
       } catch {
         log('capture:sender-unavailable');
@@ -837,12 +872,19 @@ function sameTurn(state, normalized, query) {
   return query === undefined || query === state.query;
 }
 
-/** State for the session's first user prompt. Later prompts only close this recall window. */
-function firstPromptState(normalized, query, clock) {
+/** Only a qualifying prompt starts the session's automatic recall window. */
+function firstPromptState(normalized, clean, clock, minChars, log) {
+  if (!clean) return null;
+  const short = countCharacters(clean) < minChars;
+  if (short) {
+    log('recall:skipped:short-prompt');
+    if (REARM_AFTER_SHORT_PROMPT) return null;
+  }
   return {
-    version: 1, query, turn: normalized.turnId ? hash(normalized.turnId) : '',
-    nonce: randomUUID(), injected: false, closed: false, expiresAt: clock() + HOOK_LIMITS.stateTtlMs,
-    attempted: false, context: '',
+    version: 1, query: short ? '' : truncateMiddleUtf8(clean, HOOK_LIMITS.queryBytes),
+    turn: normalized.turnId ? hash(normalized.turnId) : '',
+    nonce: randomUUID(), injected: false, closed: short, expiresAt: clock() + HOOK_LIMITS.stateTtlMs,
+    attempted: short, context: '',
   };
 }
 
@@ -877,6 +919,7 @@ export async function runHook(options = {}) {
   // Copilot and VS Code recall after the prompt hook, from the query it keeps in session state.
   const laterRecall = ['copilot', 'vscode'].includes(normalized.harness);
   const k = topKValue(topK ?? env?.MEMORY_HOUSE_TOP_K, log);
+  const minChars = minRecallCharsValue(env?.MEMORY_HOUSE_MIN_RECALL_CHARS, log);
   const firstRecall = async (state, save) => {
     if (!state || state.closed || !state.query) return '';
     // Claim the one automatic attempt before I/O, even if it fails or finds no memories.
@@ -885,9 +928,23 @@ export async function runHook(options = {}) {
       const generation = (await client.captureIdentity())?.generation;
       if (generation && (!state.attempted || state.generation === generation)) {
         if (state.attempted) return state.context;
-        const recalled = await recall(client, state.query, k, log);
+        const startedAt = clock();
+        let snapshot;
+        try { snapshot = await telemetrySnapshot(client); }
+        catch { log('telemetry:recall:state-unavailable'); }
+        const recalled = await recall(client, state.query, k, log, {
+          requestId: state.nonce, attempt: 1, trigger: 'auto_recall_first_prompt', ...(snapshot ? { binding: snapshot.binding } : {}),
+        });
         if ((await client.captureIdentity())?.generation === generation) {
           await save({ ...state, attempted: true, injected: recalled.ok, context: recalled.context, generation });
+          try {
+            // TODO(dogfood-feedback): Review this internal feedback reporting integration
+            // before external customer release; revise or remove without changing recall/capture.
+            if (await recordRecallTelemetry({ client, snapshot, requestId: state.nonce, result: recalled.result,
+              rendered: recalled, error: recalled.error, startedAt, clock, log })) {
+              await (launchFlush ? launchFlush() : launchFlushProcess({ env }));
+            }
+          } catch { log('telemetry:recall:queue-or-sender-unavailable'); }
           return recalled.context;
         }
       }
@@ -918,8 +975,8 @@ export async function runHook(options = {}) {
           await save({ ...previous, query: '', context: '', closed: true, expiresAt: clock() + HOOK_LIMITS.stateTtlMs });
           return '';
         }
-        if (!query) return '';
-        const next = firstPromptState(normalized, query, clock);
+        const next = firstPromptState(normalized, clean, clock, minChars, log);
+        if (!next) return '';
         await save(next);
         return laterRecall ? '' : firstRecall(next, save);
       }) : '';
@@ -946,9 +1003,11 @@ export async function runHook(options = {}) {
       }
       const stripped = stripMemoryContext(base);
       const context = cache ? await cache(async (state, save) => {
-        const query = original === undefined ? undefined : queryText(original);
+        const clean = cleanMessage(original);
+        const query = original === undefined ? undefined : truncateMiddleUtf8(clean, HOOK_LIMITS.queryBytes);
         if (!state && query) {
-          state = firstPromptState(normalized, query, clock);
+          state = firstPromptState(normalized, clean, clock, minChars, log);
+          if (!state) return '';
           await save(state);
         }
         if (!sameTurn(state, normalized, query)) return '';

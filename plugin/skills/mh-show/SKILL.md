@@ -1,6 +1,6 @@
 ---
 name: mh-show
-description: Show the user's Memory House memories, grouped by personal scope and hierarchy node, in the Memory House canvas.
+description: Show memories, recent recalls, human feedback controls and dogfooding telemetry preferences in the Memory House canvas.
 ---
 
 In the GitHub Copilot app, open the live Memory House canvas:
@@ -11,6 +11,20 @@ In the GitHub Copilot app, open the live Memory House canvas:
 2. Confirm in one sentence that the canvas is open. It shows the user's personal
    memories and every hierarchy node they can read, and refreshes itself. Do not
    also list the memories in chat unless the user asks.
+
+For recall review, ratings or privacy controls, direct the user to **Recent recalls &
+privacy** in that same canvas. Ratings are explicit UI submissions, not an agent action:
+never infer, select or submit a rating for the user, and do not call HTTP endpoints to
+work around that boundary. Changed text is current text, not the original recalled
+version. If the user asks for review details in chat, wrap those details in
+`<memory-house-review>` or `<memory-house-feedback>` blocks to exclude them from capture.
+Hosts without this canvas do not have the feedback UI; do not substitute ordinary
+memory listing for recall history or invent an MCP feedback tool.
+
+The canvas may show a sampled invitation to review one specific recall. Its Review
+button opens that recall without submitting a rating. Dismiss pauses invitations;
+Stop asking disables invitations on this installation, not telemetry. Do not generate
+invitation prompts in chat or click rating controls on the user's behalf.
 
 If the canvas reports that Memory House is not signed in, suggest the `mh-login`
 skill, but do not invoke it unless the user asks.

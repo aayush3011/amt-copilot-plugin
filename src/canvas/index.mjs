@@ -7,6 +7,7 @@ import { MemoryHouseError, safeError } from '../errors.mjs';
 import { createGateway, loadCanvasData, summarizeCanvasData } from './data.mjs';
 import { defaultRoots, importMemories, importSessions, importSource, listSessions, IMPORT_LIMITS } from './importers.mjs';
 import { renderPanel } from './panel.mjs';
+import { createReviewSession } from './review.mjs';
 
 export { createGateway, loadCanvasData, summarizeCanvasData };
 
@@ -81,6 +82,7 @@ function failure(res, error) {
   if (error instanceof MemoryHouseError) {
     const safe = safeError(error);
     if (SIGN_IN_CODES.has(safe.code)) return sendJson(res, 401, { error: 'not_signed_in', code: safe.code, message: safe.message });
+    if (safe.code === 'FEEDBACK_REJECTED') return sendJson(res, error.status, { error: error.problem, message: safe.message });
     return sendJson(res, BAD_REQUEST_CODES.has(safe.code) ? 400 : 502, { error: safe.code, message: safe.message });
   }
   return sendJson(res, 500, { error: 'internal_error', message: 'The Memory House canvas hit an unexpected error.' });
@@ -95,6 +97,8 @@ export async function startCanvasServer({ gateway: gatewayOptions = {}, roots = 
   const token = randomBytes(32).toString('base64url');
   let gateway;
   const getGateway = () => (gateway ??= createGateway(gatewayOptions));
+  let review;
+  const getReview = () => (review ??= createReviewSession(getGateway().client));
   let port = 0;
   let importing = false;
 
@@ -127,6 +131,22 @@ export async function startCanvasServer({ gateway: gatewayOptions = {}, roots = 
       if (!url.pathname.startsWith('/api/')) throw new RequestError(404, 'not_found', 'Not found.');
       guardApi(req);
       switch (route) {
+        case 'GET /api/telemetry/status':
+          return sendJson(res, 200, await getReview().status());
+        case 'POST /api/telemetry/preference':
+          return sendJson(res, 200, await getReview().preference(await readJson(req)));
+        case 'POST /api/telemetry/recalls':
+          return sendJson(res, 200, await getReview().list(await readJson(req)));
+        case 'POST /api/telemetry/recall':
+          return sendJson(res, 200, await getReview().detail(await readJson(req)));
+        case 'POST /api/telemetry/feedback':
+          return sendJson(res, 200, await getReview().feedback(await readJson(req)));
+        case 'POST /api/telemetry/invitation':
+          return sendJson(res, 200, await getReview().candidate(await readJson(req)));
+        case 'POST /api/telemetry/invitation-event':
+          return sendJson(res, 200, await getReview().invitationEvent(await readJson(req)));
+        case 'POST /api/telemetry/invitation-preference':
+          return sendJson(res, 200, await getReview().invitationSettings(await readJson(req)));
         case 'GET /api/memory': {
           const data = await loadCanvasData(getGateway(), {
             search: url.searchParams.get('search') ?? '',
@@ -170,9 +190,12 @@ export async function startCanvasServer({ gateway: gatewayOptions = {}, roots = 
   return {
     url: `http://127.0.0.1:${port}/`,
     token,
-    close: () => new Promise(resolve => {
-      server.close(() => resolve());
-      server.closeAllConnections?.();
-    }),
+    close: async () => {
+      await new Promise(resolve => {
+        server.close(resolve);
+        server.closeAllConnections?.();
+      });
+      await review?.close();
+    },
   };
 }

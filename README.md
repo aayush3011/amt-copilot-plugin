@@ -51,6 +51,10 @@ You can also just ask:
 
 The agent deletes memories only when you explicitly ask. A saved note may take a moment to become searchable.
 
+## MCP tools
+
+The plugin connects your agent to the Memory House MCP server. Its tools cover your personal memories (search, save, delete and summaries) and shared memory in hierarchies of Spaces (browsing and searching Spaces, invitations and roles, your Private Space, and promoting memories). See [Memory House MCP tools](docs/mcp-tools.md) for the full list and what each tool does.
+
 ## Automatic memory
 
 **Capture.** Hooks send each of your prompts and the agent's final answer in the main conversation, and Memory House decides what to keep. Tool output and private reasoning aren't sent, and common credentials are filtered. This isn't comprehensive data-loss protection, so enable capture only where your data policy allows sending conversation text to your Memory House deployment. If Memory House is unreachable or your sign-in has expired, turns wait in an encrypted local queue (up to 200 turns or 7 days) and are sent later. Signing out discards them.

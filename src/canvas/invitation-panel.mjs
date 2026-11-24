@@ -6,7 +6,7 @@ export const INVITATION_PANEL = `
   <p id="invitationSummary"></p>
   <p>Review this specific recall and choose whether to rate it. No rating is submitted automatically.</p>
   <p>As part of internal dogfooding, whether this invitation is shown, opened or dismissed is collected as metadata
-    for 60 days. See Recent recalls &amp; privacy for the full notice and telemetry opt-out.</p>
+    for 60 days. See the Feedback tab for the full notice and telemetry opt-out.</p>
   <button id="invitationReview" type="button" disabled>Review</button>
   <button id="invitationDismiss" type="button" disabled>Dismiss for 7 days</button>
   <button id="invitationStop" type="button">Stop asking on this installation</button>

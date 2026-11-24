@@ -112,7 +112,8 @@ test('an account change between canvas validation and the preference command can
 
 test('review UI uses explicit controls and emits syntactically valid inline JavaScript', () => {
   const page = renderPanel({ token: 'fixture-token', nonce: 'fixture-nonce' });
-  assert.match(page, /Recent recalls &amp; privacy/);
+  assert.match(page, /<button id="recalls" type="button">Feedback<\/button>/);
+  assert.doesNotMatch(page, /Recent recalls/);
   assert.match(page, /Opt out of new collection/);
   assert.match(page, /role="alert"/);
   assert.match(page, /60 days/);

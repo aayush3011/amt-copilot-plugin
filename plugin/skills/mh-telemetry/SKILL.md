@@ -25,7 +25,7 @@ node "<folder containing this SKILL.md>/../../runtime/auth.mjs" telemetry-notice
 Show the returned notice verbatim inside a `<memory-house-telemetry>` block.
 Internal dogfooding collection is on by default unless the account opted out; no
 opt-in approval is required. Point out the opt-out command below and the canvas's
-Recent recalls & privacy control. Never run enable just because the user signs in,
+Feedback tab opt-out control. Never run enable just because the user signs in,
 asks about telemetry or opens the canvas: that would override an existing opt-out.
 
 Only for an explicit request to re-enable collection after opting out, run:

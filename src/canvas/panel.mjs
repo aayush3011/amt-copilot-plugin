@@ -148,7 +148,7 @@ export function renderPanel({ token, nonce }) {
   <span id="who" class="who">Loading...</span>
   <span class="spacer"></span>
   <button id="memories" type="button">Memories</button>
-  <button id="recalls" type="button">Recent recalls &amp; privacy</button>
+  <button id="recalls" type="button">Feedback</button>
   <button id="import" class="primary" type="button">Import memory</button>
   <button id="refresh" type="button">Refresh</button>
 </header>

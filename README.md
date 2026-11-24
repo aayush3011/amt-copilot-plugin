@@ -67,7 +67,7 @@ Run `/memory-house:mh-show` or ask to open the Memory House canvas. The side pan
 
 - your memories, personal and from any hierarchy node you can read, with search, type filters and auto-refresh;
 - **Import memory**, which adds recent Copilot or Claude Code sessions and saved memories (text is credential-filtered first);
-- **Recent recalls & privacy**, for reviewing recalls and managing telemetry.
+- **Feedback**, for reviewing recalls, rating them and managing telemetry.
 
 It runs locally on `127.0.0.1` using the plugin's sign-in. If it says you're not signed in, run `/memory-house:mh-login` and select **Refresh**. Deleting and promoting memories aren't available from the panel.
 

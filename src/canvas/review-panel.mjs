@@ -3,8 +3,8 @@
 import { FEEDBACK_VALUES } from '../feedback.mjs';
 
 export const REVIEW_PANEL = `
-<section id="reviewView" hidden aria-label="Recent recalls and privacy">
-  <h2>Recent recalls and privacy</h2>
+<section id="reviewView" hidden aria-label="Feedback">
+  <h2>Feedback</h2>
   <p>Internal dogfooding telemetry is on by default unless you opted out. New metadata
   and explicit feedback are retained for 60 days. Your prompts, answers and memory text
   are not copied into feedback telemetry.</p>

@@ -19,7 +19,7 @@ How long it's kept: 60 days from collection, in your account's Cosmos DB and in 
 Who can see it: designated Memory House maintainers, as metadata only. They don't get your memory text through it.
 
 Opting out: you can opt out at any time. Opting out stops new collection immediately; what was already collected is kept until its retention ends. Your memories and the existing count-only usage telemetry are unaffected.`;
-export const TELEMETRY_OPT_OUT = 'To opt out, use mh-telemetry or select Recent recalls & privacy > Opt out of new collection in the Memory House canvas.';
+export const TELEMETRY_OPT_OUT = 'To opt out, use mh-telemetry or select Feedback > Opt out of new collection in the Memory House canvas.';
 export const TELEMETRY_LIMITS = Object.freeze({
   events: 200, bytes: 512 * 1024, eventBytes: 16 * 1024,
   ageMs: 30 * 24 * 60 * 60 * 1000, lockMs: 250, passes: 12,

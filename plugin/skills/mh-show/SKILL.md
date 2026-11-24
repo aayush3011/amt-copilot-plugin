@@ -12,8 +12,8 @@ In the GitHub Copilot app, open the live Memory House canvas:
    memories and every hierarchy node they can read, and refreshes itself. Do not
    also list the memories in chat unless the user asks.
 
-For recall review, ratings or privacy controls, direct the user to **Recent recalls &
-privacy** in that same canvas. Ratings are explicit UI submissions, not an agent action:
+For recall review, ratings or privacy controls, direct the user to the **Feedback**
+tab in that same canvas. Ratings are explicit UI submissions, not an agent action:
 never infer, select or submit a rating for the user, and do not call HTTP endpoints to
 work around that boundary. Changed text is current text, not the original recalled
 version. If the user asks for review details in chat, wrap those details in

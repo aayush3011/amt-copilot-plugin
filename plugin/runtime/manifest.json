@@ -16,9 +16,9 @@
     "src/canvas/data.mjs": "712a612b17310985d811e30d14673be5c20c532acc4046ee7a339a9ac9c2bb17",
     "src/canvas/importers.mjs": "c0a1f428a5646a854e5feb9c274074e6e3c63ef4504fd083bbaf6940317d7d72",
     "src/canvas/index.mjs": "9d224f55a830464314ba0989a2470f634876109924351a1d991b4e39bd6d0f79",
-    "src/canvas/invitation-panel.mjs": "ce5aa2d07500bc4efb4b98c3ce61885182cf38d81f3b035f0dcaa62eca7b43be",
-    "src/canvas/panel.mjs": "ac63c96e367d6bbf676dd145ae64e40627c59519b1e798d1961685239aa09430",
-    "src/canvas/review-panel.mjs": "1f11ad4ba5972aee632472aa38f1a15b0b2d7a3db84fedc7636af19639dbb119",
+    "src/canvas/invitation-panel.mjs": "aec274d2fd853adae5e02643be98cd2bab83f5ec646b34256d0796b5baea847a",
+    "src/canvas/panel.mjs": "7899ad8c4fd9da7fc5692ab59015162f9100c87018485ecf91457a6b738ff8f7",
+    "src/canvas/review-panel.mjs": "080cae104dc151eac9d2b7c0081138db769c77641b4ebbea80e7c06fecc1eb14",
     "src/canvas/review.mjs": "aeb85562f618f390820385d0b1019dd2ad80e8208b11ffe291c2b65028c01c8a",
     "src/capture-queue.mjs": "4c0594a62fbe324471bb23bc7d7624b51f66a2e846e57d949b216f766422d166",
     "src/client.mjs": "e50adc58932386b316905fa8520c370848d52f247d37269fe038ed4520ffe1b4",
@@ -31,7 +31,7 @@
     "src/hooks.mjs": "4e1932ac53ae686f6623c9a788213efaa27d2a55ef2e77bcbfbc21e16e956695",
     "src/invitations.mjs": "0ff4b1b6cd4ca42257ce4b80bef7f46a85cdcd1bd579616c2c1eb2c1af431409",
     "src/state.mjs": "eafeb14829ac7e4654b4175428dc1a523520031bb9637fd40c0d86c5f5c929c9",
-    "src/telemetry.mjs": "4cbdaa92ead053bb623bd17cd1a4dcbbe99cf6cda6c4f55584ea80a194cbc774",
+    "src/telemetry.mjs": "f657493867d1b5df46f062db068e9ba37c93205dd9f1dd358b83bbced18bfab0",
     "src/tenant.mjs": "5df68612dbe96c52362903cfc0beef59ffaa2b80ac553c5f3d4a830d9e21397f"
   },
   "packageFiles": {
@@ -52,8 +52,8 @@
     "skills/mh-login/SKILL.md": "ca759dadded72c69194ef56934f2a81fbd05b7edd968c954ef80e8ee63ef58aa",
     "skills/mh-logout/SKILL.md": "2cb5a5fbf4211ab92fa0bef68fbf60bacdaef7e8f6372557ac646812051bb64d",
     "skills/mh-status/SKILL.md": "d38d1fa1759712cc9c80ba208134999c803373ec7e73edf797a1fd7e3a79c90a",
-    "skills/mh-show/SKILL.md": "9386830b352536f75a32b0dfb610c35086a4ef4798caf549967e8b1babe656f3",
-    "skills/mh-telemetry/SKILL.md": "292ec8ce9551fe5b7327080877110f60c2c47be71c6e312f2a7d730267583266",
+    "skills/mh-show/SKILL.md": "d7fe41e42b225dd6884aca7c9c8cc2beda8b306c791118aa9bad1c12aed5d54c",
+    "skills/mh-telemetry/SKILL.md": "6a66d4df62413e2c1d533945597214ec70a05b337e5771b7dc78147129dd4078",
     "skills/use-memory/SKILL.md": "5f260c50cac293a77abe569db30486b27023e8c688a8668493f8eda6ec1157c6"
   },
   "dependencies": [
@@ -145,11 +145,11 @@
   ],
   "outputs": {
     "THIRD_PARTY_NOTICES.txt": "b541934107dd0362457abd71995fee51c97ad2070b9bc4a295fd07620c3523ca",
-    "auth.mjs": "27ab2ca3fb07dcd1929bb1e0c616a52477686e94f8cbd103b1e20c2f1831f549",
-    "canvas.mjs": "bfb5089d69d8328235d4cb3ac815ea982cd96e2a1f5064eb88a5ccb929c65353",
-    "flush.mjs": "541c8dc2224dc0d514fb274a16b88b4632acebcff52d64d5df5a002d6cd3429d",
-    "hook.mjs": "a7b4edce2e12641239bf4935065f59e080895f9f420e261df23a1afbaa05a3cc",
-    "shared-6Z4IOOQ5.mjs": "d92e10f6dda7fa0bb6b5a1fdc2dcbf598a3ce5d149c399f2c2d7fcf880c0db16",
-    "shared-BYOKS3DH.mjs": "29aa9906ac897217b49938aa96629f6a9805ed0aca37c70c7ba8cd53c726ed48"
+    "auth.mjs": "11d39a5a7330f3f373a0dc0acf4c74dc6901ba1f89313788b680bd92306024b0",
+    "canvas.mjs": "7277ce86787f7facb9cab08385b4e0809793fd2d40331e5472265449921bf9cd",
+    "flush.mjs": "13b60c7d9846b347d56ccc151fe9410c8c0eb2717e2d392acddaba8afcb6f1bd",
+    "hook.mjs": "65687d85b8ae5a2e52c61ea18451fc3d861991ee8306e29d4b71c8997c74116f",
+    "shared-BZY26XAT.mjs": "0349f3115d4354b5bb20fd10ea78d7996f948ac2d776dc66023af272382c6e4f",
+    "shared-L23RX4TR.mjs": "bb1f66a874dbe986204f4ee40a78e38fe82f7169092e25baceb2d960c85576e7"
   }
 }

@@ -32,19 +32,25 @@ export async function runSecretTool(file, args, input = '', timeoutMs = 10_000, 
   });
 }
 
+/**
+ * `purpose` separates what one device key protects: the MSAL cache (`msal`) and queued captures
+ * (`capture-queue`) share the OS-protected key but use different DPAPI entropy and AES-GCM data, so
+ * neither ciphertext can be read as the other.
+ */
 export function createCacheProtection(config, { platform = process.platform, env = process.env,
-  run = (file, args, input, timeout) => runSecretTool(file, args, input, timeout, env) } = {}) {
-  if (!['win32', 'darwin', 'linux'].includes(platform)) throw fail();
+  run = (file, args, input, timeout) => runSecretTool(file, args, input, timeout, env), purpose = 'msal' } = {}) {
+  if (!['win32', 'darwin', 'linux'].includes(platform) || !/^[a-z][a-z-]{0,31}$/.test(purpose)) throw fail();
   const identity = createHash('sha256').update(JSON.stringify([
     config.stateDir, config.tenantId, config.clientId, config.scope,
   ])).digest('hex');
+  const associated = purpose === 'msal' ? identity : `${identity}:${purpose}`;
   const timeout = config.authTimeoutMs;
   const dpapi = async (value, protect) => {
     const script = `$ErrorActionPreference='Stop'; `
       + `[void][Reflection.Assembly]::Load('System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a'); `
       + `$data=[Convert]::FromBase64String([Console]::In.ReadToEnd()); `
       + `$result=[Security.Cryptography.ProtectedData]::${protect ? 'Protect' : 'Unprotect'}(`
-      + `$data,[Text.Encoding]::UTF8.GetBytes('memory-house-msal-v1'),[Security.Cryptography.DataProtectionScope]::CurrentUser); `
+      + `$data,[Text.Encoding]::UTF8.GetBytes('memory-house-${purpose}-v1'),[Security.Cryptography.DataProtectionScope]::CurrentUser); `
       + `[Console]::Out.Write([Convert]::ToBase64String($result))`;
     const result = await run(join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], value, timeout);
@@ -72,13 +78,20 @@ export function createCacheProtection(config, { platform = process.platform, env
     if (verified.code !== 0 || verified.stdout !== key.toString('hex')) throw fail();
     return key;
   };
+  // One lookup per instance, shared by concurrent calls: the parts of a long message are sealed
+  // together, and a sender opens many queued turns, with one request to the credential store.
+  let deviceKey;
+  const cachedKey = create => (deviceKey ??= keychain(create).catch(error => {
+    deviceKey = undefined;
+    throw error;
+  }));
   return {
     async protect(text) {
       if (platform === 'win32') return { version: 1, scheme: 'dpapi', data: await dpapi(Buffer.from(text).toString('base64'), true) };
-      const key = await keychain(true);
+      const key = await cachedKey(true);
       const iv = randomBytes(12);
       const cipher = createCipheriv('aes-256-gcm', key, iv);
-      cipher.setAAD(Buffer.from(identity));
+      cipher.setAAD(Buffer.from(associated));
       const data = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
       return { version: 1, scheme: 'keychain', iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), data: data.toString('base64') };
     },
@@ -90,9 +103,9 @@ export function createCacheProtection(config, { platform = process.platform, env
           return Buffer.from(await dpapi(value.data, false), 'base64').toString('utf8');
         }
         if (value.scheme !== 'keychain' || typeof value.iv !== 'string' || typeof value.tag !== 'string') throw fail();
-        const key = await keychain(false);
+        const key = await cachedKey(false);
         const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(value.iv, 'base64'));
-        decipher.setAAD(Buffer.from(identity));
+        decipher.setAAD(Buffer.from(associated));
         decipher.setAuthTag(Buffer.from(value.tag, 'base64'));
         return Buffer.concat([decipher.update(Buffer.from(value.data, 'base64')), decipher.final()]).toString('utf8');
       } catch { throw fail(); }

@@ -1,5 +1,8 @@
 // The Memory House canvas page. Served by the canvas's loopback server; every dynamic value is
 // escaped before it reaches the DOM, and API calls carry the per-server capability token.
+import { REVIEW_PANEL, REVIEW_SCRIPT } from './review-panel.mjs';
+import { INVITATION_PANEL, INVITATION_SCRIPT } from './invitation-panel.mjs';
+
 export function renderPanel({ token, nonce }) {
   return `<!doctype html>
 <html lang="en">
@@ -107,6 +110,36 @@ export function renderPanel({ token, nonce }) {
   .modal .selall { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 8px; }
   .modal .selall input { width: auto; }
   .modal .selall label { margin: 0; }
+  [hidden] { display: none !important; }
+  .review-grid { display: grid; grid-template-columns: minmax(210px, 30%) 1fr; gap: 18px; margin-top: 18px; }
+  #reviewView { overflow: visible; }
+  #reviewView button { margin: 4px 0; }
+  #reviewView > button { width: auto; margin-right: 8px; }
+  #invitationBanner { margin: 12px 16px; }
+  #invitationBanner button { width: auto; margin: 4px; }
+  #invitationError { margin: 0 16px; }
+  #recallList button { text-align: left; }
+  #recallDetail select { margin-bottom: 8px; }
+  .feedback-intro { margin: 14px 0; }
+  .feedback-intro p, .answer-reasons p { margin: 6px 0; }
+  .feedback-question { min-width: 0; margin: 16px 0; padding: 12px; border: 1px solid var(--mh-border); border-radius: 10px; }
+  .feedback-question legend { padding: 0 4px; font-weight: var(--font-weight-semibold, 600); }
+  .answer-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+  .answer-choice { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px;
+    border: 1px solid var(--mh-border); border-radius: 8px; cursor: pointer; color: var(--mh-fg); font-size: inherit; }
+  .answer-choice:has(input:checked) { border-color: var(--mh-accent); background: color-mix(in srgb, var(--mh-accent) 14%, var(--mh-bg)); }
+  .answer-choice:has(input:focus-visible) { outline: 2px solid var(--mh-accent); outline-offset: 2px; }
+  .answer-choice input, .answer-reasons input { width: auto; margin: 0; accent-color: var(--mh-accent); }
+  .answer-reasons { margin-top: 12px; }
+  .answer-reasons label { display: inline-flex; gap: 6px; align-items: center; margin: 4px 12px 4px 0; cursor: pointer; }
+  .answer-status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--mh-muted); }
+  .answer-status button { width: auto; padding: 4px 8px; background: transparent; }
+  .feedback-memory-heading { margin-top: 20px; }
+  .memory-questions > summary { padding: 8px 0; font-size: 14px; color: var(--mh-fg); }
+  .feedback-submit-bar { position: sticky; top: 0; z-index: 1; padding: 10px 0; background: var(--mh-bg); border-bottom: 1px solid var(--mh-border); }
+  .feedback-submit-bar button { width: auto; margin-right: 8px !important; }
+  #feedbackDraftStatus { margin: 4px 0; font-size: 12px; color: var(--mh-muted); }
+  @media (max-width: 600px) { .review-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -114,10 +147,13 @@ export function renderPanel({ token, nonce }) {
   <h1>Memory House</h1>
   <span id="who" class="who">Loading...</span>
   <span class="spacer"></span>
+  <button id="memories" type="button">Memories</button>
+  <button id="recalls" type="button">Feedback</button>
   <button id="import" class="primary" type="button">Import memory</button>
   <button id="refresh" type="button">Refresh</button>
 </header>
-<main>
+${INVITATION_PANEL}
+<main id="memoryView">
   <aside>
     <label>Signed-in principal</label><div id="principal" class="identity">Loading...</div>
     <label>Tenant</label><div id="tenant" class="identity">Loading...</div>
@@ -160,6 +196,7 @@ export function renderPanel({ token, nonce }) {
     <div id="cards"></div>
   </section>
 </main>
+${REVIEW_PANEL}
 
 <div id="overlay" class="overlay" role="dialog" aria-modal="true" aria-label="Import memory">
   <div class="modal" id="modal"></div>
@@ -201,7 +238,7 @@ export function renderPanel({ token, nonce }) {
     const other = data.rows.filter(row => row.kind === 'unlisted' || row.kind === 'other');
     let html = '<div class="tree-section">Personal</div>' + (personal.length ? personal.map(button).join('') : '<div class="hint">No personal scope yet.</div>');
     html += '<div class="tree-section">Shared hierarchy</div>' + (shared.length ? shared.map(button).join('')
-      : '<div class="hint">You are not a member or curator of any hierarchy node yet.</div>');
+      : '<div class="hint">You are not a member of any Learning Space yet.</div>');
     if (other.length) html += '<div class="tree-section">Other scopes</div>' + other.map(button).join('');
     return html;
   }
@@ -330,8 +367,8 @@ export function renderPanel({ token, nonce }) {
 
   // Import: choose the source agent, then what to import from it.
   const SOURCES = {
-    copilot: { label: 'GitHub Copilot', memory: 'Copilot memories', memoryText: 'Facts Copilot saved with its memory tool on this device.', sessionText: 'Pick recent Copilot sessions; their turns go through Memory House extraction.' },
-    claude: { label: 'Claude Code', memory: 'Claude memories', memoryText: 'Memory files Claude Code saved for your projects.', sessionText: 'Pick recent Claude Code sessions; their turns go through Memory House extraction.' },
+    copilot: { label: 'GitHub Copilot', memory: 'Copilot memories', memoryText: 'Facts Copilot saved with its memory tool on this device; they go through Memory House extraction.', sessionText: 'Pick recent Copilot sessions; their turns go through Memory House extraction.' },
+    claude: { label: 'Claude Code', memory: 'Claude memories', memoryText: 'Memory files Claude Code saved for your projects; they go through Memory House extraction.', sessionText: 'Pick recent Claude Code sessions; their turns go through Memory House extraction.' },
   };
   const overlay = $('overlay');
   const modal = $('modal');
@@ -351,11 +388,11 @@ export function renderPanel({ token, nonce }) {
   function outcome(result, noun) {
     const sent = noun === 'memories' ? result.memories : result.messages;
     let text = noun === 'memories'
-      ? 'Sent ' + sent + ' memories' + (result.reconcile ? ' and requested reconciliation.' : '.')
+      ? 'Sent ' + sent + ' memories for extraction.'
       : 'Sent ' + sent + ' messages from ' + result.sessions + ' session(s) for extraction.';
     if (result.skipped) text += ' Skipped ' + result.skipped + ' empty or filtered item(s).';
     if (result.failed || result.unknown) text += ' ' + (result.failed + result.unknown) + ' item(s) were not confirmed.';
-    if (noun === 'messages' && sent) text += ' New memories appear after background processing.';
+    if (sent) text += ' New memories appear after background processing.';
     if (result.error) text += ' Stopped early: ' + result.error.message;
     return text;
   }
@@ -466,13 +503,16 @@ export function renderPanel({ token, nonce }) {
     const value = Math.min(Math.max(Number(seconds) || 0, 0), 300);
     $('autoRefreshValue').textContent = value ? value + 's' : 'off';
     if (timer) clearInterval(timer);
-    timer = value ? setInterval(() => { if (!document.hidden) load(); }, value * 1000) : null;
+    timer = value ? setInterval(() => { if (!document.hidden && !$('memoryView').hidden) load(); }, value * 1000) : null;
   }
   $('autoRefresh').addEventListener('input', event => {
     const value = Math.min(Math.max(Number(event.target.value) || 0, 0), 300);
     $('autoRefreshValue').textContent = value ? value + 's' : 'off';
   });
   $('autoRefresh').addEventListener('change', event => setAutoRefresh(event.target.value));
+
+  ${REVIEW_SCRIPT}
+  ${INVITATION_SCRIPT}
 
   load();
   setAutoRefresh($('autoRefresh').value);

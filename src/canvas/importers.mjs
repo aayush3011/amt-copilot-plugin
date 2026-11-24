@@ -3,8 +3,9 @@
 //
 //   Sessions -> POST /memory {extract: true, thread_id, items: [{role, content, source}]}, so the
 //               AMT pipeline extracts, consolidates and summarizes them like captured turns.
-//   Memories -> POST /memory {extract: false, items: [{content, source}]} (direct facts), then
-//               one POST /reconcile to consolidate them against existing memories.
+//   Memories -> the same request, with every saved memory as a user turn on one thread per source.
+//               AMT stores no direct facts: memories only come from extracting turns, and its
+//               dreaming pass consolidates them later, so no separate reconcile is sent.
 //
 // The parsers follow the 0.8.1 canvas engine. Session files can be hundreds of megabytes, so
 // they are streamed, only the event types in use are parsed, and the picker offers the newest
@@ -23,9 +24,8 @@ export const IMPORT_LIMITS = Object.freeze({
   sessions: 100, // newest sessions offered by the picker
   selected: 200, // sessions accepted by one import request
   batchItems: 50, // AMT POST /memory accepts 1 to 50 items
-  factBatchItems: 10, // direct facts are embedded while the request waits
   batchBytes: 240 * 1024, // below AMT's 256 KiB insertion limit
-  factBytes: 16 * 1024,
+  factBytes: 16 * 1024, // one saved memory
   previewBytes: 2048,
   timeoutMs: 120_000,
 });
@@ -402,10 +402,10 @@ async function scanMemories(source, roots) {
   return memories;
 }
 
-/** Publish the source's own saved memories as direct facts, then request one reconciliation. */
+/** Send the source's own saved memories as user turns on one thread, to be extracted into memories. */
 export async function importMemories({ gateway, source, roots }) {
   importSource(source);
-  const result = { source, memories: 0, skipped: 0, failed: 0, unknown: 0, batches: 0, reconcile: null };
+  const result = { source, memories: 0, skipped: 0, failed: 0, unknown: 0, batches: 0 };
   try {
     const items = [];
     const seen = new Set();
@@ -416,16 +416,11 @@ export async function importMemories({ gateway, source, roots }) {
         continue;
       }
       seen.add(content);
-      items.push({ content, source: SOURCES[source].memory });
+      items.push({ role: 'user', content, source: SOURCES[source].memory });
     }
-    for (const body of batches(items, IMPORT_LIMITS.factBatchItems, chunk => ({ extract: false, items: chunk }))) {
+    const threadId = `mh:import-memories:${source}`;
+    for (const body of batches(items, IMPORT_LIMITS.batchItems, chunk => ({ extract: true, thread_id: threadId, items: chunk }))) {
       tally(result, 'memories', body.items.length, await postMemory(gateway, body));
-    }
-    if (result.memories > 0) {
-      const { data } = await gateway.json('/reconcile', {
-        method: 'POST', body: {}, operation: 'reconcile', timeoutMs: IMPORT_LIMITS.timeoutMs,
-      });
-      result.reconcile = isObject(data) && typeof data.status === 'string' ? data.status : 'requested';
     }
   } catch (error) {
     return { ...result, error: safeError(error) };

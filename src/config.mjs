@@ -47,10 +47,10 @@ export function assertSafeUrl(value, { allowInsecureLocalhost = false } = {}) {
     if (typeof value !== 'string' || !/^https?:\/\//i.test(value) || /[\x00-\x20\x7f\\]/.test(value)) throw new Error('format');
     url = new URL(value);
   } catch {
-    throw new MemoryHouseError('INVALID_GATEWAY', 'The publisher must provide a valid absolute Memory House gateway URL in deployment.json.');
+    throw new MemoryHouseError('INVALID_GATEWAY', 'The publisher must provide valid absolute Memory House endpoint URLs in deployment.json.');
   }
   if (url.username || url.password || url.hash || url.search) {
-    throw new MemoryHouseError('INVALID_GATEWAY', 'The gateway URL must not contain credentials, a query, or a fragment.');
+    throw new MemoryHouseError('INVALID_GATEWAY', 'Endpoint URLs must not contain credentials, a query, or a fragment.');
   }
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback && allowInsecureLocalhost)) {
@@ -93,9 +93,9 @@ export function loadConfig(options = {}) {
   const pluginRoot = options.pluginRoot ?? dirname(dirname(fileURLToPath(import.meta.url)));
   const deployment = options.deployment ?? readDeployment(pluginRoot);
   if (!object(deployment) || deployment.version !== 1
-    || Object.keys(deployment).some(key => !['version', 'gatewayBase', 'entra'].includes(key))
+    || Object.keys(deployment).some(key => !['version', 'gatewayBase', 'mcpUrl', 'entra'].includes(key))
     || !object(deployment.entra) || Object.keys(deployment.entra).some(key => !AUTH_FIELDS.includes(key))) {
-    throw new MemoryHouseError('INVALID_DEPLOYMENT', 'deployment.json must contain version 1, gatewayBase, and public entra settings only.');
+    throw new MemoryHouseError('INVALID_DEPLOYMENT', 'deployment.json must contain version 1, gatewayBase, optional mcpUrl, and public entra settings only.');
   }
   const auth = {};
   const publisherMissing = [];
@@ -116,6 +116,8 @@ export function loadConfig(options = {}) {
   const url = assertSafeUrl(deployment.gatewayBase, { allowInsecureLocalhost });
   url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/mcp$/, '').replace(/\/+$/, '');
   const gatewayBase = url.href.replace(/\/$/, '');
+  const mcpUrl = deployment.mcpUrl === undefined ? `${gatewayBase}/mcp/`
+    : assertSafeUrl(deployment.mcpUrl, { allowInsecureLocalhost }).href;
   const home = resolve(options.home ?? (env.HOME || env.USERPROFILE || homedir()));
   const selected = options.stateDir ?? env.MEMORY_HOUSE_HOME ?? join(home, '.memory-house');
   if (typeof selected !== 'string' || !selected.trim() || /[\x00-\x1f\x7f]/.test(selected)) {
@@ -125,7 +127,7 @@ export function loadConfig(options = {}) {
   if (stateDir === parse(stateDir).root) throw new MemoryHouseError('INVALID_CONFIG', 'The Memory House state directory cannot be a filesystem root.');
   inspectDirectorySync(stateDir);
   return Object.freeze({
-    gatewayBase, mcpUrl: `${gatewayBase}/mcp/`,
+    gatewayBase, mcpUrl,
     stateDir, authStatePath: join(stateDir, 'auth.json'), lockPath: join(stateDir, 'auth.json.lock'),
     cachePath: join(stateDir, 'msal-cache.json.enc'), cacheLockPath: join(stateDir, 'msal-cache.lock'),
     auth: Object.freeze(auth), ...auth, publisherMissing: Object.freeze(publisherMissing),

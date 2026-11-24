@@ -14,13 +14,14 @@ test('packaged publisher defaults select the Entra public client, tenant and gat
   const config = loadConfig({ env });
   assert.equal(config.tenantId, '72f988bf-86f1-41af-91ab-2d7cd011db47');
   assert.equal(config.clientId, '45cdeed7-4e4e-481d-9f00-6708c0631565');
-  assert.equal(config.scope, 'https://dbinference.azure.com/.default');
-  assert.equal(config.mcpScope, 'api://inference-service-mcp/Logs.Read');
+  assert.equal(config.scope, 'api://45cdeed7-4e4e-481d-9f00-6708c0631565/Inference.Execute');
+  assert.equal(config.mcpScope, 'api://8f548183-439e-46ba-9a5a-aeedb8594a5c/MemoryHouse.Access');
   assert.equal(config.redirectUri, 'http://127.0.0.1:33418');
   assert.deepEqual(config.publisherMissing, []);
   assert.doesNotThrow(() => requirePublisherConfig(config));
   assert.equal(config.hookBase, undefined);
-  assert.equal(config.mcpUrl, `${config.gatewayBase}/mcp/`);
+  assert.equal(config.gatewayBase, 'https://mh-standalone-gateway-6537b4.azurewebsites.net/inference/memory');
+  assert.equal(config.mcpUrl, 'https://mh-mcp-6537b4.azurewebsites.net/mcp/memoryhouse');
   await assert.rejects(access(config.stateDir), { code: 'ENOENT' });
 });
 
@@ -33,9 +34,36 @@ test('environment endpoints, token overrides and old per-user config cannot repo
     env: { ...env, MEMORY_HOUSE_GATEWAY: 'https://wrong.example', AMT_GATEWAY_BASE: 'https://wrong.example',
       MEMORY_HOUSE_ENTRA_CLIENT_ID: 'wrong', AMT_ACCESS_TOKEN: 'fake-secret' },
   });
-  assert.equal(config.scope, 'https://dbinference.azure.com/.default');
+  assert.equal(config.scope, 'api://45cdeed7-4e4e-481d-9f00-6708c0631565/Inference.Execute');
   assert.notEqual(config.gatewayBase, 'https://wrong.example');
   assert.equal(await readFile(join(env.MEMORY_HOUSE_HOME, 'token.json'), 'utf8'), 'not read during configuration');
+});
+
+test('publisher MCP URLs can use a separate origin and preserve the endpoint path and trailing slash', async t => {
+  const env = await isolatedEnvironment(t);
+  const legacy = loadConfig({ env, deployment: fixtureDeployment() });
+  assert.equal(legacy.mcpUrl, `${legacy.gatewayBase}/mcp/`);
+  for (const mcpUrl of ['https://mcp.example/mcp/memoryhouse', 'https://mcp.example/mcp/memoryhouse/']) {
+    const deployment = { ...fixtureDeployment(), mcpUrl };
+    const config = loadConfig({ env, deployment });
+    assert.equal(config.gatewayBase, deployment.gatewayBase);
+    assert.equal(config.mcpUrl, mcpUrl);
+  }
+});
+
+test('explicit MCP URLs reject unsafe values instead of falling back to the gateway', async t => {
+  const env = await isolatedEnvironment(t);
+  for (const mcpUrl of [null, '', 42, {}, '/mcp/memoryhouse', 'https:mcp.example', 'file:///tmp',
+    'https://mcp.example/?token=fake-secret', 'https://mcp.example/#bad', 'https://user:fake-secret@mcp.example',
+    'https://mcp.example\\bad', 'https://mcp.example/\n', 'http://mcp.example', 'http://127.0.0.1:1234/mcp']) {
+    assert.throws(() => loadConfig({ env: { ...env, MH_ALLOW_INSECURE_LOCALHOST: '' },
+      deployment: { ...fixtureDeployment(), mcpUrl } }), error =>
+      ['INVALID_GATEWAY', 'INSECURE_GATEWAY'].includes(error.code) && !error.message.includes('fake-secret'));
+  }
+  const mcpUrl = 'http://127.0.0.1:1234/mcp/memoryhouse';
+  assert.equal(loadConfig({ env, deployment: { ...fixtureDeployment(), mcpUrl } }).mcpUrl, mcpUrl);
+  assert.throws(() => loadConfig({ env, deployment: { ...fixtureDeployment(), mcpUrl: 'http://mcp.example' } }),
+    { code: 'INSECURE_GATEWAY' });
 });
 
 test('publisher metadata is loaded from deployment.json rather than native MCP transport definitions', async t => {

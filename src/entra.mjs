@@ -119,6 +119,14 @@ export async function browserSignIn(pca, config, { openBrowser = openBrowserUrl,
   }
 }
 
+const OBJECT_ID = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
+
+/** The account's object ID in the signed-in tenant, which identifies the account across sign-ins. */
+function objectIdOf(account) {
+  const value = account?.idTokenClaims?.oid ?? account?.localAccountId;
+  return typeof value === 'string' && OBJECT_ID.test(value) ? value : undefined;
+}
+
 function usableToken(result, config, clock, label) {
   const expiresAt = Math.floor(result?.expiresOn?.getTime() / 1000);
   if (typeof result?.accessToken !== 'string' || !/^[a-z\d._~+/-]+=*$/i.test(result.accessToken)
@@ -127,7 +135,8 @@ function usableToken(result, config, clock, label) {
     || !Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(clock() / 1000) + config.tokenSkewSeconds) {
     throw fail('ENTRA_TOKEN_INVALID', `Microsoft did not return a usable ${label} access token. Retry mh-login.`);
   }
-  return { accessToken: result.accessToken, expiresAt };
+  const objectId = objectIdOf(result.account);
+  return { accessToken: result.accessToken, expiresAt, ...(objectId ? { objectId } : {}) };
 }
 
 /**

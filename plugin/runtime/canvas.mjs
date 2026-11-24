@@ -1,6 +1,584 @@
 import { createRequire as __mhCreateRequire } from 'node:module'; const require = __mhCreateRequire(import.meta.url);
-import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g as q,h as G}from"./shared-4PO736SC.mjs";import{createServer as Je}from"node:http";import{randomBytes as le,timingSafeEqual as Ve}from"node:crypto";var x=e=>e!==null&&typeof e=="object"&&!Array.isArray(e),g=(e,t=4096)=>typeof e=="string"&&e.length<=t?e:null,N="node:",ue=3e5,fe=Object.freeze({limit:L.maxCount});function W(e={}){let t=e.fetch??globalThis.fetch,o=e.client??G({...e.clientOptions,fetch:t});async function n(s,{method:r="GET",body:i,headers:a={},operation:c="request",timeoutMs:p}={}){let u=await o.getAccessToken(),d=Math.min(Math.max(p??o.config.timeoutMs,1),ue);return q({url:`${o.config.gatewayBase}${s}`,fetch:t,timeoutMs:d,maxResponseBytes:o.config.maxResponseBytes,method:r,body:i,operation:c,headers:{...a,Authorization:`Bearer ${u}`}})}return Object.freeze({client:o,json:n})}function J(e={}){let t=Number(e.limit);return{search:typeof e.search=="string"?e.search.trim().slice(0,256):"",memoryTypes:[...new Set((Array.isArray(e.memoryTypes)?e.memoryTypes:[]).filter(o=>U.includes(o)))],includeSuperseded:e.includeSuperseded===!0,limit:Number.isInteger(t)&&t>=1&&t<=L.maxCount?t:fe.limit}}function he(e){return!x(e)||!g(e.principal,512)?null:{principal:e.principal,tenant:g(e.tenant_id,512)}}function ge(e){return!x(e)||!Array.isArray(e.nodes)?null:e.nodes.flatMap(t=>!x(t)||!g(t.id,256)?.startsWith(N)||!g(t.name,1024)?[]:[{id:t.id,name:t.name,path:g(t.path,8192)??t.name,parentId:g(t.parent_id,256),description:g(t.description,4096)}])}async function V(e,t={}){let o=J(t),[n,s,r]=await Promise.allSettled([e.client.getMemories({recent_k:o.limit,memory_types:o.memoryTypes,include_superseded:o.includeSuperseded}),e.json("/whoami",{operation:"identity"}),e.json("/v1/me/reach",{operation:"hierarchy"})]);if(n.status==="rejected")throw n.reason;let i=[],a=s.status==="fulfilled"?he(s.value.data):null;a||i.push("Your signed-in identity could not be loaded.");let c=r.status==="fulfilled"?ge(r.value.data):null;return c||i.push("The hierarchy could not be loaded, so shared memories are shown by node ID."),Se({who:a,nodes:c??[],listing:n.value,filters:o,warnings:i})}function R(e){return String(e||"").split("/").filter(Boolean).join(" / ")}function ye(e){for(let t of["content","text","summary","title","name"])if(typeof e[t]=="string"&&e[t].trim())return e[t];return""}function be(e,t,o){let n=typeof e.scope_key=="string"?e.scope_key:"",s=t.get(n),r=n.startsWith("user:")&&(!o||n===o),i=r?"personal":s?"node":n.startsWith(N)?"unlisted":"other",a=x(e.source)?g(e.source.source,256)??g(e.source.application,256):null;return{id:e.id,scope_key:n,scope_kind:i,scope_label:r?"Personal":s?s.name:i==="unlisted"?"Unlisted node":n||"Unknown scope",scope_path:s?R(s.path):"",type:g(e.memory_type,64)??g(e.type,64),content:ye(e),tags:Array.isArray(e.tags)?e.tags.filter(c=>typeof c=="string").slice(0,20):[],created_at:g(e.created_at,64),updated_at:g(e.updated_at,64),salience:typeof e.salience=="number"?e.salience:null,confidence:typeof e.confidence=="number"?e.confidence:null,source:a,superseded:typeof e.superseded_by=="string"&&e.superseded_by.length>0,promotion:ve(we(e),t)}}function we(e){let t=x(e.metadata)?e.metadata:null;if(t&&typeof t.promoted_from_scope=="string"){let o=x(t.topology_assessment)?t.topology_assessment:{};return{from_scope:t.promoted_from_scope,origin:t.promotion_origin_principal,rationale:t.assessment_rationale??o.rationale,promoted_at:t.promoted_at}}return x(e.promotion)?e.promotion:null}function ve(e,t){if(!x(e))return null;let o=g(e.from_scope,256),n=o?t.get(o):null,s={from_scope:o,from_label:n?R(n.path):o,origin:g(e.origin,256),rationale:g(e.rationale,2e3),promoted_at:g(e.promoted_at,64)};return Object.values(s).some(Boolean)?s:null}function xe(e,t){return[e.content,e.id,e.scope_label,e.scope_path,...e.tags].some(o=>String(o||"").toLowerCase().includes(t))}var ke=(e,t)=>e.name.localeCompare(t.name,void 0,{sensitivity:"base"})||e.id.localeCompare(t.id),_e=(e,t)=>String(t.created_at||"").localeCompare(String(e.created_at||""));function Se({who:e=null,nodes:t=[],listing:o,filters:n={},warnings:s=[]}){let r=J(n),i=new Map(t.map(l=>[l.id,l])),a=e?.principal??null,c=r.search.toLowerCase(),p={},u=new Set,d=0;for(let l of Array.isArray(o?.items)?o.items:[]){if(!x(l)||typeof l.id!="string"||u.has(l.id))continue;u.add(l.id);let b=be(l,i,a);c&&!xe(b,c)||((p[b.scope_key]||=[]).push(b),d+=1)}for(let l of Object.values(p))l.sort(_e);let m=l=>(p[l]||[]).length,f=[],_=new Set(a?[a]:[]);for(let l of Object.keys(p))l.startsWith("user:")&&_.add(l);for(let l of _)f.push({scope:l,kind:"personal",name:"Personal",path:"",depth:0,count:m(l)});let h=new Map;for(let l of t){let b=l.parentId&&i.has(l.parentId)?l.parentId:null;h.has(b)||h.set(b,[]),h.get(b).push(l)}let M=new Set,F=(l,b)=>{for(let S of(h.get(l)||[]).sort(ke))M.has(S.id)||(M.add(S.id),f.push({scope:S.id,kind:l===null?"root":"node",name:S.name,path:R(S.path),description:S.description,depth:b,count:m(S.id)}),F(S.id,b+1))};F(null,0);for(let l of Object.keys(p).sort()){if(_.has(l)||M.has(l))continue;let b=l.startsWith(N);f.push({scope:l,kind:b?"unlisted":"other",name:b?"Unlisted node":l,path:l,depth:0,count:m(l)})}return{principal:a,tenant:e?.tenant??null,rows:f,groups:p,total:d,truncated:o?.has_more===!0,limit:r.limit,warnings:s,updatedAt:new Date().toISOString()}}function Te(e,{maxItems:t=100,maxChars:o=1e3}={}){let n=[];for(let s of e.rows)for(let r of e.groups[s.scope]||[]){if(n.length>=t)break;n.push({scope:s.kind==="personal"?"Personal":s.path||s.name,type:r.type,content:r.content.length>o?`${r.content.slice(0,o)}...`:r.content,created_at:r.created_at})}return{principal:e.principal,total:e.total,truncated:e.truncated||n.length<e.total,scopes:e.rows.map(({scope:s,kind:r,name:i,path:a,count:c})=>({scope:s,kind:r,name:i,path:a,count:c})),memories:n,warnings:e.warnings,referenceOnly:!0}}import{createReadStream as Me}from"node:fs";import{readdir as z,readFile as Ce,stat as Ee}from"node:fs/promises";import{createInterface as Ie}from"node:readline";import{createHash as Ae}from"node:crypto";import{homedir as $e}from"node:os";import{basename as Oe,join as k,posix as Le,relative as Ne,sep as Re}from"node:path";var v=Object.freeze({sessions:100,selected:200,batchItems:50,factBatchItems:10,batchBytes:240*1024,factBytes:16*1024,previewBytes:2048,timeoutMs:12e4}),H=Object.freeze({copilot:Object.freeze({label:"GitHub Copilot",session:"github-copilot",memory:"copilot-cli-memory"}),claude:Object.freeze({label:"Claude Code",session:"claude-code",memory:"claude-code-memory"})}),P=/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,je=/"type"\s*:\s*"(?:session\.start|user\.message|assistant\.message)"/,w=e=>e!==null&&typeof e=="object"&&!Array.isArray(e);function C(e){if(typeof e!="string"||!Object.hasOwn(H,e))throw new A("INVALID_PAYLOAD","Import source must be copilot or claude.");return e}function Y(e=process.env){let t=e.HOME||e.USERPROFILE||$e();return{copilot:k(e.COPILOT_HOME||k(t,".copilot"),"session-state"),claude:k(e.CLAUDE_CONFIG_DIR||k(t,".claude"),"projects")}}function j(e,t=130){let o=O(e,{maxBytes:v.previewBytes}).replace(/```[\s\S]*?```/g," ").replace(/`([^`]*)`/g,"$1").replace(/^\s{0,3}#{1,6}\s+/gm,"").replace(/\*\*([^*]*)\*\*/g,"$1").replace(/[*_>]/g," ").replace(/\s+/g," ").trim();return o.length>t?`${o.slice(0,t-3)}...`:o}async function*D(e,t){let o=Me(e,{encoding:"utf8"}),n=Ie({input:o,crlfDelay:1/0});try{for await(let s of n){if(t&&!t(s))continue;let r=s.trim();if(r)try{let i=JSON.parse(r);w(i)&&(yield i)}catch{}}}finally{n.close(),o.destroy()}}async function K(e){try{let t=await Ee(e);return t.isFile()?t:null}catch{return null}}async function B(e){try{return(await z(e,{withFileTypes:!0})).filter(t=>t.isDirectory()).map(t=>t.name)}catch{return[]}}var I=new Map;async function X(e,t,o,n){let s=`${e}\0${t}`,r=I.get(s);if(r&&r.mtimeMs===o.mtimeMs&&r.size===o.size)return r.value;let i=await n();return I.delete(s),I.set(s,{mtimeMs:o.mtimeMs,size:o.size,value:i}),I.size>2e3&&I.delete(I.keys().next().value),i}async function ze(e,t){let o="",n="",s=new Map,r=new Map;for await(let a of D(e,c=>je.test(c))){let c=a.data;if(w(c)){if(a.type==="session.start")o=String(c.startTime||a.timestamp||""),w(c.context)&&(n=String(c.context.cwd||""));else if(a.type==="user.message")typeof c.interactionId=="string"&&typeof c.content=="string"&&c.content.trim()&&s.set(c.interactionId,{role:"user",content:c.content});else if(a.type==="assistant.message"){let p=c.interactionId;if(typeof p!="string"||!s.has(p)||typeof c.content!="string"||!c.content.trim())continue;let u=c.phase==="final_answer";if(r.get(p)?.final&&!u)continue;r.set(p,{role:"agent",content:c.content,final:u})}}}let i=[];for(let[a,c]of s){let p=r.get(a);p&&i.push({question:c,response:{role:p.role,content:p.content}})}return{session_id:t,start_time:o,cwd:n,turns:i}}async function Z(e){let t=[];for(let o of await B(e)){if(!P.test(o))continue;let n=k(e,o,"events.jsonl"),s=await K(n);s&&t.push({id:o,file:n,info:s})}return t}async function He(e,t){let o=[];for await(let n of D(e,s=>s.includes("storeMemory"))){let s=n.data;if(n.type!=="tool.execution_complete"||!w(s)||!s.success)continue;let r=s.toolTelemetry;if(!w(r)||!w(r.properties)||r.properties.operation!=="storeMemory")continue;let i=r.restrictedProperties;!w(i)||typeof i.memoryFact!="string"||o.push({memory_id:String(n.id||""),session_id:t,fact:i.memoryFact})}return o}function Pe(e){return typeof e=="string"?e.trim():Array.isArray(e)?e.filter(t=>w(t)&&t.type==="text").map(t=>String(t.text||"").trim()).filter(Boolean).join(`
-`).trim():""}async function De(e,t){let o="",n="",s=null,r=null,i=[];for await(let a of D(e)){if(a.isSidechain||a.isMeta)continue;let c=a.message;if(a.type!=="user"&&a.type!=="assistant"||!w(c))continue;n=String(a.cwd||n);let p=String(a.timestamp||"");p&&(!o||p<o)&&(o=p);let u=Pe(c.content);if(u)if(a.type==="user"){if(typeof c.content!="string")continue;s&&r&&i.push({question:s,response:r}),s={role:"user",content:u},r=null}else s&&(r={role:"agent",content:u})}return s&&r&&i.push({question:s,response:r}),{session_id:t,start_time:o,cwd:n,turns:i}}async function Be(e){let t=[];for(let o of await B(e)){let n=[];try{n=await z(k(e,o),{withFileTypes:!0})}catch{continue}for(let s of n){if(!s.isFile()||!s.name.endsWith(".jsonl"))continue;let r=s.name.slice(0,-6);if(!P.test(r))continue;let i=k(e,o,s.name),a=await K(i);a&&t.push({id:r,file:i,info:a})}}return t}var Fe=/^---\r?\n[\s\S]*?\r?\n---\r?\n?/;async function Q(e,t=[]){let o=[];try{o=await z(e,{withFileTypes:!0})}catch{return t}for(let n of o){let s=k(e,n.name);n.isDirectory()?await Q(s,t):n.isFile()&&n.name.endsWith(".md")&&t.push(s)}return t}async function Ue(e){let t=[];for(let o of await B(e)){let n=k(e,o,"memory");for(let s of(await Q(n)).sort()){if(Oe(s)==="MEMORY.md")continue;let r=(await Ce(s,"utf8")).replace(Fe,"").trim();if(!r)continue;let i=Ne(n,s).split(Re).join(Le.sep);t.push({memory_id:`${o}:${i}`,session_id:o,fact:r})}}return t}async function ee(e,t){return e==="claude"?Be(t.claude):Z(t.copilot)}async function te(e,t){let o=e==="claude"?De:ze;return X(`${e}-session`,t.file,t.info,()=>o(t.file,t.id))}function qe(e){let t=e.turns[0];return j(t?t.question.content:"",72)||e.cwd.split(/[\\/]/).filter(Boolean).pop()||e.session_id}async function oe(e,t,{limit:o=v.sessions}={}){C(e);let n=(await ee(e,t)).sort((r,i)=>i.info.mtimeMs-r.info.mtimeMs),s=[];for(let r of n){if(s.length>=o)break;let i=await te(e,r);if(!i.turns.length)continue;let a=i.turns[i.turns.length-1];s.push({session_id:i.session_id,label:qe(i),cwd:i.cwd,start_time:i.start_time,turn_count:i.turns.length,last_user_turn:j(a.question.content),last_agent_turn:j(a.response.content)})}return s}function Ge(e){if(!Array.isArray(e)||!e.length||e.length>v.selected||e.some(t=>typeof t!="string"||!P.test(t)))throw new A("INVALID_PAYLOAD",`Select 1 to ${v.selected} listed sessions to import.`);return[...new Set(e)]}function*ne(e,t,o){let n=[];for(let s of e)n.length&&(n.length>=t||Buffer.byteLength(JSON.stringify(o([...n,s])))>v.batchBytes)&&(yield o(n),n=[]),n.push(s);n.length&&(yield o(n))}async function se(e,t){let o=`mh-import-${Ae("sha256").update(JSON.stringify(t)).digest("hex")}`,{data:n}=await e.json("/memory",{method:"POST",body:t,headers:{"Idempotency-Key":o},operation:"import",timeoutMs:v.timeoutMs});return n}function re(e,t,o,n){e.batches+=1;let s=w(n)?n.result:null;w(s)&&Number.isSafeInteger(s.succeeded)?(e[t]+=s.succeeded,e.failed+=Number.isSafeInteger(s.failed)?s.failed:0,e.unknown+=Number.isSafeInteger(s.unknown)?s.unknown:0):e[t]+=o}async function ie({gateway:e,source:t,ids:o,roots:n}){C(t);let s=Ge(o),r={source:t,sessions:0,messages:0,skipped:0,failed:0,unknown:0,batches:0};try{let i=new Map((await ee(t,n)).map(a=>[a.id,a]));for(let a of s){let c=i.get(a);if(!c)continue;let p=await te(t,c);if(!p.turns.length)continue;let u=[];for(let m of p.turns)for(let f of[m.question,m.response]){let _=O(f.content);_?u.push({role:f.role,content:_,source:H[t].session}):r.skipped+=1}if(!u.length)continue;r.sessions+=1;let d=`mh:import:${t}:${a}`;for(let m of ne(u,v.batchItems,f=>({extract:!0,thread_id:d,items:f})))re(r,"messages",m.items.length,await se(e,m))}}catch(i){return{...r,error:E(i)}}return r}async function We(e,t){if(e==="claude")return Ue(t.claude);let o=[];for(let n of await Z(t.copilot))o.push(...await X("copilot-memories",n.file,n.info,()=>He(n.file,n.id)));return o}async function ae({gateway:e,source:t,roots:o}){C(t);let n={source:t,memories:0,skipped:0,failed:0,unknown:0,batches:0,reconcile:null};try{let s=[],r=new Set;for(let i of await We(t,o)){let a=O(i.fact,{maxBytes:v.factBytes});if(!a||r.has(a)){n.skipped+=1;continue}r.add(a),s.push({content:a,source:H[t].memory})}for(let i of ne(s,v.factBatchItems,a=>({extract:!1,items:a})))re(n,"memories",i.items.length,await se(e,i));if(n.memories>0){let{data:i}=await e.json("/reconcile",{method:"POST",body:{},operation:"reconcile",timeoutMs:v.timeoutMs});n.reconcile=w(i)&&typeof i.status=="string"?i.status:"requested"}}catch(s){return{...n,error:E(s)}}return n}function ce({token:e,nonce:t}){return`<!doctype html>
+import{b as z}from"./shared-BZY26XAT.mjs";import{A as q,B as Y,C as we,F as ge,G as be,H as ye,I as xe,J as ke,K as G,L as _e,M as W,N as Se,O as Ee,a as y,b as D,l as ae,m as j,n as B,o as le,p as ce,q as F,r as U,s as de,t as ue,u as pe,v as me,w as fe,x as ve,y as he,z as V}from"./shared-L23RX4TR.mjs";import{createServer as Dt}from"node:http";import{randomBytes as We,timingSafeEqual as Pt}from"node:crypto";var $=e=>e!==null&&typeof e=="object"&&!Array.isArray(e),k=(e,t=4096)=>typeof e=="string"&&e.length<=t?e:null,K="node:",et=50,tt=3e5,nt=Object.freeze({limit:W.maxCount});function Te(e={}){let t=e.fetch??globalThis.fetch,n=e.client??Ee({...e.clientOptions,fetch:t});async function i(r,{method:o="GET",body:a,headers:l={},operation:d="request",timeoutMs:m}={}){let v=await n.getAccessToken(),S=Math.min(Math.max(m??n.config.timeoutMs,1),tt);return Se({url:`${n.config.gatewayBase}${r}`,fetch:t,timeoutMs:S,maxResponseBytes:n.config.maxResponseBytes,method:o,body:a,operation:d,headers:{...l,Authorization:`Bearer ${v}`}})}return Object.freeze({client:n,json:i})}function Ie(e={}){let t=Number(e.limit);return{search:typeof e.search=="string"?e.search.trim().slice(0,256):"",memoryTypes:[...new Set((Array.isArray(e.memoryTypes)?e.memoryTypes:[]).filter(n=>_e.includes(n)))],includeSuperseded:e.includeSuperseded===!0,limit:Number.isInteger(t)&&t>=1&&t<=W.maxCount?t:nt.limit}}function it(e){if(!$(e)||!k(e.principal,512))return null;let t=Array.isArray(e.read_spaces)?e.read_spaces.filter(n=>k(n,256)):[];return{principal:e.principal,tenant:k(e.tenant_id,512),readSpaces:[...new Set(t)]}}function rt(e,t){return!$(e)||e.id!==t||!k(e.name,1024)?null:{id:t,name:e.name,path:k(e.path,8192)??e.name,parentId:k(e.parent_id,256),description:k($(e.metadata)?e.metadata.description:null,4096)}}async function st(e,t){let n=t.readSpaces.filter(o=>o.startsWith(K)).slice(0,et),r=(await Promise.allSettled(n.map(o=>e.json(`/v1/spaces/${encodeURIComponent(o)}`,{operation:"space"})))).flatMap((o,a)=>{let l=o.status==="fulfilled"?rt(o.value.data,n[a]):null;return l?[l]:[]});return{spaces:r,missing:n.length-r.length}}async function Ae(e,t={}){let n=Ie(t),i=e.json("/whoami",{operation:"identity"}).then(v=>it(v.data)),[r,o,a]=await Promise.allSettled([e.client.getMemories({recent_k:n.limit,memory_types:n.memoryTypes,include_superseded:n.includeSuperseded}),i,i.then(v=>v?st(e,v):null)]);if(r.status==="rejected")throw r.reason;let l=[],d=o.status==="fulfilled"?o.value:null;d||l.push("Your signed-in identity could not be loaded, so shared memories are shown by Space ID.");let m=a.status==="fulfilled"&&a.value?a.value:{spaces:[],missing:0};return m.missing&&l.push("Some Learning Spaces could not be loaded, so their memories are shown by Space ID."),mt({who:d,nodes:m.spaces,listing:r.value,filters:n,warnings:l})}function J(e){return String(e||"").split("/").filter(Boolean).join(" / ")}function ot(e){for(let t of["content","text","summary","title","name"])if(typeof e[t]=="string"&&e[t].trim())return e[t];return""}function at(e,t,n){let i=typeof e.space_key=="string"?e.space_key:typeof e.scope_key=="string"?e.scope_key:"",r=t.get(i),o=i.startsWith("user:")&&(!n||i===n),a=o?"personal":r?"node":i.startsWith(K)?"unlisted":"other",l=$(e.source)?k(e.source.source,256)??k(e.source.application,256):null;return{id:e.id,scope_key:i,scope_kind:a,scope_label:o?"Personal":r?r.name:a==="unlisted"?"Unlisted node":i||"Unknown scope",scope_path:r?J(r.path):"",type:k(e.memory_type,64)??k(e.type,64),content:ot(e),tags:Array.isArray(e.tags)?e.tags.filter(d=>typeof d=="string").slice(0,20):[],created_at:k(e.created_at,64),updated_at:k(e.updated_at,64),salience:typeof e.salience=="number"?e.salience:null,confidence:typeof e.confidence=="number"?e.confidence:null,source:l,superseded:typeof e.superseded_by=="string"&&e.superseded_by.length>0,promotion:ct(lt(e),t)}}function lt(e){let t=$(e.metadata)?e.metadata:null;if(t&&typeof t.promoted_from_scope=="string"){let n=$(t.topology_assessment)?t.topology_assessment:{};return{from_scope:t.promoted_from_scope,origin:t.promotion_origin_principal,rationale:t.assessment_rationale??n.rationale,promoted_at:t.promoted_at}}return $(e.promotion)?e.promotion:null}function ct(e,t){if(!$(e))return null;let n=k(e.from_scope,256),i=n?t.get(n):null,r={from_scope:n,from_label:i?J(i.path):n,origin:k(e.origin,256),rationale:k(e.rationale,2e3),promoted_at:k(e.promoted_at,64)};return Object.values(r).some(Boolean)?r:null}function dt(e,t){return[e.content,e.id,e.scope_label,e.scope_path,...e.tags].some(n=>String(n||"").toLowerCase().includes(t))}var ut=(e,t)=>e.name.localeCompare(t.name,void 0,{sensitivity:"base"})||e.id.localeCompare(t.id),pt=(e,t)=>String(t.created_at||"").localeCompare(String(e.created_at||""));function mt({who:e=null,nodes:t=[],listing:n,filters:i={},warnings:r=[]}){let o=Ie(i),a=new Map(t.map(p=>[p.id,p])),l=e?.principal??null,d=o.search.toLowerCase(),m={},v=new Set,S=0;for(let p of Array.isArray(n?.items)?n.items:[]){if(!$(p)||typeof p.id!="string"||v.has(p.id))continue;v.add(p.id);let E=at(p,a,l);d&&!dt(E,d)||((m[E.scope_key]||=[]).push(E),S+=1)}for(let p of Object.values(m))p.sort(pt);let b=p=>(m[p]||[]).length,u=[],f=new Set(l?[l]:[]);for(let p of Object.keys(m))p.startsWith("user:")&&f.add(p);for(let p of f)u.push({scope:p,kind:"personal",name:"Personal",path:"",depth:0,count:b(p)});let w=new Map;for(let p of t){let E=p.parentId&&a.has(p.parentId)?p.parentId:null;w.has(E)||w.set(E,[]),w.get(E).push(p)}let O=new Set,x=(p,E)=>{for(let R of(w.get(p)||[]).sort(ut))O.has(R.id)||(O.add(R.id),u.push({scope:R.id,kind:p===null?"root":"node",name:R.name,path:J(R.path),description:R.description,depth:E,count:b(R.id)}),x(R.id,E+1))};x(null,0);for(let p of Object.keys(m).sort()){if(f.has(p)||O.has(p))continue;let E=p.startsWith(K);u.push({scope:p,kind:E?"unlisted":"other",name:E?"Unlisted node":p,path:p,depth:0,count:b(p)})}return{principal:l,tenant:e?.tenant??null,rows:u,groups:m,total:S,truncated:n?.has_more===!0,limit:o.limit,warnings:r,updatedAt:new Date().toISOString()}}function ft(e,{maxItems:t=100,maxChars:n=1e3}={}){let i=[];for(let r of e.rows)for(let o of e.groups[r.scope]||[]){if(i.length>=t)break;i.push({scope:r.kind==="personal"?"Personal":r.path||r.name,type:o.type,content:o.content.length>n?`${o.content.slice(0,n)}...`:o.content,created_at:o.created_at})}return{principal:e.principal,total:e.total,truncated:e.truncated||i.length<e.total,scopes:e.rows.map(({scope:r,kind:o,name:a,path:l,count:d})=>({scope:r,kind:o,name:a,path:l,count:d})),memories:i,warnings:e.warnings,referenceOnly:!0}}import{createReadStream as vt}from"node:fs";import{readdir as X,readFile as ht,stat as wt}from"node:fs/promises";import{createInterface as gt}from"node:readline";import{createHash as bt}from"node:crypto";import{homedir as yt}from"node:os";import{basename as xt,join as M,posix as kt,relative as _t,sep as St}from"node:path";var C=Object.freeze({sessions:100,selected:200,batchItems:50,batchBytes:240*1024,factBytes:16*1024,previewBytes:2048,timeoutMs:12e4}),Z=Object.freeze({copilot:Object.freeze({label:"GitHub Copilot",session:"github-copilot",memory:"copilot-cli-memory"}),claude:Object.freeze({label:"Claude Code",session:"claude-code",memory:"claude-code-memory"})}),ee=/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,Et=/"type"\s*:\s*"(?:session\.start|user\.message|assistant\.message)"/,A=e=>e!==null&&typeof e=="object"&&!Array.isArray(e);function N(e){if(typeof e!="string"||!Object.hasOwn(Z,e))throw new y("INVALID_PAYLOAD","Import source must be copilot or claude.");return e}function Ce(e=process.env){let t=e.HOME||e.USERPROFILE||yt();return{copilot:M(e.COPILOT_HOME||M(t,".copilot"),"session-state"),claude:M(e.CLAUDE_CONFIG_DIR||M(t,".claude"),"projects")}}function Q(e,t=130){let n=z(e,{maxBytes:C.previewBytes}).replace(/```[\s\S]*?```/g," ").replace(/`([^`]*)`/g,"$1").replace(/^\s{0,3}#{1,6}\s+/gm,"").replace(/\*\*([^*]*)\*\*/g,"$1").replace(/[*_>]/g," ").replace(/\s+/g," ").trim();return n.length>t?`${n.slice(0,t-3)}...`:n}async function*te(e,t){let n=vt(e,{encoding:"utf8"}),i=gt({input:n,crlfDelay:1/0});try{for await(let r of i){if(t&&!t(r))continue;let o=r.trim();if(o)try{let a=JSON.parse(o);A(a)&&(yield a)}catch{}}}finally{i.close(),n.destroy()}}async function Re(e){try{let t=await wt(e);return t.isFile()?t:null}catch{return null}}async function ne(e){try{return(await X(e,{withFileTypes:!0})).filter(t=>t.isDirectory()).map(t=>t.name)}catch{return[]}}var P=new Map;async function $e(e,t,n,i){let r=`${e}\0${t}`,o=P.get(r);if(o&&o.mtimeMs===n.mtimeMs&&o.size===n.size)return o.value;let a=await i();return P.delete(r),P.set(r,{mtimeMs:n.mtimeMs,size:n.size,value:a}),P.size>2e3&&P.delete(P.keys().next().value),a}async function Tt(e,t){let n="",i="",r=new Map,o=new Map;for await(let l of te(e,d=>Et.test(d))){let d=l.data;if(A(d)){if(l.type==="session.start")n=String(d.startTime||l.timestamp||""),A(d.context)&&(i=String(d.context.cwd||""));else if(l.type==="user.message")typeof d.interactionId=="string"&&typeof d.content=="string"&&d.content.trim()&&r.set(d.interactionId,{role:"user",content:d.content});else if(l.type==="assistant.message"){let m=d.interactionId;if(typeof m!="string"||!r.has(m)||typeof d.content!="string"||!d.content.trim())continue;let v=d.phase==="final_answer";if(o.get(m)?.final&&!v)continue;o.set(m,{role:"agent",content:d.content,final:v})}}}let a=[];for(let[l,d]of r){let m=o.get(l);m&&a.push({question:d,response:{role:m.role,content:m.content}})}return{session_id:t,start_time:n,cwd:i,turns:a}}async function Me(e){let t=[];for(let n of await ne(e)){if(!ee.test(n))continue;let i=M(e,n,"events.jsonl"),r=await Re(i);r&&t.push({id:n,file:i,info:r})}return t}async function It(e,t){let n=[];for await(let i of te(e,r=>r.includes("storeMemory"))){let r=i.data;if(i.type!=="tool.execution_complete"||!A(r)||!r.success)continue;let o=r.toolTelemetry;if(!A(o)||!A(o.properties)||o.properties.operation!=="storeMemory")continue;let a=o.restrictedProperties;!A(a)||typeof a.memoryFact!="string"||n.push({memory_id:String(i.id||""),session_id:t,fact:a.memoryFact})}return n}function At(e){return typeof e=="string"?e.trim():Array.isArray(e)?e.filter(t=>A(t)&&t.type==="text").map(t=>String(t.text||"").trim()).filter(Boolean).join(`
+`).trim():""}async function Ct(e,t){let n="",i="",r=null,o=null,a=[];for await(let l of te(e)){if(l.isSidechain||l.isMeta)continue;let d=l.message;if(l.type!=="user"&&l.type!=="assistant"||!A(d))continue;i=String(l.cwd||i);let m=String(l.timestamp||"");m&&(!n||m<n)&&(n=m);let v=At(d.content);if(v)if(l.type==="user"){if(typeof d.content!="string")continue;r&&o&&a.push({question:r,response:o}),r={role:"user",content:v},o=null}else r&&(o={role:"agent",content:v})}return r&&o&&a.push({question:r,response:o}),{session_id:t,start_time:n,cwd:i,turns:a}}async function Rt(e){let t=[];for(let n of await ne(e)){let i=[];try{i=await X(M(e,n),{withFileTypes:!0})}catch{continue}for(let r of i){if(!r.isFile()||!r.name.endsWith(".jsonl"))continue;let o=r.name.slice(0,-6);if(!ee.test(o))continue;let a=M(e,n,r.name),l=await Re(a);l&&t.push({id:o,file:a,info:l})}}return t}var $t=/^---\r?\n[\s\S]*?\r?\n---\r?\n?/;async function Le(e,t=[]){let n=[];try{n=await X(e,{withFileTypes:!0})}catch{return t}for(let i of n){let r=M(e,i.name);i.isDirectory()?await Le(r,t):i.isFile()&&i.name.endsWith(".md")&&t.push(r)}return t}async function Mt(e){let t=[];for(let n of await ne(e)){let i=M(e,n,"memory");for(let r of(await Le(i)).sort()){if(xt(r)==="MEMORY.md")continue;let o=(await ht(r,"utf8")).replace($t,"").trim();if(!o)continue;let a=_t(i,r).split(St).join(kt.sep);t.push({memory_id:`${n}:${a}`,session_id:n,fact:o})}}return t}async function Oe(e,t){return e==="claude"?Rt(t.claude):Me(t.copilot)}async function Ne(e,t){let n=e==="claude"?Ct:Tt;return $e(`${e}-session`,t.file,t.info,()=>n(t.file,t.id))}function Lt(e){let t=e.turns[0];return Q(t?t.question.content:"",72)||e.cwd.split(/[\\/]/).filter(Boolean).pop()||e.session_id}async function De(e,t,{limit:n=C.sessions}={}){N(e);let i=(await Oe(e,t)).sort((o,a)=>a.info.mtimeMs-o.info.mtimeMs),r=[];for(let o of i){if(r.length>=n)break;let a=await Ne(e,o);if(!a.turns.length)continue;let l=a.turns[a.turns.length-1];r.push({session_id:a.session_id,label:Lt(a),cwd:a.cwd,start_time:a.start_time,turn_count:a.turns.length,last_user_turn:Q(l.question.content),last_agent_turn:Q(l.response.content)})}return r}function Ot(e){if(!Array.isArray(e)||!e.length||e.length>C.selected||e.some(t=>typeof t!="string"||!ee.test(t)))throw new y("INVALID_PAYLOAD",`Select 1 to ${C.selected} listed sessions to import.`);return[...new Set(e)]}function*Pe(e,t,n){let i=[];for(let r of e)i.length&&(i.length>=t||Buffer.byteLength(JSON.stringify(n([...i,r])))>C.batchBytes)&&(yield n(i),i=[]),i.push(r);i.length&&(yield n(i))}async function He(e,t){let n=`mh-import-${bt("sha256").update(JSON.stringify(t)).digest("hex")}`,{data:i}=await e.json("/memory",{method:"POST",body:t,headers:{"Idempotency-Key":n},operation:"import",timeoutMs:C.timeoutMs});return i}function ze(e,t,n,i){e.batches+=1;let r=A(i)?i.result:null;A(r)&&Number.isSafeInteger(r.succeeded)?(e[t]+=r.succeeded,e.failed+=Number.isSafeInteger(r.failed)?r.failed:0,e.unknown+=Number.isSafeInteger(r.unknown)?r.unknown:0):e[t]+=n}async function je({gateway:e,source:t,ids:n,roots:i}){N(t);let r=Ot(n),o={source:t,sessions:0,messages:0,skipped:0,failed:0,unknown:0,batches:0};try{let a=new Map((await Oe(t,i)).map(l=>[l.id,l]));for(let l of r){let d=a.get(l);if(!d)continue;let m=await Ne(t,d);if(!m.turns.length)continue;let v=[];for(let b of m.turns)for(let u of[b.question,b.response]){let f=z(u.content);f?v.push({role:u.role,content:f,source:Z[t].session}):o.skipped+=1}if(!v.length)continue;o.sessions+=1;let S=`mh:import:${t}:${l}`;for(let b of Pe(v,C.batchItems,u=>({extract:!0,thread_id:S,items:u})))ze(o,"messages",b.items.length,await He(e,b))}}catch(a){return{...o,error:D(a)}}return o}async function Nt(e,t){if(e==="claude")return Mt(t.claude);let n=[];for(let i of await Me(t.copilot))n.push(...await $e("copilot-memories",i.file,i.info,()=>It(i.file,i.id)));return n}async function Be({gateway:e,source:t,roots:n}){N(t);let i={source:t,memories:0,skipped:0,failed:0,unknown:0,batches:0};try{let r=[],o=new Set;for(let l of await Nt(t,n)){let d=z(l.fact,{maxBytes:C.factBytes});if(!d||o.has(d)){i.skipped+=1;continue}o.add(d),r.push({role:"user",content:d,source:Z[t].memory})}let a=`mh:import-memories:${t}`;for(let l of Pe(r,C.batchItems,d=>({extract:!0,thread_id:a,items:d})))ze(i,"memories",l.items.length,await He(e,l))}catch(r){return{...i,error:D(r)}}return i}var Fe=`
+<section id="reviewView" hidden aria-label="Feedback">
+  <h2>Feedback</h2>
+  <p>Internal dogfooding telemetry is on by default unless you opted out. New metadata
+  and explicit feedback are retained for 60 days. Your prompts, answers and memory text
+  are not copied into feedback telemetry.</p>
+  <details><summary>Collection and retention notice</summary><p id="reviewNotice"></p></details>
+  <p id="reviewStatus" role="status" aria-live="polite">Loading participation...</p>
+  <button id="reviewPreference" type="button" disabled>Loading participation...</button>
+  <button id="reviewRefresh" type="button">Refresh recalls</button>
+  <label class="checkline"><input id="invitationPreference" type="checkbox" checked />
+    Occasionally invite me to rate a recall on this installation</label>
+  <p class="hint">Only while this canvas is open. At most once per 24 hours; dismissing pauses invitations for 7 days.
+    This preference does not opt you out of telemetry.</p>
+  <p id="reviewError" class="err" role="alert"></p>
+  <div class="review-grid">
+    <div><h3>Your recorded recalls</h3><div id="recallList"></div>
+      <button id="recallMore" type="button" hidden>Load more</button></div>
+    <div id="recallDetail" aria-live="polite">Select a recall to review it.</div>
+  </div>
+</section>`,Ue=`
+  const review = { session: null, enrollment: null, cursor: null, items: [], detail: null,
+    busy: false, pending: null, edits: new Map(), needsRefresh: false };
+  const feedbackValues = ${JSON.stringify(be)};
+  const feedbackQuestions = {
+    benefit: { title: 'Did this recall help with your task?', values: {
+      helped: 'Helped', no_difference: 'No noticeable difference', harmed: 'Made things worse', unsure: 'Not sure' } },
+    correctness: { title: 'Is this information still accurate?', values: {
+      correct: 'Correct', outdated: 'Outdated', incorrect: 'Incorrect', unsure: 'Not sure' } },
+    applicability: { title: 'Does it apply to this task or context?', values: {
+      applies: 'Applies', partly_applies: 'Partly applies', does_not_apply: 'Does not apply', unsure: 'Not sure' } },
+    relevance: { title: 'Was it relevant to what you were doing?', values: {
+      relevant: 'Relevant', partly_relevant: 'Partly relevant', irrelevant: 'Irrelevant', unsure: 'Not sure' } },
+  };
+  const labelText = value => String(value ?? '').replaceAll('_', ' ');
+  const reviewTime = value => new Date(value).toLocaleString();
+
+  function reviewError(error) {
+    $('reviewError').textContent = error?.message || String(error || '');
+  }
+
+  async function reviewGet(path) {
+    const response = await fetch(path, { headers: HEADERS, cache: 'no-store' });
+    if (!response.ok) throw new Error(await errorText(response));
+    return response.json();
+  }
+
+  async function reviewPost(path, body) {
+    const response = await fetch(path, { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body) });
+    const data = await response.json();
+    if (!response.ok) {
+      const error = new Error(data.message || 'The review request failed.');
+      error.status = response.status; error.code = data.error; throw error;
+    }
+    return data;
+  }
+
+  function participation() {
+    const value = review.enrollment;
+    $('reviewPreference').disabled = review.busy || !value || (!value.available && !value.enrolled);
+    $('reviewPreference').textContent = value?.enrolled ? 'Opt out of new collection' : 'Re-enable collection';
+    $('reviewStatus').textContent = !value ? 'Participation could not be loaded.'
+      : value.local_collection_paused && value.enrolled
+        ? 'Local collection is paused. Server opt-out is unconfirmed; retry Opt out.'
+        : !value.available ? 'Collection is unavailable for this account.'
+        : value.enrolled ? 'Collection is on. You can opt out below without disabling memories.'
+        : 'Collection is off. Previously recorded metadata keeps its original expiry.';
+  }
+
+  async function reviewStatus() {
+    const data = await reviewGet('/api/telemetry/status');
+    if (review.session && (review.session !== data.session
+      || review.enrollment?.epoch !== data.enrollment.epoch
+      || !data.enrollment.enrolled || !data.enrollment.available || data.enrollment.local_collection_paused)) {
+      clearInvitation();
+      review.items = []; review.detail = null; review.pending = null; review.cursor = null;
+      review.edits.clear();
+      $('recallList').textContent = '';
+      $('recallDetail').textContent = 'Sign-in or participation changed. Select a recall again.';
+    }
+    review.session = data.session;
+    review.enrollment = data.enrollment;
+    invitationSettings(data.invitations);
+    $('reviewNotice').textContent = data.notice + '\\n\\n' + data.opt_out;
+    participation();
+  }
+
+  function recallList() {
+    $('recallList').innerHTML = review.items.length ? review.items.map(item =>
+      '<button type="button" data-recall="' + esc(item.retrieval_id) + '">' +
+      esc(reviewTime(item.recorded_at)) + '<br>' + esc(item.client?.trigger || 'Unknown source') +
+      ' - ' + esc(item.count) + ' result(s)' + (item.feedback ? ' - rated' : '') + '</button>').join('')
+      : '<p>No recorded recalls are available. Earlier unrecorded searches cannot be reconstructed.</p>';
+    $('recallMore').hidden = !review.cursor;
+  }
+
+  async function loadRecallPage(more = false) {
+    const data = await reviewPost('/api/telemetry/recalls', { session: review.session,
+      ...(more && review.cursor ? { cursor: review.cursor } : {}) });
+    const items = more ? [...review.items, ...data.items] : data.items;
+    review.items = [...new Map(items.map(item => [item.retrieval_id, item])).values()];
+    review.cursor = data.cursor;
+    recallList();
+  }
+
+  function memoryText(memory) {
+    for (const key of ['content', 'text', 'summary']) if (typeof memory?.[key] === 'string') {
+      const conflicts = memory.conflicts_with;
+      return memory[key] + (Array.isArray(conflicts) && conflicts.length
+        ? '\\n\\nConflict notes:\\n' + JSON.stringify(conflicts, null, 2) : '');
+    }
+    return memory ? JSON.stringify(memory, null, 2) : '';
+  }
+
+  const answerKey = (target, dimension) => target + ':' + dimension;
+  const questionId = (target, dimension) => 'question-' + target + '-' + dimension;
+  function savedAnswer(target, dimension) {
+    return review.detail?.feedback?.labels.find(label => label.target === target && label.dimension === dimension);
+  }
+  function selectedAnswer(target, dimension) {
+    const edit = review.edits.get(answerKey(target, dimension));
+    return edit ? edit.action === 'set' ? edit : null : savedAnswer(target, dimension);
+  }
+  function stageAnswer(label) {
+    const saved = savedAnswer(label.target, label.dimension);
+    const same = label.action === 'withdraw' ? !saved : saved?.value === label.value
+      && JSON.stringify([...(saved.reasons || [])].sort()) === JSON.stringify([...(label.reasons || [])].sort());
+    if (same) review.edits.delete(answerKey(label.target, label.dimension));
+    else review.edits.set(answerKey(label.target, label.dimension), label);
+  }
+  function feedbackAllowed() {
+    return review.detail?.feedback_allowed && review.enrollment?.enrolled && review.enrollment?.available
+      && !review.enrollment.local_collection_paused && review.detail.epoch === review.enrollment.epoch;
+  }
+  function answerTools(target, dimension) {
+    const saved = savedAnswer(target, dimension);
+    const edit = review.edits.get(answerKey(target, dimension));
+    const attrs = ' data-target="' + target + '" data-dimension="' + dimension + '"';
+    return '<div class="answer-status">' +
+      (edit ? '<span>' + (edit.action === 'withdraw' ? 'Will be withdrawn when you submit.' : 'Not submitted yet.') + '</span> ' +
+        (saved ? '<button type="button" data-undo-answer="true"' + attrs + '>Undo change</button>' : '') :
+        saved ? '<span>Saved answer</span> ' : '<span>Optional - leave unanswered to skip</span>') +
+      (selectedAnswer(target, dimension) ? '<button type="button" data-clear-answer="true"' + attrs + '>' +
+        (saved ? 'Withdraw saved rating' : 'Clear answer') + '</button>' : '') + '</div>';
+  }
+  function questionContents(target, dimension) {
+    const answer = selectedAnswer(target, dimension);
+    const id = questionId(target, dimension);
+    const attrs = ' data-target="' + target + '" data-dimension="' + dimension + '"';
+    return '<legend>' + feedbackQuestions[dimension].title + '</legend><div class="answer-choices">' +
+      Object.entries(feedbackQuestions[dimension].values).map(([value, title]) =>
+        '<label class="answer-choice"><input type="radio" data-answer="true"' + attrs +
+        ' name="' + id + '" id="' + id + '-' + value + '" value="' + value + '"' +
+        (answer?.value === value ? ' checked' : '') + ' /><span>' + title + '</span></label>').join('') + '</div>' +
+      (answer && feedbackValues[dimension][answer.value].length
+        ? '<div class="answer-reasons" role="group" aria-label="Optional reasons"><p>Why? Optional - choose up to 3.</p>' +
+          feedbackValues[dimension][answer.value].map(reason => {
+            const checked = answer.reasons?.includes(reason);
+            const capped = !checked && answer.reasons?.length >= 3;
+            return '<label><input type="checkbox" data-reason="true"' + attrs + ' id="' + id + '-' + reason +
+              '" value="' + reason + '"' + (checked ? ' checked' : '') +
+              (capped ? ' disabled data-limit-disabled="true"' : '') + ' />' + esc(labelText(reason)) + '</label>';
+          }).join('') + '</div>' : '') + answerTools(target, dimension);
+  }
+  function question(target, dimension) {
+    return '<fieldset class="feedback-question" id="' + questionId(target, dimension) + '">' +
+      questionContents(target, dimension) + '</fieldset>';
+  }
+  function updateQuestion(target, dimension) {
+    const focused = document.activeElement?.id;
+    const node = $(questionId(target, dimension));
+    if (node) node.innerHTML = questionContents(target, dimension);
+    else {
+      const tools = $('saved-tools-' + target + '-' + dimension);
+      if (tools) tools.innerHTML = answerTools(target, dimension);
+    }
+    if (focused) $(focused)?.focus();
+    feedbackBusy();
+  }
+
+  function renderRecall() {
+    const detail = review.detail;
+    if (!detail) return;
+    const allowed = feedbackAllowed();
+    const labels = detail.feedback?.labels || [];
+    const states = {
+      unchanged: 'Unchanged since this recall', changed: 'Changed since this recall',
+      superseded: 'Superseded since this recall', unavailable: 'Unavailable',
+    };
+    $('recallDetail').innerHTML = '<h3>Recall from ' + esc(reviewTime(detail.recorded_at)) + '</h3>' +
+      (allowed ? '<form id="feedbackForm"><div class="feedback-intro"><h3>A quick check, if you have a moment</h3>' +
+        '<p>Answer as much or as little as you like. One answer is useful; every question is optional.</p></div>' +
+        question('retrieval', 'benefit') +
+        '<p id="feedbackHarmHint" class="hint" hidden>If you can, rate a memory below to help us understand what went wrong. This is optional.</p>' +
+        '<div class="feedback-submit-bar"><p id="feedbackDraftStatus" role="status" aria-live="polite"></p>' +
+        '<p id="feedbackMessage" role="status" aria-live="polite"></p>' +
+        '<button id="feedbackSubmit" class="primary" type="submit" disabled>Submit feedback</button>' +
+        '<button id="feedbackDiscard" type="button" hidden>Discard changes</button>' +
+        '<button id="feedbackRetry" type="button" hidden>Retry the same submission</button></div>' :
+        '<p>This recall is read-only: collection is off/unavailable, it belongs to an earlier epoch, it failed, or its revision limit was reached.</p>') +
+      '<details><summary>Recall details and privacy</summary><p>Source (client-reported): ' + esc(detail.client?.name || 'Unknown') + ' / ' +
+      esc(detail.client?.trigger || 'Unknown') + '. Outcome: ' + esc(detail.final_outcome || detail.status) +
+      '. Expires: ' + esc(reviewTime(detail.expires_at)) + '.</p>' +
+      '<p>Supplied means added to the conversation, not proof the agent used it. Review text is read with your current access; no historical copy is kept.</p></details>' +
+      '<h3 class="feedback-memory-heading">' + (detail.items.length ? 'Your recalled memories' : 'No memories were returned') + '</h3>' +
+      (allowed && detail.items.length ? '<p class="hint">Want to tell us more? Expand any memory to rate its accuracy, applicability and relevance.</p>' : '') +
+      detail.items.map(item => '<article class="card"><h3>Memory ' + item.rank + ' - ' + esc(states[item.memory_state]) +
+        '</h3><p>Position: ' + esc(item.position) + '. Delivery: ' +
+        esc(item.supplied === null ? 'unknown (no delivery report)' : item.supplied) +
+        (item.omit_reason ? ' (' + esc(labelText(item.omit_reason)) + ')' : '') + '.</p>' +
+        (item.memory ? '<p><b>' + (item.memory_state === 'unchanged' ? 'Unchanged text' : 'Current text, NOT the recalled version') +
+          '</b></p><pre>' + esc(memoryText(item.memory)) + '</pre>' : '') +
+        (['changed', 'superseded'].includes(item.memory_state) && !item.memory
+          ? '<button type="button" data-current="true">Show current text (not the recalled version)</button>' : '') +
+        (item.successor_id ? '<p>A readable successor exists: ' + esc(item.successor_id) + '</p>' : '') +
+        (item.memory_state !== 'unchanged' ? '<p>New result ratings are unavailable because the original text cannot be verified.</p>' : '') +
+        (allowed && item.memory_state === 'unchanged' ? '<details class="memory-questions"' +
+          (['correctness', 'applicability', 'relevance'].some(dimension => review.edits.has(answerKey(item.rank, dimension))) ? ' open' : '') +
+          '><summary>Rate this memory <span class="hint">- accuracy, applicability &amp; relevance' +
+          (labels.some(label => label.target === item.rank) ? ' (saved answers inside)' : '') + '</span></summary>' +
+          ['correctness', 'applicability', 'relevance'].map(dimension => question(item.rank, dimension)).join('') + '</details>' : '') +
+        '</article>').join('') +
+      (labels.some(label => !allowed || (label.target !== 'retrieval'
+        && detail.items.find(item => item.rank === label.target)?.memory_state !== 'unchanged')) ? '<h3>Previously saved ratings</h3>' : '') +
+      labels.filter(label => !allowed || (label.target !== 'retrieval'
+        && detail.items.find(item => item.rank === label.target)?.memory_state !== 'unchanged')).map(label => '<div><p>' +
+        esc(label.target === 'retrieval' ? 'Whole recall' : 'Memory ' + label.target) +
+        ': ' + esc(label.dimension) + ' - ' + esc(labelText(label.value)) +
+        (label.reasons?.length ? ' (' + esc(label.reasons.map(labelText).join(', ')) + ')' : '') +
+        '</p>' + (allowed ? '<div id="saved-tools-' + label.target + '-' + label.dimension + '">' +
+          answerTools(label.target, label.dimension) + '</div>' : '') + '</div>').join('') +
+      '<details><summary>How your feedback is handled</summary>' +
+      '<p>Only answers you choose are submitted, as UI-attested feedback. Nothing changes your memories or their ranking. ' +
+      'Leaving a question untouched keeps any saved rating; use Withdraw to remove one. Up to 20 revisions are retained.</p>' +
+      (detail.feedback ? '<p>' + esc(detail.feedback.revisions_left) + ' revisions left. Feedback expires ' +
+        esc(reviewTime(detail.feedback.expires_at)) + '. Withdrawal removes the active rating; previously exported versions remain until that expiry.</p>' :
+        '<p>Feedback expires 60 days after your first submission. Changes do not restart expiry.</p>') + '</details>' +
+      (allowed ? '</form>' : '') +
+      (allowed ? '' : '<p id="feedbackMessage" role="status" aria-live="polite"></p>' +
+        '<button id="feedbackRetry" type="button" hidden>Retry the same submission</button>');
+    if (allowed) {
+      $('feedbackForm').onsubmit = event => {
+        event.preventDefault();
+        submitFeedback();
+      };
+      $('feedbackDiscard').onclick = () => {
+        if (review.busy || review.pending) return;
+        review.edits.clear();
+        renderRecall();
+      };
+    }
+    $('feedbackRetry').onclick = () => sendFeedback();
+    feedbackBusy();
+  }
+
+  function feedbackBusy() {
+    for (const element of $('recallDetail').querySelectorAll('button, input, select')) {
+      element.disabled = review.busy || Boolean(review.pending) || review.needsRefresh || element.dataset.limitDisabled === 'true';
+    }
+    if ($('feedbackRetry')) {
+      $('feedbackRetry').hidden = !review.pending;
+      $('feedbackRetry').disabled = review.busy;
+    }
+    const blocked = review.busy || Boolean(review.pending) || review.edits.size > 0;
+    $('reviewRefresh').disabled = blocked;
+    $('recallMore').disabled = blocked;
+    for (const button of $('recallList').querySelectorAll('button')) button.disabled = blocked;
+    if ($('feedbackSubmit')) $('feedbackSubmit').disabled = review.busy || Boolean(review.pending) || review.needsRefresh || !review.edits.size;
+    if ($('feedbackDiscard')) $('feedbackDiscard').hidden = !review.edits.size || Boolean(review.pending);
+    if ($('feedbackDraftStatus')) $('feedbackDraftStatus').textContent = review.pending ? 'Waiting for confirmation. Your selected answers are kept for retry.'
+      : review.edits.size ? review.edits.size + (review.edits.size === 1 ? ' change ready to save.' : ' changes ready to save.')
+        : 'Choose any answer. Nothing is sent until you submit.';
+    if ($('feedbackHarmHint')) $('feedbackHarmHint').hidden = selectedAnswer('retrieval', 'benefit')?.value !== 'harmed';
+  }
+
+  async function openRecall(id, includeCurrent = false) {
+    if (review.busy || review.pending) return;
+    if (review.edits.size && id !== review.detail?.retrieval_id) {
+      reviewError(new Error('Submit or discard your changes before opening another recall.'));
+      return false;
+    }
+    const previous = review.detail;
+    const previousSession = review.session;
+    review.busy = true; feedbackBusy(); reviewError('');
+    try {
+      await reviewStatus();
+      const detail = await reviewPost('/api/telemetry/recall', {
+        session: review.session, retrieval_id: id, include_current: includeCurrent,
+      });
+      if (previous?.retrieval_id !== id || previousSession !== review.session || previous.epoch !== detail.epoch) review.edits.clear();
+      else if (previous.feedback?.revision !== detail.feedback?.revision) {
+        if (review.edits.size) reviewError(new Error('Saved ratings changed elsewhere. Your draft was cleared; review the updated answers.'));
+        review.edits.clear();
+      }
+      review.detail = detail;
+      if (!feedbackAllowed()) review.edits.clear();
+      for (const [key, label] of review.edits) {
+        if (label.action === 'set' && label.target !== 'retrieval'
+          && detail.items.find(item => item.rank === label.target)?.memory_state !== 'unchanged') {
+          review.edits.delete(key);
+          reviewError(new Error('A memory changed or is unavailable. Its unsaved rating was cleared to avoid rating the wrong version.'));
+        }
+      }
+      review.needsRefresh = false;
+      renderRecall();
+      return true;
+    } catch (error) {
+      review.detail = null;
+      review.edits.clear();
+      $('recallDetail').textContent = 'Recall could not be loaded.';
+      reviewError(error);
+      return false;
+    } finally { review.busy = false; participation(); feedbackBusy(); }
+  }
+
+  function submitFeedback() {
+    if (review.busy || review.pending || review.needsRefresh || !feedbackAllowed() || !review.edits.size) return;
+    review.pending = { session: review.session, retrieval_id: review.detail.retrieval_id,
+      event: { event_id: crypto.randomUUID(), epoch: review.detail.epoch, surface: 'review_canvas',
+        attestation: 'client_ui', occurred_at: new Date().toISOString(), labels: [...review.edits.values()] } };
+    return sendFeedback();
+  }
+
+  async function sendFeedback() {
+    if (review.busy || !review.pending) return;
+    review.busy = true; participation(); feedbackBusy(); reviewError('');
+    $('feedbackMessage').textContent = 'Submitting...';
+    const pending = review.pending;
+    let saved = false;
+    try {
+      const ack = await reviewPost('/api/telemetry/feedback', pending);
+      if (!['recorded', 'duplicate'].includes(ack.status) || ack.event_id !== pending.event.event_id) {
+        throw new Error('The submission was not acknowledged. Retry the same submission.');
+      }
+      saved = true; review.pending = null; review.edits.clear(); review.needsRefresh = true;
+      review.detail = await reviewPost('/api/telemetry/recall', {
+        session: review.session, retrieval_id: pending.retrieval_id, include_current: false,
+      });
+      review.needsRefresh = false;
+      renderRecall();
+      $('feedbackMessage').textContent = 'Thank you! Your feedback is saved. Only your latest answers count.';
+    } catch (error) {
+      if (!saved && ([400, 401, 403, 404, 413, 422].includes(error.status)
+        || (error.status === 409 && error.code !== 'retrieval_not_ready')
+        || error.code === 'TELEMETRY_STATE_CHANGED')) {
+        review.pending = null; review.edits.clear(); review.needsRefresh = true;
+      }
+      $('feedbackMessage').textContent = saved ? 'Saved, but the updated recall could not be loaded. Refresh to see it.'
+        : review.pending ? 'Submission not confirmed. Retry uses the same event ID; no automatic retry is sent.'
+          : 'Feedback was not accepted. Refresh before trying again.';
+      reviewError(error);
+    } finally { review.busy = false; participation(); feedbackBusy(); }
+  }
+
+  async function refreshReview() {
+    if (review.busy || review.pending || review.edits.size) return;
+    review.busy = true; participation(); reviewError('');
+    try {
+      await reviewStatus();
+      review.detail = null;
+      review.needsRefresh = false;
+      $('recallDetail').textContent = 'Select a recall to review it.';
+      await loadRecallPage();
+    }
+    catch (error) {
+      review.enrollment = null; review.session = null; review.pending = null;
+      review.edits.clear();
+      review.detail = null; review.items = []; review.cursor = null;
+      $('recallList').textContent = '';
+      $('recallDetail').textContent = 'Refresh participation before reviewing recalls.';
+      reviewError(error);
+    } finally { review.busy = false; participation(); feedbackBusy(); }
+  }
+
+  $('recallList').addEventListener('click', event => {
+    const button = event.target.closest('[data-recall]');
+    if (button) openRecall(button.getAttribute('data-recall'));
+  });
+  $('recallDetail').addEventListener('click', event => {
+    const current = event.target.closest('[data-current]');
+    if (current && review.detail) { openRecall(review.detail.retrieval_id, true); return; }
+    if (review.busy || review.pending || review.needsRefresh || !feedbackAllowed()) return;
+    const control = event.target.closest('[data-clear-answer], [data-undo-answer]');
+    if (control) {
+      const target = control.dataset.target === 'retrieval' ? 'retrieval' : Number(control.dataset.target);
+      const dimension = control.dataset.dimension;
+      if (control.hasAttribute('data-undo-answer')) review.edits.delete(answerKey(target, dimension));
+      else stageAnswer({ target, dimension, action: 'withdraw' });
+      updateQuestion(target, dimension);
+    }
+  });
+  $('recallDetail').addEventListener('change', event => {
+    if (review.busy || review.pending || review.needsRefresh || !feedbackAllowed()) return;
+    const control = event.target.closest('[data-answer], [data-reason]');
+    if (!control) return;
+    const target = control.dataset.target === 'retrieval' ? 'retrieval' : Number(control.dataset.target);
+    const dimension = control.dataset.dimension;
+    const current = selectedAnswer(target, dimension);
+    if (control.hasAttribute('data-answer')) {
+      stageAnswer({ target, dimension, action: 'set', value: control.value,
+        reasons: current?.value === control.value ? [...(current.reasons || [])] : [] });
+    } else {
+      if (!current) return;
+      const reasons = new Set(current.reasons || []);
+      if (control.checked) reasons.add(control.value); else reasons.delete(control.value);
+      if (reasons.size > 3) {
+        control.checked = false;
+        reviewError(new Error('Choose at most three reasons.'));
+        return;
+      }
+      stageAnswer({ target, dimension, action: 'set', value: current.value, reasons: [...reasons] });
+    }
+    updateQuestion(target, dimension);
+  });
+  $('recallMore').addEventListener('click', async () => {
+    if (review.busy || review.pending || review.edits.size || !review.cursor) return;
+    review.busy = true; feedbackBusy(); reviewError('');
+    try { await loadRecallPage(true); } catch (error) { reviewError(error); }
+    finally { review.busy = false; participation(); feedbackBusy(); }
+  });
+  $('reviewRefresh').addEventListener('click', refreshReview);
+  $('recalls').addEventListener('click', () => {
+    $('memoryView').hidden = true;
+    $('reviewView').hidden = false;
+    refreshReview();
+  });
+  $('memories').addEventListener('click', () => {
+    $('reviewView').hidden = true;
+    $('memoryView').hidden = false;
+  });
+  $('reviewPreference').addEventListener('click', async () => {
+    if (review.busy || !review.enrollment || !review.session) return;
+    review.busy = true; participation(); reviewError('');
+    try {
+      const data = await reviewPost('/api/telemetry/preference', {
+        session: review.session, action: review.enrollment.enrolled ? 'disable' : 'enable',
+      });
+      review.enrollment = data.enrollment;
+      clearInvitation();
+      review.pending = null;
+      review.edits.clear();
+      review.detail = null;
+      $('recallDetail').textContent = 'Participation changed. Select a recall again.';
+    } catch (error) {
+      reviewError(error);
+      review.pending = null;
+      review.edits.clear();
+      review.detail = null;
+      $('recallDetail').textContent = 'Refresh participation before submitting feedback.';
+    } finally { review.busy = false; participation(); feedbackBusy(); }
+  });
+`;var Ve=`
+<section id="invitationBanner" class="notice" hidden aria-label="Optional recall feedback">
+  <h2>Was this recall helpful?</h2>
+  <p id="invitationSummary"></p>
+  <p>Review this specific recall and choose whether to rate it. No rating is submitted automatically.</p>
+  <p>As part of internal dogfooding, whether this invitation is shown, opened or dismissed is collected as metadata
+    for 60 days. See the Feedback tab for the full notice and telemetry opt-out.</p>
+  <button id="invitationReview" type="button" disabled>Review</button>
+  <button id="invitationDismiss" type="button" disabled>Dismiss for 7 days</button>
+  <button id="invitationStop" type="button">Stop asking on this installation</button>
+</section>
+<p id="invitationError" class="err" role="status" aria-live="polite"></p>`,qe=`
+  const invitation = { current: null, busy: false, lastCheck: 0, observer: null, timer: null, shown: false };
+
+  function clearInvitation() {
+    invitation.observer?.disconnect();
+    clearTimeout(invitation.timer);
+    invitation.current = null;
+    invitation.shown = false;
+    $('invitationBanner').hidden = true;
+  }
+
+  function invitationError(error) {
+    $('invitationError').textContent = error?.message || String(error || '');
+  }
+
+  function invitationSettings(data) {
+    $('invitationPreference').checked = data.enabled;
+  }
+
+  async function invitationEvent(action, current) {
+    return reviewPost('/api/telemetry/invitation-event', {
+      session: current.session, invitation_id: current.invitation_id, action,
+    });
+  }
+
+  async function showInvitationWhenVisible(entries) {
+    const current = invitation.current;
+    if (!current || invitation.shown || invitation.busy || document.hidden
+      || !entries.some(entry => entry.isIntersecting && entry.intersectionRatio >= 0.5)) return;
+    invitation.busy = true;
+    try {
+      await invitationEvent('shown', current);
+      if (invitation.current !== current) return;
+      invitation.shown = true;
+      invitation.observer.disconnect();
+      $('invitationReview').disabled = false;
+      $('invitationDismiss').disabled = false;
+    } catch (error) {
+      clearInvitation();
+      invitationError(error);
+    } finally { invitation.busy = false; }
+  }
+
+  async function checkInvitation() {
+    if (document.hidden || invitation.busy || invitation.current || review.busy || review.pending || review.edits?.size
+      || Date.now() - invitation.lastCheck < 60000) return;
+    invitation.lastCheck = Date.now();
+    invitation.busy = true;
+    try {
+      // Separate from reviewStatus: background invitations must never change an
+      // in-progress review selection or pending rating.
+      const status = await reviewGet('/api/telemetry/status');
+      invitationSettings(status.invitations);
+      const data = await reviewPost('/api/telemetry/invitation', { session: status.session });
+      if (!data.invitation || document.hidden || review.busy || review.pending || review.edits?.size) return;
+      const current = { ...data.invitation, session: status.session };
+      invitation.current = current;
+      invitation.shown = false;
+      $('invitationSummary').textContent = reviewTime(current.recorded_at) + ' - ' + current.count + ' result(s).';
+      $('invitationReview').disabled = true;
+      $('invitationDismiss').disabled = true;
+      $('invitationBanner').hidden = false;
+      invitation.observer = new IntersectionObserver(showInvitationWhenVisible, { threshold: 0.5 });
+      invitation.observer.observe($('invitationBanner'));
+      invitation.timer = setTimeout(clearInvitation, Math.max(0, Date.parse(current.expires_at) - Date.now()));
+    } catch (error) {
+      clearInvitation();
+      invitationError(error);
+    } finally { invitation.busy = false; }
+  }
+
+  $('invitationReview').addEventListener('click', async () => {
+    const current = invitation.current;
+    if (!current || !invitation.shown || invitation.busy || review.busy || review.pending || review.edits?.size) return;
+    invitation.busy = true;
+    invitationError('');
+    try {
+      $('memoryView').hidden = true;
+      $('reviewView').hidden = false;
+      if (await openRecall(current.retrieval_id)) await invitationEvent('opened', current);
+    } catch (error) { invitationError(error); }
+    finally { clearInvitation(); invitation.busy = false; }
+  });
+  $('invitationDismiss').addEventListener('click', async () => {
+    const current = invitation.current;
+    if (!current || !invitation.shown || invitation.busy) return;
+    invitation.busy = true;
+    try { await invitationEvent('dismissed', current); }
+    catch (error) { invitationError(error); }
+    finally { clearInvitation(); invitation.busy = false; }
+  });
+  async function changeInvitationPreference(enabled) {
+    if (invitation.busy) return;
+    invitation.busy = true;
+    $('invitationPreference').disabled = true;
+    invitationError('');
+    try {
+      const status = await reviewGet('/api/telemetry/status');
+      const data = await reviewPost('/api/telemetry/invitation-preference', { session: status.session, enabled });
+      invitationSettings(data);
+      if (data.warning) invitationError(data.warning);
+      clearInvitation();
+    } catch (error) {
+      $('invitationPreference').checked = !enabled;
+      invitationError(error);
+    } finally { invitation.busy = false; $('invitationPreference').disabled = false; }
+  }
+  $('invitationStop').addEventListener('click', () => changeInvitationPreference(false));
+  $('invitationPreference').addEventListener('change', () => changeInvitationPreference($('invitationPreference').checked));
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearInvitation();
+    else checkInvitation();
+  });
+  $('refresh').addEventListener('click', checkInvitation);
+  checkInvitation();
+`;function Ye({token:e,nonce:t}){return`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -106,6 +684,36 @@ import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g a
   .modal .selall { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 8px; }
   .modal .selall input { width: auto; }
   .modal .selall label { margin: 0; }
+  [hidden] { display: none !important; }
+  .review-grid { display: grid; grid-template-columns: minmax(210px, 30%) 1fr; gap: 18px; margin-top: 18px; }
+  #reviewView { overflow: visible; }
+  #reviewView button { margin: 4px 0; }
+  #reviewView > button { width: auto; margin-right: 8px; }
+  #invitationBanner { margin: 12px 16px; }
+  #invitationBanner button { width: auto; margin: 4px; }
+  #invitationError { margin: 0 16px; }
+  #recallList button { text-align: left; }
+  #recallDetail select { margin-bottom: 8px; }
+  .feedback-intro { margin: 14px 0; }
+  .feedback-intro p, .answer-reasons p { margin: 6px 0; }
+  .feedback-question { min-width: 0; margin: 16px 0; padding: 12px; border: 1px solid var(--mh-border); border-radius: 10px; }
+  .feedback-question legend { padding: 0 4px; font-weight: var(--font-weight-semibold, 600); }
+  .answer-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+  .answer-choice { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px;
+    border: 1px solid var(--mh-border); border-radius: 8px; cursor: pointer; color: var(--mh-fg); font-size: inherit; }
+  .answer-choice:has(input:checked) { border-color: var(--mh-accent); background: color-mix(in srgb, var(--mh-accent) 14%, var(--mh-bg)); }
+  .answer-choice:has(input:focus-visible) { outline: 2px solid var(--mh-accent); outline-offset: 2px; }
+  .answer-choice input, .answer-reasons input { width: auto; margin: 0; accent-color: var(--mh-accent); }
+  .answer-reasons { margin-top: 12px; }
+  .answer-reasons label { display: inline-flex; gap: 6px; align-items: center; margin: 4px 12px 4px 0; cursor: pointer; }
+  .answer-status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--mh-muted); }
+  .answer-status button { width: auto; padding: 4px 8px; background: transparent; }
+  .feedback-memory-heading { margin-top: 20px; }
+  .memory-questions > summary { padding: 8px 0; font-size: 14px; color: var(--mh-fg); }
+  .feedback-submit-bar { position: sticky; top: 0; z-index: 1; padding: 10px 0; background: var(--mh-bg); border-bottom: 1px solid var(--mh-border); }
+  .feedback-submit-bar button { width: auto; margin-right: 8px !important; }
+  #feedbackDraftStatus { margin: 4px 0; font-size: 12px; color: var(--mh-muted); }
+  @media (max-width: 600px) { .review-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -113,10 +721,13 @@ import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g a
   <h1>Memory House</h1>
   <span id="who" class="who">Loading...</span>
   <span class="spacer"></span>
+  <button id="memories" type="button">Memories</button>
+  <button id="recalls" type="button">Feedback</button>
   <button id="import" class="primary" type="button">Import memory</button>
   <button id="refresh" type="button">Refresh</button>
 </header>
-<main>
+${Ve}
+<main id="memoryView">
   <aside>
     <label>Signed-in principal</label><div id="principal" class="identity">Loading...</div>
     <label>Tenant</label><div id="tenant" class="identity">Loading...</div>
@@ -159,6 +770,7 @@ import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g a
     <div id="cards"></div>
   </section>
 </main>
+${Fe}
 
 <div id="overlay" class="overlay" role="dialog" aria-modal="true" aria-label="Import memory">
   <div class="modal" id="modal"></div>
@@ -200,7 +812,7 @@ import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g a
     const other = data.rows.filter(row => row.kind === 'unlisted' || row.kind === 'other');
     let html = '<div class="tree-section">Personal</div>' + (personal.length ? personal.map(button).join('') : '<div class="hint">No personal scope yet.</div>');
     html += '<div class="tree-section">Shared hierarchy</div>' + (shared.length ? shared.map(button).join('')
-      : '<div class="hint">You are not a member or curator of any hierarchy node yet.</div>');
+      : '<div class="hint">You are not a member of any Learning Space yet.</div>');
     if (other.length) html += '<div class="tree-section">Other scopes</div>' + other.map(button).join('');
     return html;
   }
@@ -329,8 +941,8 @@ import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g a
 
   // Import: choose the source agent, then what to import from it.
   const SOURCES = {
-    copilot: { label: 'GitHub Copilot', memory: 'Copilot memories', memoryText: 'Facts Copilot saved with its memory tool on this device.', sessionText: 'Pick recent Copilot sessions; their turns go through Memory House extraction.' },
-    claude: { label: 'Claude Code', memory: 'Claude memories', memoryText: 'Memory files Claude Code saved for your projects.', sessionText: 'Pick recent Claude Code sessions; their turns go through Memory House extraction.' },
+    copilot: { label: 'GitHub Copilot', memory: 'Copilot memories', memoryText: 'Facts Copilot saved with its memory tool on this device; they go through Memory House extraction.', sessionText: 'Pick recent Copilot sessions; their turns go through Memory House extraction.' },
+    claude: { label: 'Claude Code', memory: 'Claude memories', memoryText: 'Memory files Claude Code saved for your projects; they go through Memory House extraction.', sessionText: 'Pick recent Claude Code sessions; their turns go through Memory House extraction.' },
   };
   const overlay = $('overlay');
   const modal = $('modal');
@@ -350,11 +962,11 @@ import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g a
   function outcome(result, noun) {
     const sent = noun === 'memories' ? result.memories : result.messages;
     let text = noun === 'memories'
-      ? 'Sent ' + sent + ' memories' + (result.reconcile ? ' and requested reconciliation.' : '.')
+      ? 'Sent ' + sent + ' memories for extraction.'
       : 'Sent ' + sent + ' messages from ' + result.sessions + ' session(s) for extraction.';
     if (result.skipped) text += ' Skipped ' + result.skipped + ' empty or filtered item(s).';
     if (result.failed || result.unknown) text += ' ' + (result.failed + result.unknown) + ' item(s) were not confirmed.';
-    if (noun === 'messages' && sent) text += ' New memories appear after background processing.';
+    if (sent) text += ' New memories appear after background processing.';
     if (result.error) text += ' Stopped early: ' + result.error.message;
     return text;
   }
@@ -465,7 +1077,7 @@ import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g a
     const value = Math.min(Math.max(Number(seconds) || 0, 0), 300);
     $('autoRefreshValue').textContent = value ? value + 's' : 'off';
     if (timer) clearInterval(timer);
-    timer = value ? setInterval(() => { if (!document.hidden) load(); }, value * 1000) : null;
+    timer = value ? setInterval(() => { if (!document.hidden && !$('memoryView').hidden) load(); }, value * 1000) : null;
   }
   $('autoRefresh').addEventListener('input', event => {
     const value = Math.min(Math.max(Number(event.target.value) || 0, 0), 300);
@@ -473,8 +1085,12 @@ import{b as O}from"./shared-NDIG7TX4.mjs";import{a as A,b as E,e as U,f as L,g a
   });
   $('autoRefresh').addEventListener('change', event => setAutoRefresh(event.target.value));
 
+  ${Ue}
+  ${qe}
+
   load();
   setAutoRefresh($('autoRefresh').value);
 </script>
 </body>
-</html>`}var pe=new Set(["NOT_SIGNED_IN","ENTRA_AUTH_REQUIRED","ENTRA_TOKEN_INVALID","SECURE_CACHE_UNAVAILABLE","INVALID_AUTH_STATE","PUBLISHER_CONFIG_MISSING","TENANT_CHANGED"]),Ye=new Set(["INVALID_PAYLOAD"]),Ke=64*1024,Xe="x-mh-canvas-token";function bt(e){let t=E(e);return{code:pe.has(t.code)?"not_signed_in":t.code.toLowerCase(),message:t.message}}var y=class extends Error{constructor(t,o,n){super(n),this.status=t,this.code=o}};function me(e,t,o,n={}){e.writeHead(t,{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer",...n}),e.end(o)}function T(e,t,o){me(e,t,JSON.stringify(o),{"Content-Type":"application/json; charset=utf-8","Cross-Origin-Resource-Policy":"same-origin"})}function $(e,t){let o=e.headers[t];return Array.isArray(o)?o[0]:o}function Ze(e,t){if(typeof e!="string")return!1;let o=Buffer.from(e),n=Buffer.from(t);return o.length===n.length&&Ve(o,n)}async function de(e){if(!/^application\/json(?:\s*;|$)/i.test($(e,"content-type")??""))throw new y(415,"unsupported_media_type","Send a JSON request body.");let t=[],o=0;for await(let n of e){if(o+=n.length,o>Ke)throw new y(413,"payload_too_large","The request body is too large.");t.push(n)}try{let n=JSON.parse(Buffer.concat(t).toString("utf8")||"{}");if(n===null||typeof n!="object"||Array.isArray(n))throw new Error("shape");return n}catch{throw new y(400,"invalid_json","The request body must be a JSON object.")}}function Qe(e,t){if(t instanceof y)return T(e,t.status,{error:t.code,message:t.message});if(t instanceof A){let o=E(t);return pe.has(o.code)?T(e,401,{error:"not_signed_in",code:o.code,message:o.message}):T(e,Ye.has(o.code)?400:502,{error:o.code,message:o.message})}return T(e,500,{error:"internal_error",message:"The Memory House canvas hit an unexpected error."})}async function wt({gateway:e={},roots:t=Y()}={}){let o=le(32).toString("base64url"),n,s=()=>n??=W(e),r=0,i=!1,a=d=>d===`127.0.0.1:${r}`||d===`localhost:${r}`,c=d=>{if(!a($(d,"host")))throw new y(403,"forbidden","Forbidden.");let m=$(d,"sec-fetch-site");if(m!==void 0&&m!=="same-origin"&&m!=="none")throw new y(403,"forbidden","Forbidden.");if(!Ze($(d,Xe),o))throw new y(403,"forbidden","Forbidden.")},p=async d=>{if(i)throw new y(409,"import_in_progress","Another import is still running. Wait for it to finish.");i=!0;try{return await d()}finally{i=!1}},u=Je(async(d,m)=>{try{let f=new URL(d.url??"/","http://127.0.0.1"),_=`${d.method} ${f.pathname}`;if(f.pathname==="/"){if(d.method!=="GET"&&d.method!=="HEAD")throw new y(405,"method_not_allowed","Method not allowed.");if(!a($(d,"host")))throw new y(403,"forbidden","Forbidden.");let h=le(18).toString("base64");return me(m,200,d.method==="HEAD"?void 0:ce({token:o,nonce:h}),{"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":`script-src 'nonce-${h}'; object-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'self'`})}if(!f.pathname.startsWith("/api/"))throw new y(404,"not_found","Not found.");switch(c(d),_){case"GET /api/memory":{let h=await V(s(),{search:f.searchParams.get("search")??"",memoryTypes:f.searchParams.getAll("memory_types"),includeSuperseded:f.searchParams.get("include_superseded")==="true",limit:f.searchParams.get("limit")});return T(m,200,h)}case"GET /api/import/sessions":{let h=C(f.searchParams.get("source"));return T(m,200,{source:h,limit:v.sessions,sessions:await oe(h,t)})}case"POST /api/import/sessions":{let h=await de(d),M=C(h.source);return T(m,200,await p(()=>ie({gateway:s(),source:M,ids:h.ids,roots:t})))}case"POST /api/import/memories":{let h=await de(d),M=C(h.source);return T(m,200,await p(()=>ae({gateway:s(),source:M,roots:t})))}default:throw new y(404,"not_found","Not found.")}}catch(f){m.headersSent?m.destroy():Qe(m,f)}});return await new Promise((d,m)=>{u.once("error",m),u.listen(0,"127.0.0.1",()=>{u.off("error",m),d()})}),r=u.address().port,{url:`http://127.0.0.1:${r}/`,token:o,close:()=>new Promise(d=>{u.close(()=>d()),u.closeAllConnections?.()})}}export{bt as canvasActionError,W as createGateway,V as loadCanvasData,wt as startCanvasServer,Te as summarizeCanvasData};
+</html>`}import{randomUUID as ie}from"node:crypto";function Ge(e,{clock:t=Date.now}={}){let n,i,r,o,a,l=!1,d,m=s=>process.stderr.write(`memory-house:${s}
+`),v=new Map,S=(s,c)=>s&&typeof s=="object"&&!Array.isArray(s)&&Object.keys(s).every(h=>c.includes(h)),b=()=>{throw new y("INVALID_PAYLOAD","Invalid recall review request.")};async function u(){let s=await e.captureIdentity();if(!s?.accountBound)throw new y("NOT_SIGNED_IN","Sign in to Memory House before reviewing recalls.");return s}async function f(){let s=await u(),c=await Y(e,"status",void 0,{expectedBinding:s.binding}),h=await u();if(s.binding!==h.binding||s.generation!==h.generation)throw new y("TELEMETRY_STATE_CHANGED","Sign-in changed. Refresh the review before continuing.");return(n!==h.binding||i!==h.generation)&&(r=ie(),v.clear(),a=null),n=h.binding,i=h.generation,o=c,(!c.enrolled||!c.available||c.local_collection_paused||!F(c.invitation_policy)||a?.snapshot.epoch!==c.epoch)&&(a=null),{enrollment:o,session:r,invitations:await B(e.config),notice:ve,opt_out:he,notice_version:fe}}async function w(s){let c=await u();if(!r||s!==r||n!==c.binding||i!==c.generation)throw new y("TELEMETRY_STATE_CHANGED","Sign-in changed or the review expired. Refresh before continuing.");return c}async function O(s){if(!s||Object.keys(s).some(g=>!["action","session"].includes(g))||!["enable","disable"].includes(s.action))throw new y("INVALID_PAYLOAD","Choose enable or disable.");let c=await w(s.session),h=await Y(e,s.action,void 0,{expectedBinding:c.binding});return await w(s.session),v.clear(),a=null,{enrollment:h}}async function x(s,c,h){let g=await w(s);try{let I=await e.telemetryReview(c,{...h,binding:g.binding});return await w(s),I}catch(I){throw Object.hasOwn(G,I.problem??"")?new y("FEEDBACK_REJECTED",G[I.problem],{status:I.status,problem:I.problem}):I}}async function p(s){return(!S(s,["session","cursor"])||s.cursor!==void 0&&(typeof s.cursor!="string"||!s.cursor.length||s.cursor.length>16384))&&b(),xe(await x(s.session,"list",{...s.cursor===void 0?{}:{cursor:s.cursor}}))}async function E(s){(!S(s,["session","retrieval_id","include_current"])||s.include_current!==void 0&&typeof s.include_current!="boolean")&&b();let c=s.include_current===!0,h=ke(await x(s.session,"detail",{retrievalId:s.retrieval_id,includeCurrent:c}),s.retrieval_id,c);return v.delete(h.retrieval_id),v.set(h.retrieval_id,{epoch:h.epoch,count:h.count,allowed:h.feedback_allowed,states:new Map(h.items.map(g=>[g.rank,g.memory_state]))}),v.size>50&&v.delete(v.keys().next().value),h}async function R(s){(!S(s,["session","retrieval_id","event"])||!ye(s.event))&&b(),await w(s.session);let c=v.get(s.retrieval_id);if(!c||!c.allowed||c.epoch!==s.event.epoch)throw new y("TELEMETRY_STATE_CHANGED","Refresh and select an eligible recall before submitting feedback.");if(s.event.labels.some(g=>g.target!=="retrieval"&&(g.target>c.count||g.action==="set"&&c.states.get(g.target)!=="unchanged")))throw new y("INVALID_PAYLOAD","Only unchanged, currently readable results can receive new result ratings.");let h=await V(e);if(h?.binding!==n||h.epoch!==s.event.epoch)throw new y("TELEMETRY_STATE_CHANGED","Local collection is paused or participation changed. Refresh before submitting.");return x(s.session,"feedback",{retrievalId:s.retrieval_id,body:s.event,revision:h.revision})}async function Qe(s){if(S(s,["session"])||b(),await w(s.session),l)return{invitation:null};l=!0;try{if(await f(),await w(s.session),!o.available||!o.enrolled||o.local_collection_paused||!F(o.invitation_policy)||!(await B(e.config)).enabled)return{invitation:null};let c=await V(e),g=(await p(s)).items.find(oe=>U(oe,c.epoch,t())&&ce(oe.retrieval_id));if(!g)return{invitation:null};let I=await de(e.config,t());if(!I)return{invitation:null};if(await w(s.session),!await q(e.config,c.binding,c.epoch,c.revision))return{invitation:null};let se=Math.min(t()+j.leaseMs,Date.parse(g.expires_at),Date.parse(g.recorded_at)+j.recentMs);return a={id:ie(),session:s.session,snapshot:c,reservation:I,expiresAt:se,retrievalId:g.retrieval_id,events:new Map},{invitation:{invitation_id:a.id,retrieval_id:g.retrieval_id,recorded_at:g.recorded_at,count:g.count,expires_at:new Date(se).toISOString()}}}finally{l=!1}}async function re(s,c,h){if(await w(s.session),s.expiresAt<=t()||!await q(e.config,s.snapshot.binding,s.snapshot.epoch,s.snapshot.revision))throw new y("TELEMETRY_STATE_CHANGED","The invitation expired or participation changed.");let g=s.events.get(c);if(g||(g={queued:!1,body:{event_id:ie(),epoch:s.snapshot.epoch,policy:ae,action:c,surface:"review_canvas_banner",occurred_at:new Date(t()).toISOString(),...c==="dismissed"?{dismissal:h}:{}}},s.events.set(c,g)),!g.queued&&(g.queued=await we(e,s.snapshot,[{kind:"invitation",retrievalId:s.retrievalId,body:g.body}],s.snapshot.epoch,{clock:t,log:m}),!g.queued))throw new y("TELEMETRY_STATE_CHANGED","Participation changed; the invitation event was not queued.");return d??=ge({client:e,clock:t,log:m}).finally(()=>{d=null}),{status:"queued"}}async function Xe(s){(!S(s,["session","invitation_id","action"])||!["shown","opened","dismissed"].includes(s.action))&&b(),await w(s.session);let c=a;if(!c||s.invitation_id!==c.id||c.session!==s.session||!await ue(e.config,c.reservation))throw new y("TELEMETRY_STATE_CHANGED","This invitation is no longer active.");if(s.action==="shown"){if(await f(),c!==a)throw new y("TELEMETRY_STATE_CHANGED","Invitations or collection are now disabled.");if(!(await p({session:s.session})).items.some(I=>I.retrieval_id===c.retrievalId&&U(I,c.snapshot.epoch,t())))throw new y("TELEMETRY_STATE_CHANGED","This recall is no longer eligible for an invitation.");if(!c.events.has("shown")&&!await pe(e.config,c.reservation,t()))throw new y("TELEMETRY_STATE_CHANGED","Invitations are now disabled or this reservation expired.")}else(!c.events.get("shown")?.queued||s.action==="opened"&&!v.has(c.retrievalId))&&b();s.action==="dismissed"&&await me(e.config,c.reservation,t());let h=await re(c,s.action,"dismiss");return s.action!=="shown"&&(a=null),h}async function Ze(s){(!S(s,["session","enabled"])||typeof s.enabled!="boolean")&&b(),await w(s.session);let c=a,h=await le(e.config,s.enabled,t());if(a=null,!s.enabled&&c?.events.get("shown")?.queued)try{await re(c,"dismissed","stop_asking")}catch{h.warning="Invitations are off on this installation, but the dismissal event could not be queued.",m("invitation:dismissal:not-queued")}return h}return{status:f,check:w,preference:O,list:p,detail:E,feedback:R,candidate:Qe,invitationEvent:Xe,invitationSettings:Ze,close:async()=>{await d}}}var Ke=new Set(["NOT_SIGNED_IN","ENTRA_AUTH_REQUIRED","ENTRA_TOKEN_INVALID","SECURE_CACHE_UNAVAILABLE","INVALID_AUTH_STATE","PUBLISHER_CONFIG_MISSING","TENANT_CHANGED"]),Ht=new Set(["INVALID_PAYLOAD"]),zt=64*1024,jt="x-mh-canvas-token";function yn(e){let t=D(e);return{code:Ke.has(t.code)?"not_signed_in":t.code.toLowerCase(),message:t.message}}var T=class extends Error{constructor(t,n,i){super(i),this.status=t,this.code=n}};function Je(e,t,n,i={}){e.writeHead(t,{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer",...i}),e.end(n)}function _(e,t,n){Je(e,t,JSON.stringify(n),{"Content-Type":"application/json; charset=utf-8","Cross-Origin-Resource-Policy":"same-origin"})}function H(e,t){let n=e.headers[t];return Array.isArray(n)?n[0]:n}function Bt(e,t){if(typeof e!="string")return!1;let n=Buffer.from(e),i=Buffer.from(t);return n.length===i.length&&Pt(n,i)}async function L(e){if(!/^application\/json(?:\s*;|$)/i.test(H(e,"content-type")??""))throw new T(415,"unsupported_media_type","Send a JSON request body.");let t=[],n=0;for await(let i of e){if(n+=i.length,n>zt)throw new T(413,"payload_too_large","The request body is too large.");t.push(i)}try{let i=JSON.parse(Buffer.concat(t).toString("utf8")||"{}");if(i===null||typeof i!="object"||Array.isArray(i))throw new Error("shape");return i}catch{throw new T(400,"invalid_json","The request body must be a JSON object.")}}function Ft(e,t){if(t instanceof T)return _(e,t.status,{error:t.code,message:t.message});if(t instanceof y){let n=D(t);return Ke.has(n.code)?_(e,401,{error:"not_signed_in",code:n.code,message:n.message}):n.code==="FEEDBACK_REJECTED"?_(e,t.status,{error:t.problem,message:n.message}):_(e,Ht.has(n.code)?400:502,{error:n.code,message:n.message})}return _(e,500,{error:"internal_error",message:"The Memory House canvas hit an unexpected error."})}async function xn({gateway:e={},roots:t=Ce()}={}){let n=We(32).toString("base64url"),i,r=()=>i??=Te(e),o,a=()=>o??=Ge(r().client),l=0,d=!1,m=u=>u===`127.0.0.1:${l}`||u===`localhost:${l}`,v=u=>{if(!m(H(u,"host")))throw new T(403,"forbidden","Forbidden.");let f=H(u,"sec-fetch-site");if(f!==void 0&&f!=="same-origin"&&f!=="none")throw new T(403,"forbidden","Forbidden.");if(!Bt(H(u,jt),n))throw new T(403,"forbidden","Forbidden.")},S=async u=>{if(d)throw new T(409,"import_in_progress","Another import is still running. Wait for it to finish.");d=!0;try{return await u()}finally{d=!1}},b=Dt(async(u,f)=>{try{let w=new URL(u.url??"/","http://127.0.0.1"),O=`${u.method} ${w.pathname}`;if(w.pathname==="/"){if(u.method!=="GET"&&u.method!=="HEAD")throw new T(405,"method_not_allowed","Method not allowed.");if(!m(H(u,"host")))throw new T(403,"forbidden","Forbidden.");let x=We(18).toString("base64");return Je(f,200,u.method==="HEAD"?void 0:Ye({token:n,nonce:x}),{"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":`script-src 'nonce-${x}'; object-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'self'`})}if(!w.pathname.startsWith("/api/"))throw new T(404,"not_found","Not found.");switch(v(u),O){case"GET /api/telemetry/status":return _(f,200,await a().status());case"POST /api/telemetry/preference":return _(f,200,await a().preference(await L(u)));case"POST /api/telemetry/recalls":return _(f,200,await a().list(await L(u)));case"POST /api/telemetry/recall":return _(f,200,await a().detail(await L(u)));case"POST /api/telemetry/feedback":return _(f,200,await a().feedback(await L(u)));case"POST /api/telemetry/invitation":return _(f,200,await a().candidate(await L(u)));case"POST /api/telemetry/invitation-event":return _(f,200,await a().invitationEvent(await L(u)));case"POST /api/telemetry/invitation-preference":return _(f,200,await a().invitationSettings(await L(u)));case"GET /api/memory":{let x=await Ae(r(),{search:w.searchParams.get("search")??"",memoryTypes:w.searchParams.getAll("memory_types"),includeSuperseded:w.searchParams.get("include_superseded")==="true",limit:w.searchParams.get("limit")});return _(f,200,x)}case"GET /api/import/sessions":{let x=N(w.searchParams.get("source"));return _(f,200,{source:x,limit:C.sessions,sessions:await De(x,t)})}case"POST /api/import/sessions":{let x=await L(u),p=N(x.source);return _(f,200,await S(()=>je({gateway:r(),source:p,ids:x.ids,roots:t})))}case"POST /api/import/memories":{let x=await L(u),p=N(x.source);return _(f,200,await S(()=>Be({gateway:r(),source:p,roots:t})))}default:throw new T(404,"not_found","Not found.")}}catch(w){f.headersSent?f.destroy():Ft(f,w)}});return await new Promise((u,f)=>{b.once("error",f),b.listen(0,"127.0.0.1",()=>{b.off("error",f),u()})}),l=b.address().port,{url:`http://127.0.0.1:${l}/`,token:n,close:async()=>{await new Promise(u=>{b.close(u),b.closeAllConnections?.()}),await o?.close()}}}export{yn as canvasActionError,Te as createGateway,Ae as loadCanvasData,xn as startCanvasServer,ft as summarizeCanvasData};

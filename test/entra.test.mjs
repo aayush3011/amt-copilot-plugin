@@ -45,8 +45,27 @@ test('real MSAL reuses the protected cache across fresh providers without networ
       openBrowser: () => assert.fail('background acquisition must never prompt'),
     });
     assert.equal(value.accessToken, 'fixture-access-1');
+    // The account's object ID, which binds queued captures to the account.
+    assert.equal(value.objectId, 'fixture-user');
   }
   assert.doesNotMatch(await readFile(config.cachePath, 'utf8'), /fixture-access|fixture-user/);
+});
+
+test('tokens report the account object ID from its ID token claims, or else its local account ID', async t => {
+  const { config } = await setup(t);
+  const protectedCache = protection(config);
+  await mkdir(config.stateDir);
+  await writeFile(config.cachePath, JSON.stringify(await protectedCache.protect(JSON.stringify({
+    context: JSON.stringify([config.tenantId, config.clientId, config.scope]), accountId: 'fixture-account', cache: '{}',
+  }))));
+  const objectIdFor = async account => (await acquireEntraToken(config, { protection: protectedCache, createApplication: () => ({
+    getTokenCache: () => ({ deserialize() {}, serialize: () => '{}', getAccountByHomeId: async () => ({}) }),
+    acquireTokenSilent: async () => ({ ...result(config), account: { homeAccountId: 'fixture-account', ...account } }),
+  }) })).objectId;
+  assert.equal(await objectIdFor({ localAccountId: 'local-oid', idTokenClaims: { oid: 'claims-oid' } }), 'claims-oid');
+  assert.equal(await objectIdFor({ localAccountId: 'local-oid' }), 'local-oid');
+  assert.equal(await objectIdFor({}), undefined);
+  assert.equal(await objectIdFor({ localAccountId: 'not an id' }), undefined);
 });
 
 test('browser login uses PKCE and rejects wrong state, host, path and duplicate codes', async t => {
@@ -195,6 +214,44 @@ test('cache protection authenticates ciphertext and stores Unix keys only throug
     const locked = createCacheProtection(config, { platform, run: async () => ({ code: 1, hasError: true }) });
     await assert.rejects(locked.protect('fixture-secret'), { code: 'SECURE_CACHE_UNAVAILABLE' });
   }
+});
+
+test('queued captures share the device key but not its ciphertext, with one key lookup per instance', async t => {
+  const { config } = await setup(t);
+  for (const platform of ['darwin', 'linux']) {
+    let key;
+    let lookups = 0;
+    const run = async (file, args, input) => {
+      if (args[0] === '-i' || args[0] === 'store') {
+        key = platform === 'darwin' ? input.match(/-w ([a-f\d]{64})/)[1] : input;
+        return { code: 0 };
+      }
+      lookups++;
+      return key ? { code: 0, stdout: key } : { code: platform === 'darwin' ? 44 : 1, hasError: false };
+    };
+    const msal = createCacheProtection(config, { platform, run });
+    const queue = createCacheProtection(config, { platform, run, purpose: 'capture-queue' });
+    // The parts of a long message are sealed together: one key is created (a lookup and its verification).
+    const parts = await Promise.all(['one', 'two', 'three'].map(text => queue.protect(text)));
+    const sealed = await queue.protect('queued turn');
+    assert.equal(lookups, 2);
+    assert.equal(await queue.unprotect(sealed), 'queued turn');
+    assert.equal(await queue.unprotect(await queue.protect('another turn')), 'another turn');
+    assert.equal(lookups, 2);
+    // A later process, such as a sender after mh-login, opens turns sealed before it.
+    const later = createCacheProtection(config, { platform, run, purpose: 'capture-queue' });
+    assert.deepEqual(await Promise.all(parts.map(value => later.unprotect(value))), ['one', 'two', 'three']);
+    await assert.rejects(msal.unprotect(sealed), { code: 'SECURE_CACHE_UNAVAILABLE' });
+    await assert.rejects(queue.unprotect(await msal.protect('sign-in cache')), { code: 'SECURE_CACHE_UNAVAILABLE' });
+  }
+  const scripts = [];
+  const windows = createCacheProtection(config, {
+    platform: 'win32', purpose: 'capture-queue', env: {},
+    run: async (file, args) => { scripts.push(args.at(-1)); return { code: 0, stdout: 'AAAA' }; },
+  });
+  await windows.protect('queued turn');
+  assert.match(scripts[0], /'memory-house-capture-queue-v1'/);
+  assert.throws(() => createCacheProtection(config, { platform: 'linux', purpose: "x');evil" }), { code: 'SECURE_CACHE_UNAVAILABLE' });
 });
 
 test('secure-tool failures are bounded and sanitize subprocess diagnostics', async () => {

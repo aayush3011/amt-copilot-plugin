@@ -17,17 +17,19 @@ const PYTHON = 'node:22222222-2222-4222-8222-222222222222';
 const BRANCH = 'node:33333333-3333-4333-8333-333333333333';
 const DOTNET = 'node:44444444-4444-4444-8444-444444444444';
 const ORPHAN = 'node:99999999-9999-4999-8999-999999999999';
-const NODES = [
-  { id: BRANCH, root_id: ROOT, parent_id: PYTHON, name: 'hotfix-4.14.x', path: 'Cosmos DB SDKs/Python SDK/hotfix-4.14.x', tier: 'node', status: 'active' },
-  { id: ROOT, root_id: ROOT, parent_id: null, name: 'Cosmos DB SDKs', path: 'Cosmos DB SDKs', tier: 'root', status: 'active', description: 'Demo root' },
-  { id: PYTHON, root_id: ROOT, parent_id: ROOT, name: 'Python SDK', path: 'Cosmos DB SDKs/Python SDK', tier: 'node', status: 'active' },
-  { id: DOTNET, root_id: ROOT, parent_id: ROOT, name: '.NET SDK', path: 'Cosmos DB SDKs/.NET SDK', tier: 'node', status: 'active' },
+// GET /v1/spaces/{id} responses: path joins the names from the hierarchy's root.
+const SPACES = [
+  { id: BRANCH, hierarchy_id: 'hierarchy:1', parent_id: PYTHON, name: 'hotfix-4.14.x', path: 'Cosmos DB SDKs/Python SDK/hotfix-4.14.x', depth: 3, status: 'active' },
+  { id: ROOT, hierarchy_id: 'hierarchy:1', parent_id: null, name: 'Cosmos DB SDKs', path: 'Cosmos DB SDKs', depth: 1, status: 'active', metadata: { description: 'Demo root' } },
+  { id: PYTHON, hierarchy_id: 'hierarchy:1', parent_id: ROOT, name: 'Python SDK', path: 'Cosmos DB SDKs/Python SDK', depth: 2, status: 'active' },
+  { id: DOTNET, hierarchy_id: 'hierarchy:1', parent_id: ROOT, name: '.NET SDK', path: 'Cosmos DB SDKs/.NET SDK', depth: 2, status: 'active' },
 ];
+// Learning Spaces records carry space_key; old-1 keeps the scope_key of earlier stores.
 const MEMORIES = [
-  { id: 'personal-1', scope_key: 'user:fixture', memory_type: 'fact', content: 'I prefer pytest -k for focused runs.', created_at: '2026-10-01T00:00:00Z', source: { application: 'github-copilot', source: 'github-copilot' } },
-  { id: 'branch-1', scope_key: BRANCH, memory_type: 'procedural', content: 'Install packages through the approved package feed.', created_at: '2026-10-03T00:00:00Z', tags: ['pip'] },
-  { id: 'python-1', scope_key: PYTHON, memory_type: 'fact', content: 'Curator note: run the emulator tests before release.', created_at: '2026-10-02T00:00:00Z' },
-  { id: 'orphan-1', scope_key: ORPHAN, memory_type: 'fact', content: 'A node outside the reach view.', created_at: '2026-10-04T00:00:00Z' },
+  { id: 'personal-1', space_key: 'user:fixture', memory_type: 'fact', content: 'I prefer pytest -k for focused runs.', created_at: '2026-10-01T00:00:00Z', source: { application: 'github-copilot', source: 'github-copilot' } },
+  { id: 'branch-1', space_key: BRANCH, memory_type: 'procedural', content: 'Install packages through the approved package feed.', created_at: '2026-10-03T00:00:00Z', tags: ['pip'] },
+  { id: 'python-1', space_key: PYTHON, memory_type: 'fact', content: 'Curator note: run the emulator tests before release.', created_at: '2026-10-02T00:00:00Z' },
+  { id: 'orphan-1', space_key: ORPHAN, memory_type: 'fact', content: 'A Space the caller cannot list.', created_at: '2026-10-04T00:00:00Z' },
   { id: 'old-1', scope_key: 'user:fixture', memory_type: 'fact', content: 'Superseded preference.', created_at: '2026-09-01T00:00:00Z', superseded_by: 'personal-1' },
 ];
 
@@ -42,7 +44,8 @@ async function signedIn(t, gateway, { signIn = true } = {}) {
 
 async function hierarchyGateway(t) {
   const gateway = await mockGateway(t);
-  gateway.state.nodes = NODES;
+  gateway.state.spaces = SPACES;
+  gateway.state.whoami = { ...gateway.state.whoami, read_spaces: ['user:fixture', ...SPACES.map(space => space.id)] };
   gateway.state.memories = MEMORIES;
   return gateway;
 }
@@ -61,7 +64,7 @@ function raw(url, { method = 'GET', path = '/', headers = {}, body } = {}) {
   });
 }
 
-test('canvas data lists personal memories and every readable hierarchy node by path', async t => {
+test('canvas data lists personal memories and every readable Learning Space by path', async t => {
   const gateway = await hierarchyGateway(t);
   const { gateway: client } = await signedIn(t, gateway);
   const data = await loadCanvasData(client);
@@ -91,8 +94,11 @@ test('canvas data lists personal memories and every readable hierarchy node by p
   const listing = gateway.state.requests.filter(entry => entry.path === '/inference/memory/memories');
   assert.equal(listing.length, 1);
   assert.deepEqual(listing[0].query, [['page_size', '50']]);
-  for (const path of ['/inference/memory/whoami', '/inference/memory/v1/me/reach']) {
-    const call = gateway.state.requests.find(entry => entry.path === path);
+  // whoami lists the readable Spaces and each is named once; the canvas no longer calls /v1/me/reach.
+  const spaces = gateway.state.requests.filter(entry => entry.path.startsWith('/inference/memory/v1/spaces/'));
+  assert.deepEqual(spaces.map(entry => decodeURIComponent(entry.path.split('/').pop())).sort(), SPACES.map(space => space.id).sort());
+  assert.equal(gateway.state.requests.some(entry => entry.path.endsWith('/v1/me/reach')), false);
+  for (const call of [gateway.state.requests.find(entry => entry.path === '/inference/memory/whoami'), ...spaces]) {
     assert.match(call.authorization, /^Bearer fixture-access-/);
   }
 });
@@ -150,14 +156,21 @@ test('promoted copies show where they came from and why, from metadata or the ol
   assert.equal(Object.values(plain.groups).flat()[0].promotion, null);
 });
 
-test('identity and hierarchy failures degrade to warnings; listing and sign-in failures are fatal', async t => {
+test('identity and Space failures degrade to warnings; listing and sign-in failures are fatal', async t => {
   const gateway = await hierarchyGateway(t);
   const { gateway: client } = await signedIn(t, gateway);
-  gateway.state.reachStatus = 503;
+  gateway.state.spaceStatus = 503;
+  const unnamed = await loadCanvasData(client);
+  assert.equal(unnamed.principal, 'user:fixture');
+  assert.equal(unnamed.warnings.length, 1);
+  assert.doesNotMatch(JSON.stringify(unnamed), /fixture-provider-secret/);
+  assert.deepEqual(unnamed.rows.map(row => row.kind), ['personal', 'unlisted', 'unlisted', 'unlisted']);
+
+  gateway.state.spaceStatus = 200;
   gateway.state.whoamiStatus = 500;
   const degraded = await loadCanvasData(client);
   assert.equal(degraded.principal, null);
-  assert.equal(degraded.warnings.length, 2);
+  assert.equal(degraded.warnings.length, 1);
   assert.doesNotMatch(JSON.stringify(degraded), /fixture-provider-secret/);
   assert.deepEqual(degraded.rows.map(row => row.kind), ['personal', 'unlisted', 'unlisted', 'unlisted']);
 
@@ -362,25 +375,42 @@ test('session import splits large sessions within AMT request limits and stops a
   assert.doesNotMatch(JSON.stringify(failed), /fixture-provider-secret/);
 });
 
-test('memory import publishes deduplicated direct facts, then requests one reconciliation', async t => {
+test('memory import sends deduplicated saved memories as user turns on one thread and requests no reconcile', async t => {
   const gateway = await mockGateway(t);
   const { gateway: client } = await signedIn(t, gateway);
   const { roots } = await historyFixture(t);
   const copilot = await importMemories({ gateway: client, source: 'copilot', roots });
-  assert.deepEqual(copilot, { source: 'copilot', memories: 1, skipped: 1, failed: 0, unknown: 0, batches: 1, reconcile: 'queued' });
+  assert.deepEqual(copilot, { source: 'copilot', memories: 1, skipped: 1, failed: 0, unknown: 0, batches: 1 });
   assert.deepEqual(gateway.state.insertions[0].body, {
-    extract: false, items: [{ content: 'Use the approved package feed for pip installs.', source: 'copilot-cli-memory' }],
+    extract: true,
+    thread_id: 'mh:import-memories:copilot',
+    items: [{ role: 'user', content: 'Use the approved package feed for pip installs.', source: 'copilot-cli-memory' }],
   });
-  assert.equal(gateway.state.reconciles, 1);
+  assert.match(gateway.state.insertions[0].key, /^mh-import-[0-9a-f]{64}$/);
 
   const claude = await importMemories({ gateway: client, source: 'claude', roots });
   assert.equal(claude.memories, 1);
   assert.equal(claude.skipped, 0);
-  assert.deepEqual(gateway.state.insertions.at(-1).body.items, [{ content: 'Restore NuGet packages from the approved feed.', source: 'claude-code-memory' }]);
-  assert.equal(gateway.state.reconciles, 2);
+  assert.deepEqual(gateway.state.insertions.at(-1).body, {
+    extract: true,
+    thread_id: 'mh:import-memories:claude',
+    items: [{ role: 'user', content: 'Restore NuGet packages from the approved feed.', source: 'claude-code-memory' }],
+  });
 
   const empty = await importMemories({ gateway: client, source: 'claude', roots: { copilot: roots.copilot, claude: join(roots.claude, 'none') } });
-  assert.equal(empty.memories, 0);
-  assert.equal(empty.reconcile, null);
-  assert.equal(gateway.state.reconciles, 2);
+  assert.deepEqual(empty, { source: 'claude', memories: 0, skipped: 0, failed: 0, unknown: 0, batches: 0 });
+  assert.equal(gateway.state.insertions.length, 2);
+  assert.equal(gateway.state.reconciles, 0);
+});
+
+test('memory import splits many saved memories into AMT-sized batches on one thread', async t => {
+  const gateway = await mockGateway(t);
+  const { gateway: client } = await signedIn(t, gateway);
+  const { roots } = await historyFixture(t);
+  const memoryRoot = join(roots.claude, '-work-azure-sdk-for-net', 'memory');
+  for (let n = 0; n < 120; n++) await writeFile(join(memoryRoot, `note-${n}.md`), `Saved note ${n}.\n`);
+  const result = await importMemories({ gateway: client, source: 'claude', roots });
+  assert.deepEqual(result, { source: 'claude', memories: 121, skipped: 0, failed: 0, unknown: 0, batches: 3 });
+  assert.deepEqual(gateway.state.insertions.map(({ body }) => body.items.length), [50, 50, 21]);
+  assert.ok(gateway.state.insertions.every(({ body }) => body.extract === true && body.thread_id === 'mh:import-memories:claude'));
 });

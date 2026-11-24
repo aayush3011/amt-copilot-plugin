@@ -3,21 +3,21 @@
   "version": 1,
   "esbuildVersion": "0.28.2",
   "sources": {
-    ".maintainer/package-lock.json": "90252bf4880fbefe19d197538bcf8c294e5702290513285a2aa42535eacdce4f",
-    ".maintainer/package.json": "7860d1f36f2fd430e578f7c4cc5035b7b85fa1b1e865083f1b77819d4951deb2",
+    ".maintainer/package-lock.json": "dc5bc59a1df09972f73f7a404e521525895e5f90f4ae74287d65dc70208d4937",
+    ".maintainer/package.json": "2b8ac87bfe16ff26079cd6b488dcbb84d09fb14570d8e27e87cf7a920c79a946",
     ".maintainer/register.mjs": "56f7d079e26c54dc99798b521158cf109d8e40a73ad134a520af65abc901f6b5",
     ".maintainer/resolve.mjs": "b05b0bc024da1a7a9bbdf899305dafc98e54120f7d6ac8eb725aa0e7a209cdd5",
-    "package.json": "4bc7be1ce4439c440b7c747b8d9cac87686181c878916d39abc4c307b12e9a7d",
+    "package.json": "78de42453abe8230f2ab1157439aa6bfbc0a0e7d5acb0ad94ad12bc871f36699",
     "scripts/build.mjs": "b253593eaf1d715e55c9dde4fab56b5b60217dfa67aac377f8254fb2d2c54eea",
     "scripts/package-files.mjs": "40d73e5c5b8dbd1f96b4de2362cc8d5298b937204ed300220084d2f96f6d302c",
     "src/auth.mjs": "4bfd518772f8c6fc748bb15f0de80a12078c89a9dab931da7515bd7e4e6c5a80",
     "src/browser.mjs": "901e84ef9ce98c9effaa580a8ba3e5e3abb80b11ead1c9359ca14417275de202",
     "src/cache-protection.mjs": "4653aadf7bb0716ef897cfbf997ad0faaf920b130963a1fb8cb6d3e40a2df40b",
     "src/canvas/data.mjs": "712a612b17310985d811e30d14673be5c20c532acc4046ee7a339a9ac9c2bb17",
-    "src/canvas/importers.mjs": "fc1395b1d8f296ce669aac6dfb5eaffbe5090a6757a5f08b4d0d63655d23c086",
+    "src/canvas/importers.mjs": "c0a1f428a5646a854e5feb9c274074e6e3c63ef4504fd083bbaf6940317d7d72",
     "src/canvas/index.mjs": "9d224f55a830464314ba0989a2470f634876109924351a1d991b4e39bd6d0f79",
     "src/canvas/invitation-panel.mjs": "ce5aa2d07500bc4efb4b98c3ce61885182cf38d81f3b035f0dcaa62eca7b43be",
-    "src/canvas/panel.mjs": "6ddccbfba47584e29f6678568040d6cb4f075243df4c52c073aa979c3499a4ec",
+    "src/canvas/panel.mjs": "ac63c96e367d6bbf676dd145ae64e40627c59519b1e798d1961685239aa09430",
     "src/canvas/review-panel.mjs": "1f11ad4ba5972aee632472aa38f1a15b0b2d7a3db84fedc7636af19639dbb119",
     "src/canvas/review.mjs": "aeb85562f618f390820385d0b1019dd2ad80e8208b11ffe291c2b65028c01c8a",
     "src/capture-queue.mjs": "4c0594a62fbe324471bb23bc7d7624b51f66a2e846e57d949b216f766422d166",
@@ -35,12 +35,12 @@
     "src/tenant.mjs": "5df68612dbe96c52362903cfc0beef59ffaa2b80ac553c5f3d4a830d9e21397f"
   },
   "packageFiles": {
-    "plugin.json": "a6ec0e0db62a605a4c90e1da39f889dd8cd183561b9483149d2a9a09de0b09a3",
-    "mcp.json": "baca32f8374cde25d0e8924c4404e44cf3346f549bc4bf516aa33dfa79a0dfdd",
+    "plugin.json": "dbd9cec0f74ce53a74d585f0591056b0713cb59e28114e266bb7b0c56e9a1234",
+    "mcp.json": "306cbfb5143ed7e4b83026edbd1767c6e57e40e72c95b76ce018d5ea8b017596",
     "deployment.json": "e310424ed578cfc3d010a144c5d627a1618845a3917337e74d843d86ccdce35a",
     "LICENSE": "8154681626f8e050b1daf064ac21aca14202046fb653c24c143a14103ca42d7d",
-    ".claude-plugin/plugin.json": "2747149e27ea1ec2ec06fa3e8cf22232010b926871b285c584e1a707bb659590",
-    ".codex-plugin/plugin.json": "9054439c2afc37719bc259f2f7980437c8f164f8d245447e0166f156a50bf40d",
+    ".claude-plugin/plugin.json": "1c8cdbf6fc15efda6de5022bf3911c7648310061e65909d14b8a97c9dbc6c73c",
+    ".codex-plugin/plugin.json": "fb99f8fe9731cb49297ea2c4727a92f41ff90b8d9cf0c2fa9a0ecd03b90a9eb3",
     ".claude/entry.mjs": "f3743751460879c70e323a3247d3d3000e5b2725440f77db68f9867b83bdeb05",
     ".claude/plugin-hooks.json": "65866e8679d032ffadf8f53a6cbafbd4353f94953d63732e4399d1a9b4f2202b",
     ".codex/entry.mjs": "d17800bd2adbf18f3323404a107b10f8c0fd5093b241be02f0391bb74dff526d",
@@ -48,13 +48,13 @@
     ".github/entry.mjs": "13d0d8563e5305038be18cfb276883c1d5e2ddbdf8177ec25c777a897ba005fa",
     ".github/plugin-hooks.json": "12288dc1c211ae91aaf4dcfc8a5cc250f3333993add9c48819ff7091844ebe93",
     "com.github.copilot/extensions/memory-canvas/extension.mjs": "ab59d3348253be65dbbfa9bee92d175434466ef80f8deb49778aaa8ee9c44946",
-    "skills/mh-memory/SKILL.md": "48bcdaf026d1e50ad273de671107b69e2b8121a061975c4d4a063c0c426742fa",
+    "skills/mh-memory/SKILL.md": "107da658069ce8f25172e798ea5480996eec250ccd8732b2dc0146aadf7af159",
     "skills/mh-login/SKILL.md": "ca759dadded72c69194ef56934f2a81fbd05b7edd968c954ef80e8ee63ef58aa",
     "skills/mh-logout/SKILL.md": "2cb5a5fbf4211ab92fa0bef68fbf60bacdaef7e8f6372557ac646812051bb64d",
     "skills/mh-status/SKILL.md": "d38d1fa1759712cc9c80ba208134999c803373ec7e73edf797a1fd7e3a79c90a",
     "skills/mh-show/SKILL.md": "9386830b352536f75a32b0dfb610c35086a4ef4798caf549967e8b1babe656f3",
     "skills/mh-telemetry/SKILL.md": "292ec8ce9551fe5b7327080877110f60c2c47be71c6e312f2a7d730267583266",
-    "skills/use-memory/SKILL.md": "cedf3b36a346472216d4390a78fbfddbfc98ac163c081786af6b0b6bc29c4730"
+    "skills/use-memory/SKILL.md": "5f260c50cac293a77abe569db30486b27023e8c688a8668493f8eda6ec1157c6"
   },
   "dependencies": [
     {
@@ -145,11 +145,11 @@
   ],
   "outputs": {
     "THIRD_PARTY_NOTICES.txt": "b541934107dd0362457abd71995fee51c97ad2070b9bc4a295fd07620c3523ca",
-    "auth.mjs": "d5964768db192528fc36ec43f1d38f9acfa517205f1ff3546024488e814ac009",
-    "canvas.mjs": "eacc2d679d80731e18d64d8f116d8c787747aa087bd003c9a4c74eb445123690",
-    "flush.mjs": "0b3f4b843e683f6c83d607e2c21103c48fa2a3eaba026635179ca15ae300786a",
-    "hook.mjs": "144bac2ba73f0a4858f8eac74d80022bb6c85d2e2ce1239e0fcfbed89d2f497c",
-    "shared-SQNNV4AH.mjs": "3442166ed270fa8333f0672617120c961776404bdc9f444b9a18b0cbf724f401",
-    "shared-XGAUCKSY.mjs": "a6b2c550e60c871539046add41041c13e1af7a50a4484c8f0caf3c204b319447"
+    "auth.mjs": "27ab2ca3fb07dcd1929bb1e0c616a52477686e94f8cbd103b1e20c2f1831f549",
+    "canvas.mjs": "bfb5089d69d8328235d4cb3ac815ea982cd96e2a1f5064eb88a5ccb929c65353",
+    "flush.mjs": "541c8dc2224dc0d514fb274a16b88b4632acebcff52d64d5df5a002d6cd3429d",
+    "hook.mjs": "a7b4edce2e12641239bf4935065f59e080895f9f420e261df23a1afbaa05a3cc",
+    "shared-6Z4IOOQ5.mjs": "d92e10f6dda7fa0bb6b5a1fdc2dcbf598a3ce5d149c399f2c2d7fcf880c0db16",
+    "shared-BYOKS3DH.mjs": "29aa9906ac897217b49938aa96629f6a9805ed0aca37c70c7ba8cd53c726ed48"
   }
 }

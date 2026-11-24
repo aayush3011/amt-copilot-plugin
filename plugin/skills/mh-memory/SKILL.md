@@ -38,16 +38,12 @@ complete a request, explain that limitation. Do not work around it by reading
 plugin internals or credential files, importing bundled modules, inspecting
 other service repositories, or calling gateway/OpenAPI endpoints directly.
 
-Use `add_memory` only as a one-off write when the user explicitly asks to remember
-something. Call it with `extract` set to false and one item whose `content` states what
-to remember, close to the user's words, for example
-`{"extract": false, "items": [{"content": "Prefers concise TypeScript examples."}]}`.
-Never call it for routine capture or because a turn seems important:
-when hooks are supported they already send that conversation, and another call
-double-records it. Missing hook support does not make the model the capture gatekeeper.
-Confirm the intended text if unclear. Never save credentials, private reasoning,
-tool output, or unsolicited personal information. The write is asynchronous; do not
-claim it is immediately searchable or silently retry a failed write.
+When the user asks you to remember something, do not call `add_memory`. It only stores
+conversation turns, which the hooks already send, so a call double-records them. The hooks
+capture the request as written and Memory House extracts a memory from it in the background,
+so it is not searchable immediately. Briefly confirm what was noted and that it will appear
+after processing; do not claim it is already a searchable memory. If the host does not run
+the plugin's capture hooks, report that limitation instead of writing it yourself.
 
 The server also offers tools that delete memories (`delete_memory`,
 `delete_all_memories`). Use them only when the user explicitly asks to delete, and

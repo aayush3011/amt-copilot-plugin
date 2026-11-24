@@ -375,25 +375,42 @@ test('session import splits large sessions within AMT request limits and stops a
   assert.doesNotMatch(JSON.stringify(failed), /fixture-provider-secret/);
 });
 
-test('memory import publishes deduplicated direct facts, then requests one reconciliation', async t => {
+test('memory import sends deduplicated saved memories as user turns on one thread and requests no reconcile', async t => {
   const gateway = await mockGateway(t);
   const { gateway: client } = await signedIn(t, gateway);
   const { roots } = await historyFixture(t);
   const copilot = await importMemories({ gateway: client, source: 'copilot', roots });
-  assert.deepEqual(copilot, { source: 'copilot', memories: 1, skipped: 1, failed: 0, unknown: 0, batches: 1, reconcile: 'queued' });
+  assert.deepEqual(copilot, { source: 'copilot', memories: 1, skipped: 1, failed: 0, unknown: 0, batches: 1 });
   assert.deepEqual(gateway.state.insertions[0].body, {
-    extract: false, items: [{ content: 'Use the approved package feed for pip installs.', source: 'copilot-cli-memory' }],
+    extract: true,
+    thread_id: 'mh:import-memories:copilot',
+    items: [{ role: 'user', content: 'Use the approved package feed for pip installs.', source: 'copilot-cli-memory' }],
   });
-  assert.equal(gateway.state.reconciles, 1);
+  assert.match(gateway.state.insertions[0].key, /^mh-import-[0-9a-f]{64}$/);
 
   const claude = await importMemories({ gateway: client, source: 'claude', roots });
   assert.equal(claude.memories, 1);
   assert.equal(claude.skipped, 0);
-  assert.deepEqual(gateway.state.insertions.at(-1).body.items, [{ content: 'Restore NuGet packages from the approved feed.', source: 'claude-code-memory' }]);
-  assert.equal(gateway.state.reconciles, 2);
+  assert.deepEqual(gateway.state.insertions.at(-1).body, {
+    extract: true,
+    thread_id: 'mh:import-memories:claude',
+    items: [{ role: 'user', content: 'Restore NuGet packages from the approved feed.', source: 'claude-code-memory' }],
+  });
 
   const empty = await importMemories({ gateway: client, source: 'claude', roots: { copilot: roots.copilot, claude: join(roots.claude, 'none') } });
-  assert.equal(empty.memories, 0);
-  assert.equal(empty.reconcile, null);
-  assert.equal(gateway.state.reconciles, 2);
+  assert.deepEqual(empty, { source: 'claude', memories: 0, skipped: 0, failed: 0, unknown: 0, batches: 0 });
+  assert.equal(gateway.state.insertions.length, 2);
+  assert.equal(gateway.state.reconciles, 0);
+});
+
+test('memory import splits many saved memories into AMT-sized batches on one thread', async t => {
+  const gateway = await mockGateway(t);
+  const { gateway: client } = await signedIn(t, gateway);
+  const { roots } = await historyFixture(t);
+  const memoryRoot = join(roots.claude, '-work-azure-sdk-for-net', 'memory');
+  for (let n = 0; n < 120; n++) await writeFile(join(memoryRoot, `note-${n}.md`), `Saved note ${n}.\n`);
+  const result = await importMemories({ gateway: client, source: 'claude', roots });
+  assert.deepEqual(result, { source: 'claude', memories: 121, skipped: 0, failed: 0, unknown: 0, batches: 3 });
+  assert.deepEqual(gateway.state.insertions.map(({ body }) => body.items.length), [50, 50, 21]);
+  assert.ok(gateway.state.insertions.every(({ body }) => body.extract === true && body.thread_id === 'mh:import-memories:claude'));
 });

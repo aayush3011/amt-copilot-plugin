@@ -367,8 +367,8 @@ ${REVIEW_PANEL}
 
   // Import: choose the source agent, then what to import from it.
   const SOURCES = {
-    copilot: { label: 'GitHub Copilot', memory: 'Copilot memories', memoryText: 'Facts Copilot saved with its memory tool on this device.', sessionText: 'Pick recent Copilot sessions; their turns go through Memory House extraction.' },
-    claude: { label: 'Claude Code', memory: 'Claude memories', memoryText: 'Memory files Claude Code saved for your projects.', sessionText: 'Pick recent Claude Code sessions; their turns go through Memory House extraction.' },
+    copilot: { label: 'GitHub Copilot', memory: 'Copilot memories', memoryText: 'Facts Copilot saved with its memory tool on this device; they go through Memory House extraction.', sessionText: 'Pick recent Copilot sessions; their turns go through Memory House extraction.' },
+    claude: { label: 'Claude Code', memory: 'Claude memories', memoryText: 'Memory files Claude Code saved for your projects; they go through Memory House extraction.', sessionText: 'Pick recent Claude Code sessions; their turns go through Memory House extraction.' },
   };
   const overlay = $('overlay');
   const modal = $('modal');
@@ -388,11 +388,11 @@ ${REVIEW_PANEL}
   function outcome(result, noun) {
     const sent = noun === 'memories' ? result.memories : result.messages;
     let text = noun === 'memories'
-      ? 'Sent ' + sent + ' memories' + (result.reconcile ? ' and requested reconciliation.' : '.')
+      ? 'Sent ' + sent + ' memories for extraction.'
       : 'Sent ' + sent + ' messages from ' + result.sessions + ' session(s) for extraction.';
     if (result.skipped) text += ' Skipped ' + result.skipped + ' empty or filtered item(s).';
     if (result.failed || result.unknown) text += ' ' + (result.failed + result.unknown) + ' item(s) were not confirmed.';
-    if (noun === 'messages' && sent) text += ' New memories appear after background processing.';
+    if (sent) text += ' New memories appear after background processing.';
     if (result.error) text += ' Stopped early: ' + result.error.message;
     return text;
   }

@@ -20,8 +20,8 @@ durable, cross-session memory about this developer, their team and their convent
   when one changes what you do, say so briefly.
 - **Do not decide what is worth remembering.** Where the host admits the plugin's hooks,
   every conversational turn is already captured, and Memory House decides what becomes a
-  durable memory. Call `add_memory` only when the user explicitly asks you to remember
-  something.
+  durable memory. Do not call `add_memory`, even when the user asks you to remember
+  something: their message is already captured, and a call double-records it.
 - Never ask the user for their identity, tenant or scope; no tool takes one.
 
 Use only exposed Memory House tools; the app may prefix tool names with the plugin or server

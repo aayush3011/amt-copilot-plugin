@@ -1,5 +1,5 @@
 import { createRequire as __mhCreateRequire } from 'node:module'; const require = __mhCreateRequire(import.meta.url);
-import{B as p,O as o,b as l,d as f,x as g,y as u}from"./shared-XGAUCKSY.mjs";import{realpathSync as w}from"node:fs";import{pathToFileURL as E}from"node:url";async function M(e,{env:r=process.env,pluginRoot:c,stdout:h=process.stdout,stderr:n=process.stderr,acquireToken:i,fetch:y,acceptedNoticeVersion:d}={}){let t,s;try{if(s=f({env:r,...c?{pluginRoot:c}:{}}),e==="headers"){let a={...s,authTimeoutMs:Math.min(s.authTimeoutMs,7e3)};t={Authorization:`Bearer ${await o({config:a,env:r,acquireToken:i}).getAccessToken("mcp")}`}}else e==="login"?(n.write(`<memory-house-telemetry>
+import{B as p,O as o,b as l,d as f,x as g,y as u}from"./shared-BYOKS3DH.mjs";import{realpathSync as w}from"node:fs";import{pathToFileURL as E}from"node:url";async function M(e,{env:r=process.env,pluginRoot:c,stdout:h=process.stdout,stderr:n=process.stderr,acquireToken:i,fetch:y,acceptedNoticeVersion:d}={}){let t,s;try{if(s=f({env:r,...c?{pluginRoot:c}:{}}),e==="headers"){let a={...s,authTimeoutMs:Math.min(s.authTimeoutMs,7e3)};t={Authorization:`Bearer ${await o({config:a,env:r,acquireToken:i}).getAccessToken("mcp")}`}}else e==="login"?(n.write(`<memory-house-telemetry>
 ${g}
 ${u}
 </memory-house-telemetry>

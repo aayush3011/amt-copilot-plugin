@@ -22,15 +22,9 @@ function validSearch(body) {
     && (body.top_k === undefined || (Number.isInteger(body.top_k) && body.top_k >= 1 && body.top_k <= 50));
 }
 
-// POST /memory: captured or imported turns for extraction, or direct facts (no thread or role).
+// POST /memory takes captured or imported turns only. Direct facts (extract: false) are rejected with 422,
+// because memories are extracted from turns.
 function validInsertion(body) {
-  if (body?.extract === false) {
-    return Object.keys(body).every(key => ["extract", "items"].includes(key))
-      && Array.isArray(body.items) && body.items.length >= 1 && body.items.length <= 50
-      && body.items.every(item => isObject(item) && Object.keys(item).every(key => ["content", "source"].includes(key))
-        && typeof item.content === "string" && item.content.trim() !== "")
-      && Buffer.byteLength(JSON.stringify(body)) <= 256 * 1024;
-  }
   return validCapture(body) && body.extract === true;
 }
 
@@ -321,22 +315,19 @@ export async function mockGateway(t, options = {}) {
         if (key) state.idempotent.set(key, { raw, status, value: { ...record, replayed: true } });
         return send(status, record);
       }
-      if (body?.extract !== false && state.captureStatus >= 300) return send(state.captureStatus, { error: "unavailable" });
+      if (state.captureStatus >= 300) return send(state.captureStatus, { error: "unavailable" });
       if (!validInsertion(body)) return send(422, { code: "invalid_request" });
       state.insertions.push({ body, key });
       const created = new Date().toISOString();
       const envelope = { request_id: `fixture-request-${state.requests.length}`, kind: "insert", created_at: created, attempts: 1 };
       // Captured and imported turns get the gateway's tracked envelope, as /hook/capture returned.
-      const results = body.extract === false
-        ? body.items.map((_, index) => ({ index, id: `fixture-fact-${state.insertions.length}-${index}`, status: "stored" }))
-        : body.items.map((item, index) => {
-          state.turns.push({ thread_id: body.thread_id, role: item.role, content: item.content });
-          return { index, id: `fixture-turn-${state.turns.length}`, status: "stored" };
-        });
-      const value = { ...envelope, status: "succeeded", completed_at: created,
-        ...(body.extract === false ? {} : { deadline_at: Date.now() / 1000 + 30 }),
+      const results = body.items.map((item, index) => {
+        state.turns.push({ thread_id: body.thread_id, role: item.role, content: item.content });
+        return { index, id: `fixture-turn-${state.turns.length}`, status: "stored" };
+      });
+      const value = { ...envelope, status: "succeeded", completed_at: created, deadline_at: Date.now() / 1000 + 30,
         result: { items: results, count: results.length, succeeded: results.length, failed: 0, unknown: 0 } };
-      const status = body.extract === false ? 201 : state.captureStatus;
+      const status = state.captureStatus;
       if (key) state.idempotent.set(key, { raw, status, value });
       return send(status, value);
     }

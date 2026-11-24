@@ -49,7 +49,7 @@ You can also just ask:
 - "Search Memory House for my TypeScript preferences."
 - "Remember in Memory House that I prefer concise examples."
 
-The agent deletes memories only when you explicitly ask. A saved note may take a moment to become searchable.
+The agent deletes memories only when you explicitly ask. A note you ask it to remember is extracted in the background, so it may not be searchable right away.
 
 ## MCP tools
 
